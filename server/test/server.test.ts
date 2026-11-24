@@ -235,3 +235,28 @@ test("the same match asked for twice at once is fetched once", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+import { downloadRedirect } from "../src/index.ts";
+
+test("download links point at the newest release", async () => {
+  const exe = await downloadRedirect("/download", {});
+  assert.equal(exe?.status, 302);
+  assert.equal(exe?.headers.get("location"), "https://github.com/SaeedBataineh/CrossPOV/releases/latest/download/CrossPOV.exe");
+  assert.equal(await downloadRedirect("/demo", {}), null);
+  const realFetch = globalThis.fetch;
+  const setup = "https://github.com/SaeedBataineh/CrossPOV/releases/download/v9.9.9/CrossPOV_9.9.9_x64-setup.exe";
+  globalThis.fetch = (async () => Response.json({ version: "9.9.9", platforms: { "windows-x86_64": { url: setup } } })) as typeof fetch;
+  try {
+    const inst = await downloadRedirect("/download/installer/", {});
+    assert.equal(inst?.headers.get("location"), setup);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  globalThis.fetch = (async () => Response.json({ platforms: { "windows-x86_64": { url: "https://evil.example/x.exe" } } })) as typeof fetch;
+  try {
+    const safe = await downloadRedirect("/download/installer", {});
+    assert.equal(safe?.headers.get("location"), "https://github.com/SaeedBataineh/CrossPOV/releases/latest", "only our own release files");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -22,6 +22,15 @@ function Pane({ who, platform }: { who: "you" | "them"; platform?: string }) {
 }
 
 /** Public landing page at "/". The interactive demo lives at "/demo". */
+/** Plain four-pane window mark (not Microsoft's logo). */
+function WindowsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style={{ marginRight: 8 }}>
+      <path fill="currentColor" d="M1 2.5 7 1.7V7.5H1zM8 1.6 15 .6V7.5H8zM1 8.5h6v5.8l-6-.8zM8 8.5h7v6.9l-7-1z" />
+    </svg>
+  );
+}
+
 export default function Landing() {
   return (
     <div className="site">
@@ -31,7 +40,8 @@ export default function Landing() {
           <a href="#how">How it works</a>
           <a href="#platforms">Platforms</a>
           <a href="#data">Player data</a>
-          <a href="/demo" className="site-btn">Try the demo</a>
+          <a href="/demo">Demo</a>
+          <a href="#download" className="site-btn primary">Download</a>
         </nav>
       </header>
 
@@ -49,9 +59,10 @@ export default function Landing() {
               their VOD and clips them from their point of view, automatically.
             </p>
             <div className="site-actions">
-              <a href="/demo" className="site-btn primary">Try the demo</a>
-              <a href="#how" className="site-btn">How it works</a>
+              <a href="/download" className="site-btn primary"><WindowsIcon /> Download for Windows</a>
+              <a href="/demo" className="site-btn">Try the demo</a>
             </div>
+            <p className="site-fine">Free · Windows 10 and 11 · one file, no setup · updates itself</p>
           </div>
 
           <figure className="duel" aria-label="Illustration: the same fight from your POV and the streamer's POV, synced">
@@ -140,12 +151,37 @@ export default function Landing() {
           </div>
           <p className="muted">Details: <a href="/privacy">privacy policy</a>.</p>
         </section>
+        <section id="download" className="site-section site-download" aria-labelledby="download-title">
+          <h2 id="download-title">Download CrossPOV</h2>
+          <div className="dl-cards">
+            <a className="dl-card main" href="/download">
+              <span className="dl-name"><WindowsIcon /> CrossPOV.exe</span>
+              <span className="dl-desc">One file. Double-click to run, nothing to install. Updates itself.</span>
+              <span className="dl-meta mono">about 38 MB</span>
+            </a>
+            <a className="dl-card" href="/download/installer">
+              <span className="dl-name">Installer</span>
+              <span className="dl-desc">Adds CrossPOV to the Start menu, with an uninstaller. Also updates itself.</span>
+              <span className="dl-meta mono">about 28 MB</span>
+            </a>
+          </div>
+          <div className="dl-note">
+            <strong>Windows says &ldquo;Windows protected your PC&rdquo;?</strong> Click <b>More info</b>, then <b>Run anyway</b>.
+            Windows shows this for new apps it hasn&rsquo;t seen many downloads of yet. CrossPOV never touches the game or
+            the Riot client; it only records your screen, like OBS.
+          </div>
+          <p className="muted small">
+            Needs Windows 10 or 11 (64-bit). All versions and release notes are on{" "}
+            <a href="https://github.com/SaeedBataineh/CrossPOV/releases" target="_blank" rel="noreferrer">GitHub</a>.
+          </p>
+        </section>
       </main>
+
 
       <footer className="site-footer">
         <p className="site-brand small-brand"><Logo size={20} /> CrossPOV</p>
         <p>
-          <a href="/demo">Demo</a> · <a href="/privacy">Privacy</a> · <a href="mailto:contact@crosspov.com">contact@crosspov.com</a>
+          <a href="/download">Download</a> · <a href="/demo">Demo</a> · <a href="/privacy">Privacy</a> · <a href="mailto:contact@crosspov.com">contact@crosspov.com</a>
         </p>
         <p className="muted small">
           CrossPOV isn&rsquo;t endorsed by Riot Games and doesn&rsquo;t reflect the views or opinions of Riot Games or anyone

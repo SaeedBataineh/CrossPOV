@@ -263,6 +263,31 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
   }
 }
 
+const RELEASES = "https://github.com/SaeedBataineh/CrossPOV/releases/latest";
+
+/**
+ * Short, permanent download links for the website:
+ *   /download            -> the newest single CrossPOV.exe
+ *   /download/installer  -> the newest installer (its file name has the version in it)
+ */
+export async function downloadRedirect(pathname: string, env: Env, ctx?: ExecutionContext): Promise<Response | null> {
+  const path = pathname.replace(/\/+$/, "");
+  if (path === "/download") return Response.redirect(`${RELEASES}/download/CrossPOV.exe`, 302);
+  if (path !== "/download/installer") return null;
+  try {
+    const url = await cachedData("installer-url", LATEST_TTL_S, ctx, async () => {
+      const res = await fetch(env.LATEST_JSON_URL ?? LATEST_JSON, { headers: { accept: "application/json" } });
+      const body = (await res.json()) as { platforms?: Record<string, { url?: string }> };
+      const u = body.platforms?.["windows-x86_64"]?.url;
+      if (!u || !u.startsWith("https://github.com/SaeedBataineh/CrossPOV/releases/download/")) throw new Error("no installer");
+      return u;
+    });
+    return Response.redirect(url, 302);
+  } catch {
+    return Response.redirect(RELEASES, 302); // the release page lists it
+  }
+}
+
 /** Browser protections for the website: only our own code runs, nobody can frame it. */
 export const SECURITY_HEADERS: Record<string, string> = {
   "content-security-policy":
@@ -303,6 +328,8 @@ export default {
     const www = wwwRedirect(url);
     if (www) return Response.redirect(www, 301);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
+    const dl = await downloadRedirect(url.pathname, env, ctx);
+    if (dl) return dl;
     // Everything else is the demo website. "//riot.txt" (as Riot's verifier asks for) serves "/riot.txt".
     if (env.ASSETS) {
       const clean = collapseSlashes(url);
