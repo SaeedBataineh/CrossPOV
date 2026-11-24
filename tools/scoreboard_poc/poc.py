@@ -22,6 +22,7 @@ import os
 import re
 import statistics
 import sys
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -78,9 +79,17 @@ def live_valorant_streams(session: requests.Session) -> list[dict]:
             return streams
 
 
+_local = threading.local()
+
+
 def fetch_image(url: str) -> bytes | None:
+    """Downloads one preview. Each download thread keeps one open connection
+    (a Session), so DNS is looked up once per thread, not once per image."""
+    session = getattr(_local, "session", None)
+    if session is None:
+        session = _local.session = requests.Session()
     try:
-        r = requests.get(url.replace("{width}", str(W)).replace("{height}", str(H)), timeout=15)
+        r = session.get(url.replace("{width}", str(W)).replace("{height}", str(H)), timeout=15)
         return r.content if r.ok and len(r.content) > 2000 else None
     except requests.RequestException:
         return None
