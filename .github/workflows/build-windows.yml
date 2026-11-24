@@ -1,8 +1,10 @@
 name: Build Windows app
 
 # Builds CrossPOV.exe (portable) and the installer on a Windows machine.
-# Download them from the run's "Artifacts" section, or from Releases when
-# you push a version tag like v0.1.0.
+# Download them from the run's "Artifacts" section, or from Releases.
+# To release: Actions > Build Windows app > Run workflow, tick "release".
+# It tags the current version (from tauri.conf.json) and publishes it, and
+# every installed app updates itself. Pushing a tag like v0.1.0 also works.
 on:
   push:
     branches: [main, "claude/**"]
@@ -13,6 +15,11 @@ on:
       - ".github/workflows/vps-scanner.yml"
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release for the current version (installed apps update to it)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +43,9 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write # only used to attach files to a Release on tag pushes
+      contents: write # only used to create the Release
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,16 +82,18 @@ jobs:
           $env:CROSSPOV_FFMPEG = (Resolve-Path src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe).Path
           cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Check the tag matches the app version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Check the version for the release
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: |
           $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
           $npm = (Get-Content package.json | ConvertFrom-Json).version
           $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          if ("v$version" -ne "${{ github.ref_name }}" -or $npm -ne $version -or $cargo -ne $version) {
+          $isTag = "${{ github.ref }}".StartsWith("refs/tags/v")
+          if (($isTag -and "v$version" -ne "${{ github.ref_name }}") -or $npm -ne $version -or $cargo -ne $version) {
             throw "Tag ${{ github.ref_name }}, tauri.conf.json ($version), package.json ($npm) and Cargo.toml ($cargo) must match. Run: node scripts/bump-version.mjs <version>"
           }
+          "TAG=v$version" >> $env:GITHUB_ENV
 
       - name: Build the app and installer
         shell: pwsh
@@ -94,7 +105,7 @@ jobs:
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
             npx tauri build
           } else {
-            if ("${{ github.ref }}".StartsWith("refs/tags/v")) { throw "Releases need the TAURI_SIGNING_PRIVATE_KEY secret, or installed apps can't update." }
+            if ($env:RELEASE -eq "true") { throw "Releases need the TAURI_SIGNING_PRIVATE_KEY secret, or installed apps can't update." }
             Write-Host "::warning::TAURI_SIGNING_PRIVATE_KEY is not set, building without auto-update files."
             Set-Content src-tauri/no-updater.json '{"bundle":{"createUpdaterArtifacts":false}}'
             npx tauri build --config src-tauri/no-updater.json
@@ -115,13 +126,13 @@ jobs:
           Get-ChildItem out | Format-Table Name, Length
 
       - name: Write latest.json for auto-update
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.RELEASE == 'true'
         shell: pwsh
         run: |
           $setup = Get-ChildItem out/*-setup.exe | Select-Object -First 1
           $sig = Get-Content "$($setup.FullName).sig" -Raw
           $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($setup.Name)"
+          $url = "https://github.com/${{ github.repository }}/releases/download/$($env:TAG)/$($setup.Name)"
           @{
             version = $version
             notes = "CrossPOV $version"
@@ -136,9 +147,12 @@ jobs:
           path: out/*
           if-no-files-found: error
 
-      - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish the Release
+        if: env.RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: CrossPOV ${{ env.TAG }}
           files: out/*
           make_latest: true
