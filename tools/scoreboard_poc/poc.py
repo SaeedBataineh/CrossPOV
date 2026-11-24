@@ -2,7 +2,8 @@
 
 One sweep of every live VALORANT stream on Twitch: download each stream's
 preview image, read the HUD scoreboard at the top (score, round timer,
-score) with OCR, and report how many are readable. Answers one question:
+score) and report how many are readable. Scores are read by matching the
+HUD's digit shapes (hud.py); Tesseract only reads the round timer. Answers one question:
 is matching streams to matches by scoreboard worth building?
 
 Uses Twitch's official API (Helix) for the stream list; preview images are
@@ -37,15 +38,13 @@ import pytesseract
 import requests
 from PIL import Image, ImageChops, ImageOps
 
+import hud
+
 HELIX = "https://api.twitch.tv/helix"
 W, H = 1280, 720
 
-# Where the scoreboard sits on a 16:9 frame, as fractions of width/height.
 # The HUD is: [your score] [round timer] [enemy score], centred at the top.
-BAND = (0.30, 0.0, 0.70, 0.085)  # wide enough for stretched-res HUDs
-TIMER = (0.465, 0.0, 0.535, 0.075)
-SCORE_L = (0.415, 0.0, 0.468, 0.075)
-SCORE_R = (0.532, 0.0, 0.585, 0.075)
+BAND = hud.BAND  # wide enough for stretched-res HUDs
 
 TIMER_RE = re.compile(r"^([0-1]?\d):([0-5]\d)$")
 
@@ -116,62 +115,10 @@ def prepare(img: Image.Image) -> Image.Image:
     return ImageOps.expand(ImageOps.invert(bw), border=40, fill=255)
 
 
-def column_tint(img: Image.Image) -> list[tuple[int, int]]:
-    """For each column of the top strip: (green minus red, red minus green),
-    averaged over the middle rows where the score boxes are."""
-    w, h = img.size
-    mid = img.crop((0, int(0.3 * h), w, int(0.7 * h))).resize((w, 1), Image.BOX)
-    out = []
-    for x in range(w):
-        r, g, _ = mid.getpixel((x, 0))
-        out.append((g - r, r - g))
-    return out
-
-
-def locate_scoreboard(frame: Image.Image) -> tuple[float, float] | None:
-    """Finds the scoreboard on this frame: the green box (left) and red box
-    (right) of the HUD. Returns their outer edges as fractions of the frame
-    width, which adapts to normal, stretched and black-bar resolutions.
-    None means no HUD: the streamer isn't in a round (menu, lobby, other)."""
-    w, h = frame.size
-    x0, x1 = int(BAND[0] * w), int(BAND[2] * w)
-    strip = frame.crop((x0, 0, x1, int(BAND[3] * h)))
-    tint = column_tint(strip)
-    n = len(tint)
-    green = [i for i, (gr, _) in enumerate(tint[: n // 2]) if gr >= 12]
-    red = [i for i, (_, rg) in enumerate(tint[n // 2 :], n // 2) if rg >= 12]
-    if len(green) < n * 0.02 or len(red) < n * 0.02:
-        return None
-    left, right = (x0 + min(green)) / w, (x0 + max(red)) / w
-    width = right - left
-    centre = (left + right) / 2
-    # A real scoreboard is roughly centred and a sensible width.
-    if not (0.12 <= width <= 0.38) or abs(centre - 0.5) > 0.03:
-        return None
-    return left, right
-
-
-def hud_boxes(left: float, right: float) -> dict[str, tuple[float, float, float, float]]:
-    """Score / timer / score boxes, placed relative to the located scoreboard
-    (proportions measured on a standard 16:9 HUD)."""
-    w = right - left
-    at = lambda a, b: (left + a * w, 0.0, left + b * w, 0.075)
-    # Measured on real 16:9 frames (scoreboard ~0.385-0.618 of the width).
-    return {"L": at(0.13, 0.36), "T": at(0.345, 0.655), "R": at(0.64, 0.87)}
-
-
 def ocr(img: Image.Image, chars: str, psm: int = 7) -> str:
     """One Tesseract pass on one piece of the HUD (7 = a line, 8 = one word)."""
     cfg = f"--psm {psm} -c tessedit_char_whitelist={chars}"
     return pytesseract.image_to_string(prepare(img), config=cfg).strip().replace(" ", "")
-
-
-def read_strip(img: Image.Image, boxes) -> tuple[str | None, str | None, str | None, str]:
-    """Returns (left score, timer, right score, raw text)."""
-    left = ocr(crop(img, boxes["L"]), "0123456789")
-    timer = ocr(crop(img, boxes["T"]), "0123456789:")
-    right = ocr(crop(img, boxes["R"]), "0123456789")
-    return left or None, timer or None, right or None, f"{left or '?'} | {timer or '?'} | {right or '?'}"
 
 
 @dataclass
@@ -188,13 +135,8 @@ class Reading:
 
     @property
     def readable(self) -> bool:
-        """Timer plus both scores: enough to match against a match timeline."""
-        return self.timer is not None and self.score_left is not None and self.score_right is not None
-
-
-def as_score(text: str) -> int | None:
-    digits = re.sub(r"\D", "", text)
-    return int(digits) if digits and int(digits) <= 25 else None
+        """Both scores: the score at a known moment, enough to match against match timelines."""
+        return self.score_left is not None and self.score_right is not None
 
 
 def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None]:
@@ -203,16 +145,24 @@ def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None]:
     if not data:
         return r, None
     r.ok_image = True
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    found = locate_scoreboard(img)
+    img = Image.open(io.BytesIO(data)).convert("RGB").resize((W, H))
+    strip = crop(img, BAND)
+    found = hud.read_scores(strip)
+    if found and found[2] < hud.MIN_CONFIDENCE:
+        r.raw = {"text": f"unsure: {found[0]} | ? | {found[1]}", "confidence": found[2]}
+        found = None
     r.in_round = found is not None
     if found:
-        left, t, right, raw = read_strip(img, hud_boxes(*found))
-        r.raw = {"text": raw, "scoreboard": [round(found[0], 3), round(found[1], 3)]}
+        left, right, confidence, lx, rx = found
+        r.score_left, r.score_right = left, right
+        # The round timer sits between the two scores.
+        gap = rx - lx
+        timer_box = (lx + 0.25 * gap, 0.0, rx - 0.25 * gap, 1.0)
+        t = ocr(crop(strip, timer_box), "0123456789:")
         m = re.search(r"([0-1]?\d):([0-5]\d)", t or "")
         r.timer = f"{int(m.group(1))}:{m.group(2)}" if m else None
-        r.score_left, r.score_right = as_score(left or ""), as_score(right or "")
-    else:
+        r.raw = {"text": f"{left} | {t or '?'} | {right}", "confidence": confidence}
+    elif not r.raw:
         r.raw = {"text": "no HUD: not in a round"}
     band = crop(img, BAND)
     buf = io.BytesIO()
@@ -281,7 +231,7 @@ def main() -> int:
     readings = [r for r, _ in results]
     have = [r for r in readings if r.ok_image]
     readable = [r for r in have if r.readable]
-    timer_only = [r for r in have if r.timer and not r.readable]
+    with_timer = [r for r in readable if r.timer]
     in_round = [r for r in have if r.in_round]
     hud = [r for r in in_round if r.timer]
 
@@ -306,9 +256,8 @@ def main() -> int:
         "in_round": len(in_round),
         "in_round_pct": round(100 * len(in_round) / max(1, len(have)), 1),
         "timer_read_of_in_round_pct": round(100 * len(hud) / max(1, len(in_round)), 1),
-        "readable_score_and_timer": len(readable),
-        "readable_of_in_round_pct": round(100 * len(readable) / max(1, len(in_round)), 1),
-        "timer_only": len(timer_only),
+        "scores_read": len(readable),
+        "scores_and_timer_read": len(with_timer),
         "seconds": {"list": round(t_list, 1), "download": round(t_fetch, 1), "ocr": round(t_ocr, 1)},
         "est_full_sweep_seconds_on_this_machine": round(est_full_sweep_s),
         "cpu_count": os.cpu_count(),
@@ -323,11 +272,11 @@ def main() -> int:
         f"- Live VALORANT streams right now: **{total_live}**",
         f"- Read (most-watched first): **{len(streams)}**, images downloaded: {len(have)}",
         f"- In a round right now (scoreboard on screen): **{len(in_round)} ({summary['in_round_pct']}%)**; the rest are in menus, lobby or other content",
-        f"- Of those in a round: **timer read {summary['timer_read_of_in_round_pct']}%**, timer + both scores {summary['readable_of_in_round_pct']}% (Tesseract; digit matching would do better)",
+        f"- Of those in a round: **both scores read for all {len(readable)}** (digit matching), round timer also read for {len(with_timer)} ({summary['timer_read_of_in_round_pct']}%, Tesseract)",
         f"- Time: list {t_list:.1f}s, download {t_fetch:.1f}s, OCR {t_ocr:.1f}s on {os.cpu_count()} CPUs",
         f"- Estimated full sweep of all {total_live} streams on this machine: **~{est_full_sweep_s:.0f}s**",
         "",
-        "| Language | Streams | Score + timer read |",
+        "| Language | Streams | Scores read |",
         "|---|---|---|",
         *[f"| {k} | {len(v)} | {sum(r.readable for r in v)} |" for k, v in lang_rows],
         "",

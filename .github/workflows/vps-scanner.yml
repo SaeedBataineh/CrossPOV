@@ -65,7 +65,9 @@ jobs:
           TID: ${{ secrets.TWITCH_CLIENT_ID }}
           TSECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
         run: |
-          scp tools/scoreboard_poc/poc.py vps:/opt/crosspov/poc.py
+          scp tools/scoreboard_poc/poc.py tools/scoreboard_poc/hud.py tools/scoreboard_poc/digits.npz vps:/opt/crosspov/
+          # hud.py matches digit shapes with numpy.
+          ssh vps '/opt/crosspov/venv/bin/pip install -q numpy'
           # Credentials go over SSH stdin into a file only the crosspov user can read.
           printf 'TWITCH_CLIENT_ID=%s\nTWITCH_CLIENT_SECRET=%s\n' "$TID" "$TSECRET" | ssh vps 'umask 077 && cat > /opt/crosspov/.env'
 
