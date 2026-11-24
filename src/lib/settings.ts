@@ -1,9 +1,17 @@
 // Shape must match `Settings` in src-tauri/src/settings.rs (camelCase JSON).
 export type Resolution = "native" | "1440p" | "1080p" | "720p";
 export type Quality = "low" | "medium" | "high" | "max";
-export type Encoder = "auto" | "nvenc" | "amf" | "qsv" | "x264";
+export type Encoder = "auto" | "nvenc" | "amf" | "qsv" | "cpu";
 export type Container = "mp4" | "mkv";
 export type DownloadQuality = "source" | "1080p" | "720p";
+export type AudioMode = "game" | "desktop";
+
+/** An extra app whose sound goes into clips, e.g. Discord. */
+export interface AppAudio {
+  exe: string;
+  enabled: boolean;
+  volume: number; // 0-200
+}
 
 export interface Settings {
   // Recording
@@ -17,9 +25,13 @@ export interface Settings {
   bufferSeconds: number;
   clipSound: boolean;
   // Audio
+  audioMode: AudioMode;
   gameAudio: boolean;
+  gameVolume: number;
+  apps: AppAudio[];
   microphone: boolean;
   micDevice: string;
+  micVolume: number;
   separateTracks: boolean;
   // Streamer clips
   streamerAuto: boolean;
@@ -53,9 +65,13 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkey: "F9",
   bufferSeconds: 60,
   clipSound: true,
+  audioMode: "game",
   gameAudio: true,
+  gameVolume: 100,
+  apps: [],
   microphone: false,
   micDevice: "default",
+  micVolume: 100,
   separateTracks: true,
   streamerAuto: true,
   clipKilledYou: true,

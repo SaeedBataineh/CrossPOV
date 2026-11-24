@@ -1,7 +1,10 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Pills, Toggle } from "../components/ui";
-import { defaultClipFolder, isDesktop, pickFolder, saveSettings } from "../lib/backend";
-import { DEFAULT_SETTINGS, estimateClipMb, targetMbps, type Settings as S } from "../lib/settings";
+import { Pills, Toggle, Volume } from "../components/ui";
+import { defaultClipFolder, isDesktop, listAudioApps, listMicDevices, pickFolder, saveSettings } from "../lib/backend";
+import { DEFAULT_SETTINGS, estimateClipMb, targetMbps, type AppAudio, type Settings as S } from "../lib/settings";
+
+/** "Discord.exe" -> "Discord" */
+const appName = (exe: string) => exe.replace(/\.exe$/i, "");
 
 function Row({ label, help, children }: { label: string; help: string; children: ReactNode }) {
   return (
@@ -48,7 +51,26 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
   const [status, setStatus] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
+  const [audioApps, setAudioApps] = useState<string[]>([]);
+  const [micDevices, setMicDevices] = useState<string[]>([]);
+  const [pickApp, setPickApp] = useState("");
+
   useEffect(() => setDraft(settings), [settings]);
+  useEffect(() => {
+    void refreshApps();
+    listMicDevices().then(setMicDevices, () => setMicDevices([]));
+  }, []);
+
+  async function refreshApps() {
+    try {
+      setAudioApps((await listAudioApps()).map((a) => a.exe));
+    } catch {
+      setAudioApps([]);
+    }
+  }
+
+  const setApp = (i: number, patch: Partial<AppAudio>) =>
+    set("apps", draft.apps.map((a, j) => (j === i ? { ...a, ...patch } : a)));
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const set = <K extends keyof S>(key: K, value: S[K]) => {
@@ -136,7 +158,7 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
             <option value="nvenc">NVIDIA NVENC</option>
             <option value="amf">AMD AMF</option>
             <option value="qsv">Intel Quick Sync</option>
-            <option value="x264">CPU (x264, slowest)</option>
+            <option value="cpu">CPU (slowest, last resort)</option>
           </select>
         </Row>
         <Row label="File format" help="MP4 plays everywhere. MKV survives crashes.">
@@ -164,19 +186,70 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
         </Row>
       </Section>
 
-      <Section title="Audio" sub="What gets recorded with your clips.">
-        <Row label="Game audio" help="Record in-game sound.">
-          <Toggle label="Game audio" checked={draft.gameAudio} onChange={(v) => set("gameAudio", v)} />
+      <Section title="Audio" sub="Choose exactly what's in your clips, like OBS. Apps that aren't listed here are never recorded.">
+        <Row label="Game sound" help={draft.audioMode === "game"
+          ? "Only VALORANT's sound. Music, browser tabs and other apps stay out."
+          : "Everything you hear, including music, browser tabs and notifications."}>
+          <Pills label="Game sound" value={draft.audioMode} onChange={(v) => set("audioMode", v)}
+            options={[{ value: "game", label: "VALORANT only" }, { value: "desktop", label: "Everything you hear" }]} />
         </Row>
-        <Row label="Microphone" help="Record your voice.">
-          <Toggle label="Microphone" checked={draft.microphone} onChange={(v) => set("microphone", v)} />
+        <Row label={draft.audioMode === "game" ? "VALORANT" : "Desktop audio"} help={draft.gameAudio ? "Volume in clips" : "Muted"}>
+          <div className="row-wrap">
+            <Volume label="Game" value={draft.gameVolume} onChange={(v) => set("gameVolume", v)} disabled={!draft.gameAudio} />
+            <Toggle label="Record game sound" checked={draft.gameAudio} onChange={(v) => set("gameAudio", v)} />
+          </div>
         </Row>
-        <Row label="Microphone device" help="Your devices are listed once the recorder is added.">
+
+        {draft.audioMode === "game" && (
+          <>
+            {draft.apps.map((app, i) => (
+              <Row key={app.exe} label={appName(app.exe)} help={app.enabled ? "Recorded" : "Muted"}>
+                <div className="row-wrap">
+                  <Volume label={appName(app.exe)} value={app.volume} onChange={(v) => setApp(i, { volume: v })} disabled={!app.enabled} />
+                  <Toggle label={`Record ${appName(app.exe)}`} checked={app.enabled} onChange={(v) => setApp(i, { enabled: v })} />
+                  <button type="button" className="btn icon" aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                </div>
+              </Row>
+            ))}
+            <Row label="Add an app" help="For example Discord, to keep your team's voice in clips. Only apps playing sound right now are listed.">
+              <div className="row-wrap">
+                <select className="input select" aria-label="App to add" value={pickApp} onChange={(e) => setPickApp(e.target.value)}
+                  onFocus={() => void refreshApps()}>
+                  <option value="">{audioApps.length ? "Choose an app…" : "No other apps are playing sound"}</option>
+                  {audioApps.filter((a) => !draft.apps.some((x) => x.exe.toLowerCase() === a.toLowerCase())).map((a) => (
+                    <option key={a} value={a}>{appName(a)}</option>
+                  ))}
+                </select>
+                <button type="button" className="btn" disabled={!pickApp} onClick={() => {
+                  set("apps", [...draft.apps, { exe: pickApp, enabled: true, volume: 100 }]);
+                  setPickApp("");
+                }}>Add</button>
+                <button type="button" className="btn" onClick={() => void refreshApps()}>Refresh</button>
+              </div>
+            </Row>
+          </>
+        )}
+
+        <Row label="Microphone" help={draft.microphone ? "Your voice is recorded" : "Muted"}>
+          <div className="row-wrap">
+            <Volume label="Microphone" value={draft.micVolume} onChange={(v) => set("micVolume", v)} disabled={!draft.microphone} />
+            <Toggle label="Record microphone" checked={draft.microphone} onChange={(v) => set("microphone", v)} />
+          </div>
+        </Row>
+        <Row label="Microphone device" help="Which mic to record when it's on.">
           <select className="input select" aria-label="Microphone device" value={draft.micDevice} onChange={(e) => set("micDevice", e.target.value)}>
             <option value="default">Default device</option>
+            {micDevices.map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+            {draft.micDevice !== "default" && !micDevices.includes(draft.micDevice) && (
+              <option value={draft.micDevice}>{draft.micDevice} (not connected)</option>
+            )}
           </select>
         </Row>
-        <Row label="Separate audio tracks" help="Game and mic on separate tracks, easier to edit.">
+        <Row label="Separate audio tracks" help="Game and apps on track 1, your mic on track 2. Easier to edit.">
           <Toggle label="Separate audio tracks" checked={draft.separateTracks} onChange={(v) => set("separateTracks", v)} />
         </Row>
       </Section>
@@ -233,7 +306,7 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
           <Pills label="Storage limit" value={draft.storageLimitGb} onChange={(v) => set("storageLimitGb", v)}
             options={[{ value: 25, label: "25 GB" }, { value: 50, label: "50 GB" }, { value: 100, label: "100 GB" }, { value: 0, label: "No limit" }]} />
         </Row>
-        <Row label="Delete oldest clips when full" help="Favourited clips are never deleted.">
+        <Row label="Delete oldest clips when full" help="Oldest clips go first. Your newest clip is always kept.">
           <Toggle label="Delete oldest clips when full" checked={draft.pruneOldest} onChange={(v) => set("pruneOldest", v)} />
         </Row>
       </Section>

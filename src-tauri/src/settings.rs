@@ -35,7 +35,9 @@ pub enum Encoder {
     Nvenc,
     Amf,
     Qsv,
-    X264,
+    /// Software encoding. Older settings files said "x264".
+    #[serde(alias = "x264")]
+    Cpu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +45,27 @@ pub enum Encoder {
 pub enum Container {
     Mp4,
     Mkv,
+}
+
+/// Which game sound gets recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioMode {
+    /// Only the game (plus any apps the user adds). Needs Windows 10 2004+.
+    Game,
+    /// Everything that plays through the speakers.
+    Desktop,
+}
+
+/// An extra app whose sound goes into clips, e.g. Discord.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAudio {
+    /// Executable name, e.g. "Discord.exe".
+    pub exe: String,
+    pub enabled: bool,
+    /// 0-100.
+    pub volume: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,9 +93,13 @@ pub struct Settings {
     pub buffer_seconds: u32,
     pub clip_sound: bool,
     // Audio
+    pub audio_mode: AudioMode,
     pub game_audio: bool,
+    pub game_volume: u32,
+    pub apps: Vec<AppAudio>,
     pub microphone: bool,
     pub mic_device: String,
+    pub mic_volume: u32,
     pub separate_tracks: bool,
     // Streamer clips
     pub streamer_auto: bool,
@@ -109,9 +136,13 @@ impl Default for Settings {
             hotkey: "F9".into(),
             buffer_seconds: 60,
             clip_sound: true,
+            audio_mode: AudioMode::Game,
             game_audio: true,
+            game_volume: 100,
+            apps: Vec::new(),
             microphone: false,
             mic_device: "default".into(),
+            mic_volume: 100,
             separate_tracks: true,
             streamer_auto: true,
             clip_killed_you: true,
@@ -148,6 +179,20 @@ impl Settings {
             self.hotkey = Settings::default().hotkey;
         }
         self.clip_folder = self.clip_folder.trim().to_string();
+        self.game_volume = self.game_volume.min(200);
+        self.mic_volume = self.mic_volume.min(200);
+        for app in &mut self.apps {
+            app.volume = app.volume.min(200);
+            app.exe = app.exe.trim().to_string();
+        }
+        // One entry per app, no blanks.
+        let mut seen = Vec::new();
+        self.apps.retain(|a| !a.exe.is_empty() && {
+            let key = a.exe.to_lowercase();
+            let new = !seen.contains(&key);
+            seen.push(key);
+            new
+        });
     }
 
     /// Reads settings; a missing or unreadable file gives defaults rather than failing startup.
@@ -183,6 +228,21 @@ mod tests {
         assert_eq!(json["resolution"], "1080p");
         assert_eq!(json["downloadQuality"], "source");
         assert_eq!(json["encoder"], "auto");
+    }
+
+    #[test]
+    fn old_x264_encoder_value_still_loads() {
+        let s: Settings = serde_json::from_str(r#"{"encoder":"x264"}"#).unwrap();
+        assert_eq!(s.encoder, Encoder::Cpu);
+    }
+
+    #[test]
+    fn default_hotkey_formats_parse() {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::Shortcut;
+        for k in ["F9", "Ctrl+Shift+F8", "Alt+A", "Ctrl+1", "PageUp", "Shift+PrintScreen"] {
+            assert!(Shortcut::from_str(k).is_ok(), "{k} should parse");
+        }
     }
 
     #[test]

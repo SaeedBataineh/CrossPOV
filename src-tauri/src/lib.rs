@@ -1,20 +1,32 @@
-//! CrossPOV desktop shell: tray icon, window lifecycle and settings.
+//! CrossPOV desktop shell: tray icon, window lifecycle, settings, the
+//! replay-buffer recorder and the clip hotkey.
 //!
 //! Memory: closing the window destroys the webview (the React UI) entirely
 //! while the app keeps running in the tray, so it costs almost nothing
 //! while you play. Opening it from the tray builds a fresh window.
 
+mod audio;
+mod clips;
+mod ffmpeg;
+mod procs;
+mod recorder;
 mod settings;
+#[cfg(windows)]
+mod win_audio;
 
-use std::{path::PathBuf, sync::Mutex};
+use std::{path::PathBuf, str::FromStr, sync::Mutex, thread};
 
+use clips::ClipInfo;
+use recorder::{Recorder, RecorderStatus};
 use settings::Settings;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, State, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt as _, Shortcut, ShortcutState};
+use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
 const MAIN_WINDOW: &str = "main";
@@ -24,6 +36,7 @@ const MINIMIZED_ARG: &str = "--minimized";
 struct AppState {
     settings: Mutex<Settings>,
     path: PathBuf,
+    recorder: Recorder,
 }
 
 impl AppState {
@@ -48,6 +61,14 @@ fn clip_folder(app: &AppHandle, s: &Settings) -> PathBuf {
     }
 }
 
+/// Lets the UI show thumbnails from the clip folder (and nothing else).
+fn allow_clip_folder(app: &AppHandle, folder: &PathBuf) {
+    let _ = std::fs::create_dir_all(folder);
+    if let Err(err) = app.asset_protocol_scope().allow_directory(folder, true) {
+        eprintln!("could not allow clip folder for thumbnails: {err}");
+    }
+}
+
 /// Registers or removes the "Start with Windows" entry. Skipped in dev
 /// builds so the debug binary never ends up in the user's startup list.
 fn apply_autostart(app: &AppHandle, enabled: bool) {
@@ -63,6 +84,45 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     if let Err(err) = result {
         eprintln!("autostart update failed: {err}");
     }
+}
+
+/// (Re)binds the clip hotkey. Errors (e.g. key used by another app) show on Home.
+fn apply_hotkey(app: &AppHandle, hotkey: &str) {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let result = Shortcut::from_str(hotkey)
+        .map_err(|e| e.to_string())
+        .and_then(|sc| gs.register(sc).map_err(|e| e.to_string()));
+    let error = result.err().map(|e| format!("Couldn't use {hotkey} as the clip hotkey ({e}). Pick another in Settings."));
+    app.state::<AppState>().recorder.set_hotkey_error(error);
+}
+
+/// Saves a clip in the background and tells the user how it went.
+fn save_clip_async(app: &AppHandle) {
+    let app = app.clone();
+    thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let settings = state.get();
+        let result = state.recorder.save_clip(&clip_folder(&app, &settings));
+        match &result {
+            Ok(clip) => {
+                #[cfg(windows)]
+                if settings.clip_sound {
+                    win_audio::beep();
+                }
+                let _ = app.emit("clip-saved", clip);
+                if settings.notifications {
+                    let _ = app.notification().builder().title("Clip saved").body(&clip.name).show();
+                }
+            }
+            Err(err) => {
+                let _ = app.emit("clip-failed", err);
+                if settings.notifications {
+                    let _ = app.notification().builder().title("Clip not saved").body(err).show();
+                }
+            }
+        }
+    });
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -101,8 +161,19 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings, String> {
     settings.sanitize();
+    if settings.clip_folder.is_empty() {
+        settings.clip_folder = default_clip_folder_path(&app).to_string_lossy().into_owned();
+    }
     settings.save(&state.path).map_err(|e| format!("Could not write settings: {e}"))?;
+    let old = state.get();
     apply_autostart(&app, settings.start_with_windows);
+    if old.hotkey != settings.hotkey {
+        apply_hotkey(&app, &settings.hotkey);
+    }
+    if old.clip_folder != settings.clip_folder {
+        allow_clip_folder(&app, &PathBuf::from(&settings.clip_folder));
+    }
+    state.recorder.update_settings(settings.clone());
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();
     Ok(settings)
 }
@@ -117,12 +188,57 @@ fn open_clip_folder(app: AppHandle) -> Result<(), String> {
     open_folder(&app)
 }
 
+#[tauri::command]
+fn recorder_status(state: State<'_, AppState>) -> RecorderStatus {
+    state.recorder.status()
+}
+
+#[tauri::command]
+fn save_clip_now(app: AppHandle) {
+    save_clip_async(&app);
+}
+
+#[tauri::command]
+fn list_clips(app: AppHandle, state: State<'_, AppState>) -> Vec<ClipInfo> {
+    clips::list(&clip_folder(&app, &state.get()))
+}
+
+#[tauri::command]
+fn delete_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let root = clip_folder(&app, &state.get());
+    let clip = clips::validate(&root, &path)?;
+    clips::delete(&root, &clip)
+}
+
+#[tauri::command]
+fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
+    app.opener().open_path(clip.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reveal_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
+    app.opener().reveal_item_in_dir(clip).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_audio_apps() -> Vec<procs::AudioApp> {
+    tauri::async_runtime::spawn_blocking(procs::audio_apps).await.unwrap_or_default()
+}
+
+#[tauri::command]
+async fn list_mic_devices() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(audio::input_device_names).await.unwrap_or_default()
+}
+
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open CrossPOV", true, None::<&str>)?;
+    let save = MenuItem::with_id(app, "save", "Save clip now", true, None::<&str>)?;
     let folder = MenuItem::with_id(app, "folder", "Open clip folder", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit CrossPOV", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &folder, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &save, &folder, &separator, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("main")
         .tooltip("CrossPOV")
@@ -130,6 +246,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
+            "save" => save_clip_async(app),
             "folder" => {
                 if let Err(err) = open_folder(app) {
                     eprintln!("{err}");
@@ -158,6 +275,16 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![MINIMIZED_ARG])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        save_clip_async(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
             let path = handle.path().app_config_dir()?.join("settings.json");
@@ -166,7 +293,20 @@ pub fn run() {
                 settings.clip_folder = default_clip_folder_path(&handle).to_string_lossy().into_owned();
             }
             apply_autostart(&handle, settings.start_with_windows);
-            app.manage(AppState { settings: Mutex::new(settings), path });
+            allow_clip_folder(&handle, &PathBuf::from(&settings.clip_folder));
+
+            let emitter = handle.clone();
+            let recorder = Recorder::new(
+                settings.clone(),
+                handle.path().app_cache_dir()?,
+                Box::new(move |status| {
+                    let _ = emitter.emit("recorder-status", status);
+                }),
+            );
+            let hotkey = settings.hotkey.clone();
+            app.manage(AppState { settings: Mutex::new(settings), path, recorder: recorder.clone() });
+            apply_hotkey(&handle, &hotkey);
+            recorder.spawn();
 
             build_tray(&handle)?;
             if !std::env::args().any(|a| a == MINIMIZED_ARG) {
@@ -174,7 +314,20 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_settings, default_clip_folder, open_clip_folder])
+        .invoke_handler(tauri::generate_handler![
+            get_settings,
+            save_settings,
+            default_clip_folder,
+            open_clip_folder,
+            recorder_status,
+            save_clip_now,
+            list_clips,
+            delete_clip,
+            open_clip,
+            reveal_clip,
+            list_audio_apps,
+            list_mic_devices
+        ])
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");
 

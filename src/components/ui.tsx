@@ -1,11 +1,21 @@
 import type { ReactNode } from "react";
+import { thumbSrc, type ClipInfo } from "../lib/backend";
 import type { Clip } from "../lib/sample";
+import { formatDuration, timeAgo, type Toast } from "../lib/useRecorder";
 import { PlayIcon } from "./Icons";
 
 export function SampleBanner({ children }: { children: ReactNode }) {
   return (
     <p className="sample-banner" role="note">
-      <strong>Preview build.</strong> {children}
+      <strong>Preview.</strong> {children}
+    </p>
+  );
+}
+
+export function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }) {
+  return (
+    <p className={tone === "bad" ? "error-banner" : "warn-banner"} role="alert">
+      {children}
     </p>
   );
 }
@@ -54,25 +64,73 @@ export function Toggle({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
-export function ClipCard({ clip, actions = false }: { clip: Clip; actions?: boolean }) {
+/** 0-200 % volume slider. */
+export function Volume({ label, value, onChange, disabled }: { label: string; value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  return (
+    <label className="volume">
+      <span className="sr-only">{label} volume</span>
+      <input
+        type="range"
+        min={0}
+        max={200}
+        step={5}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <span className="volume-value" aria-hidden="true">{value}%</span>
+    </label>
+  );
+}
+
+export function ToastView({ toast }: { toast: Toast | null }) {
+  return (
+    <div className="toast-region" role="status" aria-live="polite">
+      {toast && <div key={toast.id} className={`toast ${toast.tone}`}>{toast.text}</div>}
+    </div>
+  );
+}
+
+/** What a clip card shows; built from a real clip or sample data. */
+export interface CardClip {
+  key: string;
+  title: string;
+  meta: string;
+  length: string;
+  kind: "mine" | "theirs";
+  thumb?: string;
+  sample?: boolean;
+}
+
+export function cardFromClip(c: ClipInfo): CardClip {
+  return {
+    key: c.path,
+    title: c.name.replace(/^Clip_/, "").replace(/_/g, " "),
+    meta: `${c.kind === "mine" ? "Hotkey clip" : "Streamer clip"} · ${timeAgo(c.createdMs)}`,
+    length: formatDuration(c.durationSec),
+    kind: c.kind,
+    thumb: thumbSrc(c.thumb),
+  };
+}
+
+export function cardFromSample(c: Clip): CardClip {
+  return { key: c.id, title: c.title, meta: `${c.meta} · sample`, length: c.length, kind: c.kind, sample: true };
+}
+
+export function ClipCard({ clip, actions }: { clip: CardClip; actions?: ReactNode }) {
   const theirs = clip.kind === "theirs";
   return (
-    <article className="card clip">
+    <article className={clip.sample ? "card clip sample" : "card clip"}>
       <div className="thumb">
-        <PlayIcon />
+        {clip.thumb ? <img src={clip.thumb} alt="" loading="lazy" decoding="async" /> : <PlayIcon />}
         <span className={theirs ? "badge theirs" : "badge mine"}>{theirs ? "Their POV" : "My POV"}</span>
-        <span className="duration">{clip.length}</span>
+        {clip.length && <span className="duration">{clip.length}</span>}
       </div>
       <div className="clip-body">
         <span className="clip-title">{clip.title}</span>
         <span className="muted small">{clip.meta}</span>
       </div>
-      {actions && (
-        <div className="clip-actions">
-          <button type="button" className="btn">Play</button>
-          {theirs && <button type="button" className="btn primary">Side-by-side</button>}
-        </div>
-      )}
+      {actions && <div className="clip-actions">{actions}</div>}
     </article>
   );
 }
