@@ -117,8 +117,15 @@ def prepare(img: Image.Image) -> Image.Image:
 
 def ocr(img: Image.Image, chars: str, psm: int = 7) -> str:
     """One Tesseract pass on one piece of the HUD (7 = a line, 8 = one word)."""
+    if img.width < 8 or img.height < 8:
+        return ""
     cfg = f"--psm {psm} -c tessedit_char_whitelist={chars}"
-    return pytesseract.image_to_string(prepare(img), config=cfg).strip().replace(" ", "")
+    try:
+        return pytesseract.image_to_string(prepare(img), config=cfg, timeout=10).strip().replace(" ", "")
+    except (pytesseract.TesseractError, RuntimeError):
+        # Tesseract occasionally crashes or hangs on odd images; one unreadable timer
+        # must not stop the whole sweep.
+        return ""
 
 
 @dataclass
