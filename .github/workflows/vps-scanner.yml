@@ -46,7 +46,16 @@ jobs:
           KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          # Tidy what copying from a Windows terminal can do to a key: CR line
+          # endings, stray spaces, missing BEGIN/END lines.
+          body=$(printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | grep -v -- '-----')
+          { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | tr -d ' ' ; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          if ! ssh-keygen -y -f ~/.ssh/deploy > /dev/null 2>&1; then
+            echo "::error::VPS_SSH_KEY isn't a complete private key ($(wc -l < ~/.ssh/deploy) lines). Create a new one on the server and paste it again."
+            exit 1
+          fi
+          echo "Key OK: $(ssh-keygen -l -f ~/.ssh/deploy)"
           ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host vps\n  HostName %s\n  User crosspov\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n  ServerAliveInterval 30\n' "$HOST" > ~/.ssh/config
           ssh vps 'echo "connected as $(whoami) on $(hostname), $(nproc) CPUs"'
