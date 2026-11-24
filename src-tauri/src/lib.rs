@@ -13,6 +13,7 @@ mod procs;
 mod recorder;
 mod settings;
 mod streamers;
+mod updater;
 #[cfg(windows)]
 mod win_audio;
 
@@ -34,15 +35,18 @@ use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
 const MAIN_WINDOW: &str = "main";
+/// Sent to the CrossPOV server with every request.
+pub(crate) const USER_AGENT: &str = concat!("CrossPOV/", env!("CARGO_PKG_VERSION"));
 /// Passed by the "Start with Windows" entry so the app starts in the tray.
 const MINIMIZED_ARG: &str = "--minimized";
 
-struct AppState {
+pub(crate) struct AppState {
     settings: Mutex<Settings>,
     path: PathBuf,
-    recorder: Recorder,
+    pub(crate) recorder: Recorder,
     matches: MatchWatcher,
     streamers: StreamerWorker,
+    updates: updater::Updates,
 }
 
 impl AppState {
@@ -131,7 +135,7 @@ fn save_clip_async(app: &AppHandle) {
     });
 }
 
-fn show_main_window(app: &AppHandle) {
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -276,6 +280,16 @@ async fn list_mic_devices() -> Vec<String> {
     tauri::async_runtime::spawn_blocking(audio::input_device_names).await.unwrap_or_default()
 }
 
+#[tauri::command]
+fn update_status(state: State<'_, AppState>) -> updater::UpdateStatus {
+    state.updates.status()
+}
+
+#[tauri::command]
+fn retry_update(app: AppHandle, state: State<'_, AppState>) {
+    state.updates.retry(&app);
+}
+
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open CrossPOV", true, None::<&str>)?;
     let save = MenuItem::with_id(app, "save", "Save clip now", true, None::<&str>)?;
@@ -320,6 +334,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -383,13 +398,16 @@ pub fn run() {
                 }),
             );
             let hotkey = settings.hotkey.clone();
+            let updates = updater::Updates::new();
             app.manage(AppState {
                 settings: Mutex::new(settings),
                 path,
                 recorder: recorder.clone(),
                 matches: watcher.clone(),
                 streamers: streamer_worker.clone(),
+                updates: updates.clone(),
             });
+            updates.spawn(&handle);
             watcher.spawn();
             streamer_worker.spawn();
             apply_hotkey(&handle, &hotkey);
@@ -419,7 +437,9 @@ pub fn run() {
             check_matches_now,
             streamer_states,
             check_streamers_now,
-            add_streamer_channel
+            add_streamer_channel,
+            update_status,
+            retry_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");

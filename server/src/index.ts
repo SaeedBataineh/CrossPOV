@@ -10,12 +10,15 @@
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
+import { clientVersion, LATEST_JSON, outdated, parseLatest, type Latest } from "./appVersion.ts";
 import { checkChannel, findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
 
 export interface Env extends TwitchEnv {
   HENRIK_API_KEY?: string;
   /** Optional override, used by tests. */
   HENRIK_BASE?: string;
+  /** Optional override of the release feed, used by tests. */
+  LATEST_JSON_URL?: string;
   ASSETS?: Fetcher;
 }
 
@@ -154,6 +157,23 @@ export function rateLimited(ip: string, now = Date.now()): boolean {
   return recent.length > LIMIT_PER_MINUTE;
 }
 
+const LATEST_TTL_S = 10 * 60;
+
+/** The newest app release, cached for a few minutes. Null if GitHub can't be reached. */
+async function latestRelease(env: Env, ctx?: ExecutionContext): Promise<Latest | null> {
+  try {
+    return await cachedData("latest-release", LATEST_TTL_S, ctx, async () => {
+      const res = await fetch(env.LATEST_JSON_URL ?? LATEST_JSON, { headers: { accept: "application/json" } });
+      if (!res.ok) throw new Error(`release feed ${res.status}`);
+      const latest = parseLatest(await res.json());
+      if (!latest) throw new Error("release feed unreadable");
+      return latest;
+    });
+  } catch {
+    return null; // Never lock people out because GitHub is down.
+  }
+}
+
 export async function handleApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const ip = request.headers.get("cf-connecting-ip");
@@ -167,6 +187,11 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
     });
   }
   if (request.method !== "GET") return json({ error: "Only GET is supported." }, 405);
+  const client = clientVersion(request.headers.get("user-agent"));
+  if (client && url.pathname !== "/api/health") {
+    const message = outdated(client, await latestRelease(env, ctx));
+    if (message) return json({ error: message, updateRequired: true }, 426);
+  }
   try {
     if (url.pathname === "/api/health") {
       return json({

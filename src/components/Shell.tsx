@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { isDesktop, saveClipNow, type RecorderStatus } from "../lib/backend";
+import { isDesktop, saveClipNow, type RecorderStatus, type UpdateStatus } from "../lib/backend";
 import type { Settings } from "../lib/settings";
 import { AudioIcon, ClipsIcon, GearIcon, HomeIcon, Logo, MatchesIcon, SearchIcon, StreamIcon } from "./Icons";
 
@@ -51,7 +51,9 @@ export function TopBar({
   onQuery,
   onNavigate,
   onSaving,
+  update,
 }: {
+  update: UpdateStatus | null;
   settings: Settings;
   status: RecorderStatus | null;
   query: string;
@@ -80,6 +82,9 @@ export function TopBar({
         />
       </label>
       <span className="spacer" />
+      {update?.state === "waiting" && (
+        <span className="pill purple" title="CrossPOV updates itself as soon as VALORANT is closed">Update v{update.version} · after this game</span>
+      )}
       <RecPill status={status} />
       <button
         type="button"

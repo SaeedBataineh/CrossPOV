@@ -143,3 +143,43 @@ test("www goes to the main domain, keeping the path", async () => {
   assert.equal(wwwRedirect(new URL("https://crosspov.com/demo")), null);
   assert.equal(wwwRedirect(new URL("https://crosspov.batainehsaeed1.workers.dev/")), null);
 });
+
+import { clientVersion, compareVersions, outdated, parseLatest } from "../src/appVersion.ts";
+
+test("reads the app version from the user agent", () => {
+  assert.equal(clientVersion("CrossPOV/1.4.2"), "1.4.2");
+  assert.equal(clientVersion("ureq/3.5.2"), "0.0.0", "builds from before auto-update count as oldest");
+  assert.equal(clientVersion("Mozilla/5.0 (Windows NT 10.0)"), null, "browsers are never blocked");
+  assert.equal(clientVersion(null), null);
+});
+
+test("blocks old app versions once the newest release has been out for a while", () => {
+  const now = Date.parse("2026-11-24T20:00:00Z");
+  const latest = parseLatest({ version: "0.2.0", pub_date: "2026-11-24T08:00:00Z" });
+  assert.deepEqual(latest, { version: "0.2.0", publishedMs: Date.parse("2026-11-24T08:00:00Z") });
+  assert.match(outdated("0.1.0", latest, now) ?? "", /update to v0\.2\.0/);
+  assert.equal(outdated("0.2.0", latest, now), null);
+  assert.equal(outdated("0.3.0", latest, now), null);
+  assert.equal(outdated(null, latest, now), null);
+  assert.equal(outdated("0.1.0", null, now), null, "no release info: let everyone in");
+  const fresh = parseLatest({ version: "0.2.0", pub_date: "2026-11-24T19:00:00Z" });
+  assert.equal(outdated("0.1.0", fresh, now), null, "grace period while running apps update");
+  assert.ok(compareVersions("0.10.0", "0.9.9") > 0);
+  assert.equal(parseLatest({ version: "nope" }), null);
+});
+
+test("an out-of-date app gets 426 instead of match data", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ version: "9.0.0", pub_date: "2020-01-01T00:00:00Z" }))) as typeof fetch;
+  try {
+    const req = new Request("https://crosspov.com/api/latest-match?region=eu&name=A&tag=B", { headers: { "user-agent": "CrossPOV/0.1.0" } });
+    const res = await handleApi(req, {});
+    assert.equal(res.status, 426);
+    const body = (await res.json()) as { updateRequired?: boolean };
+    assert.equal(body.updateRequired, true);
+    const health = await handleApi(new Request("https://crosspov.com/api/health", { headers: { "user-agent": "CrossPOV/0.1.0" } }), {});
+    assert.equal(health.status, 200, "health stays open");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

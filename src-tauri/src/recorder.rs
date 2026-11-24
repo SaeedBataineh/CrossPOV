@@ -85,6 +85,8 @@ struct Inner {
     status: RecorderStatus,
     /// 0 = direct GPU path, 1 = compatibility mode, 2 = CPU encoder.
     fallback: u8,
+    /// Set before an update installs: stop recording and don't start again.
+    halted: bool,
 }
 
 pub type StatusListener = Box<dyn Fn(&RecorderStatus) + Send + Sync>;
@@ -145,6 +147,7 @@ impl Recorder {
                 running: None,
                 status: RecorderStatus::new(RecState::Starting),
                 fallback: 0,
+                halted: false,
             })),
             work_dir,
             listener: Arc::new(listener),
@@ -180,6 +183,13 @@ impl Recorder {
             inner.fallback = 0;
         }
         inner.settings = settings;
+    }
+
+    /// Stops FFmpeg for good (until the app restarts), e.g. so an update can replace its files.
+    pub fn halt(&self) {
+        let mut inner = self.lock();
+        inner.halted = true;
+        inner.running = None;
     }
 
     /// Runs the supervisor loop on a background thread.
@@ -223,6 +233,7 @@ impl Recorder {
 
     fn tick(&self, want: bool, ffmpeg_path: &Path, detected: VideoEncoder, source: VideoSource) {
         let mut inner = self.lock();
+        let want = want && !inner.halted;
         let key = recording_key(&inner.settings);
 
         // Stop if the game closed or recording settings changed.

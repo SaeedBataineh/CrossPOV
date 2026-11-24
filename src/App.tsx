@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Rail, TopBar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
+import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
@@ -21,6 +22,9 @@ export default function App() {
   const [query, setQuery] = useState("");
   const recorder = useRecorder();
   const matchesState = useMatches();
+  const update = useUpdateStatus();
+  /** While updating, the app behind the update screen can't be clicked or tabbed into. */
+  const blocked = Boolean(update && !["upToDate", "waiting"].includes(update.state));
 
   useEffect(() => {
     loadSettings().then(setSettings, (err) => setLoadError(String(err)));
@@ -39,7 +43,8 @@ export default function App() {
   );
 
   return (
-    <div className="app">
+    <>
+    <div className="app" inert={blocked}>
       <TopBar
         settings={settings}
         status={recorder.status}
@@ -47,6 +52,7 @@ export default function App() {
         onQuery={setQuery}
         onNavigate={setPage}
         onSaving={() => recorder.notify("Saving clip…", "info")}
+        update={update}
       />
       <div className="body">
         <Rail page={page} onNavigate={setPage} />
@@ -70,5 +76,7 @@ export default function App() {
       </div>
       <ToastView toast={recorder.toast} />
     </div>
+    <UpdateGate status={update} />
+    </>
   );
 }

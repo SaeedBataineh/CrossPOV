@@ -282,3 +282,23 @@ export async function lookupStreamers(match: MatchSummary, mePuuid?: string): Pr
 export function fightsBetween(m: MatchSummary, a: string, b: string): number {
   return m.kills.filter((k) => (k.killer === a && k.victim === b) || (k.killer === b && k.victim === a)).length;
 }
+
+// ---------- Auto-update ----------
+
+export type UpdateStatus =
+  | { state: "checking" }
+  | { state: "upToDate"; offline: boolean }
+  | { state: "waiting"; version: string }
+  | { state: "downloading"; version: string; downloaded: number; total: number | null }
+  | { state: "installing"; version: string }
+  | { state: "failed"; version: string; message: string };
+
+export async function updateStatus(): Promise<UpdateStatus> {
+  return isDesktop ? tauriInvoke<UpdateStatus>("update_status") : { state: "upToDate", offline: false };
+}
+
+export async function retryUpdate(): Promise<void> {
+  if (isDesktop) await tauriInvoke<void>("retry_update");
+}
+
+export const onUpdateStatus = (cb: (s: UpdateStatus) => void) => listen("update-status", cb);

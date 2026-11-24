@@ -72,6 +72,8 @@ fn agent() -> ureq::Agent {
         .tls_config(tls)
         .timeout_global(Some(Duration::from_secs(30)))
         .http_status_as_error(false)
+        // The server uses this to turn away out-of-date versions.
+        .user_agent(crate::USER_AGENT)
         .build()
         .into()
 }

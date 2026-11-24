@@ -32,6 +32,16 @@ impl Procs {
         }
     }
 
+    /// Kills processes whose executable lives in `dir`, except `keep` (our own pid).
+    pub fn kill_in_dir(&self, dir: &std::path::Path, keep: u32) {
+        let Some(sys) = &self.sys else { return };
+        for (pid, p) in sys.processes() {
+            if pid.as_u32() != keep && p.exe().and_then(|e| e.parent()).is_some_and(|d| d == dir) {
+                p.kill();
+            }
+        }
+    }
+
     pub fn is_running(&self, exe: &str) -> bool {
         let Some(sys) = &self.sys else { return false };
         sys.processes_by_exact_name(OsStr::new(exe)).next().is_some()
