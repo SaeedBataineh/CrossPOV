@@ -9,7 +9,7 @@ Uses Twitch's official API (Helix) for the stream list; preview images are
 the public thumbnails Twitch serves for every live stream.
 
 Env: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
-Args: --limit N (streams to read, default 600), --out DIR
+Args: --limit N (streams to read, most-watched first; default 1500), --out DIR
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field
 
 import pytesseract
 import requests
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 HELIX = "https://api.twitch.tv/helix"
 W, H = 1280, 720
@@ -91,22 +91,36 @@ def crop(img: Image.Image, box: tuple[float, float, float, float]) -> Image.Imag
     return img.crop((int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)))
 
 
-def prepare(img: Image.Image, invert: bool) -> Image.Image:
-    """Grey, upscale 4x, high-contrast black-on-white for Tesseract."""
-    g = ImageOps.grayscale(img).resize((img.width * 4, img.height * 4), Image.LANCZOS)
+def prepare(img: Image.Image) -> Image.Image:
+    """Grey, upscale 4x, high-contrast black text on white for Tesseract.
+    The HUD is light text on a dark strip, so it is inverted."""
+    # Brightness = the brightest colour channel, so the HUD's teal and red
+    # score digits count as bright (plain grey makes red look dark).
+    r, g_, b = img.convert("RGB").split()
+    g = ImageChops.lighter(ImageChops.lighter(r, g_), b)
+    g = g.resize((img.width * 4, img.height * 4), Image.LANCZOS)
     g = ImageOps.autocontrast(g)
     bw = g.point(lambda v: 255 if v > 150 else 0)
-    return bw if invert else ImageOps.invert(bw)
+    # Tesseract reads poorly when text touches the edge: add a white margin.
+    return ImageOps.expand(ImageOps.invert(bw), border=40, fill=255)
 
 
-def ocr(img: Image.Image, chars: str) -> str:
-    cfg = f"--psm 7 -c tessedit_char_whitelist={chars}"
-    best = ""
-    for invert in (False, True):
-        text = pytesseract.image_to_string(prepare(img, invert), config=cfg).strip().replace(" ", "")
-        if len(text) > len(best):
-            best = text
-    return best
+def ocr(img: Image.Image, chars: str, psm: int = 7) -> str:
+    """One Tesseract pass on one piece of the HUD (7 = a line, 8 = one word)."""
+    cfg = f"--psm {psm} -c tessedit_char_whitelist={chars}"
+    return pytesseract.image_to_string(prepare(img), config=cfg).strip().replace(" ", "")
+
+
+def read_strip(img: Image.Image) -> tuple[str | None, str | None, str | None, str]:
+    """Returns (left score, timer, right score, raw text): three small OCR
+    passes, one per piece, which is as fast as one big pass and more accurate."""
+    # The timer is the reliable signal that a VALORANT HUD is on screen.
+    # Lone score digits are a weak spot for Tesseract; the real scanner would
+    # match VALORANT's own digit shapes instead. Best effort here.
+    left = ocr(crop(img, SCORE_L), "0123456789")
+    timer = ocr(crop(img, TIMER), "0123456789:")
+    right = ocr(crop(img, SCORE_R), "0123456789")
+    return left or None, timer or None, right or None, f"{left or '?'} | {timer or '?'} | {right or '?'}"
 
 
 @dataclass
@@ -137,13 +151,11 @@ def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None]:
         return r, None
     r.ok_image = True
     img = Image.open(io.BytesIO(data)).convert("RGB")
-    t = ocr(crop(img, TIMER), "0123456789:")
-    left = ocr(crop(img, SCORE_L), "0123456789")
-    right = ocr(crop(img, SCORE_R), "0123456789")
-    r.raw = {"timer": t, "left": left, "right": right}
-    m = TIMER_RE.match(t)
+    left, t, right, raw = read_strip(img)
+    r.raw = {"text": raw}
+    m = TIMER_RE.match(t or "")
     r.timer = f"{int(m.group(1))}:{m.group(2)}" if m else None
-    r.score_left, r.score_right = as_score(left), as_score(right)
+    r.score_left, r.score_right = as_score(left or ""), as_score(right or "")
     band = crop(img, BAND)
     buf = io.BytesIO()
     band.save(buf, "JPEG", quality=80)
@@ -173,7 +185,7 @@ def contact_sheet(rows: list[tuple[Reading, bytes]], path: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=600)
+    ap.add_argument("--limit", type=int, default=1500)
     ap.add_argument("--out", default="poc-out")
     ap.add_argument("--sample", type=int, default=80)
     args = ap.parse_args()
@@ -197,15 +209,22 @@ def main() -> int:
         images = list(pool.map(lambda s: fetch_image(s["thumbnail_url"]), streams))
     t_fetch = time.time() - t1
 
+    print(f"Listed {total_live} live streams in {t_list:.1f}s; downloaded {len(streams)} previews in {t_fetch:.1f}s", flush=True)
     t2 = time.time()
+    results = []
     with ProcessPoolExecutor() as pool:
-        results = list(pool.map(read_one, zip(streams, images), chunksize=8))
+        for i, res in enumerate(pool.map(read_one, zip(streams, images), chunksize=8), 1):
+            results.append(res)
+            if i % 100 == 0 or i == len(streams):
+                rate = i / max(0.001, time.time() - t2)
+                print(f"  read {i}/{len(streams)} ({rate:.1f}/s), readable so far: {sum(r.readable for r, _ in results)}", flush=True)
     t_ocr = time.time() - t2
 
     readings = [r for r, _ in results]
     have = [r for r in readings if r.ok_image]
     readable = [r for r in have if r.readable]
     timer_only = [r for r in have if r.timer and not r.readable]
+    hud = [r for r in have if r.timer]
 
     by_lang: dict[str, list[Reading]] = {}
     for r in have:
@@ -225,6 +244,8 @@ def main() -> int:
         "live_valorant_streams": total_live,
         "streams_read": len(streams),
         "images_downloaded": len(have),
+        "hud_visible_timer_read": len(hud),
+        "hud_visible_pct": round(100 * len(hud) / max(1, len(have)), 1),
         "readable_score_and_timer": len(readable),
         "readable_pct": round(100 * len(readable) / max(1, len(have)), 1),
         "timer_only": len(timer_only),
@@ -241,11 +262,12 @@ def main() -> int:
         "## Scoreboard proof of concept",
         f"- Live VALORANT streams right now: **{total_live}**",
         f"- Read (most-watched first): **{len(streams)}**, images downloaded: {len(have)}",
-        f"- **Readable score + timer: {len(readable)} ({summary['readable_pct']}%)**; timer only: {len(timer_only)}",
+        f"- **HUD visible (round timer read): {len(hud)} ({summary['hud_visible_pct']}%)**: the main answer",
+        f"- Full score + timer read: {len(readable)} ({summary['readable_pct']}%), best effort (real scanner would use digit matching)",
         f"- Time: list {t_list:.1f}s, download {t_fetch:.1f}s, OCR {t_ocr:.1f}s on {os.cpu_count()} CPUs",
         f"- Estimated full sweep of all {total_live} streams on this machine: **~{est_full_sweep_s:.0f}s**",
         "",
-        "| Language | Streams | Readable |",
+        "| Language | Streams | Score + timer read |",
         "|---|---|---|",
         *[f"| {k} | {len(v)} | {sum(r.readable for r in v)} |" for k, v in lang_rows],
         "",
