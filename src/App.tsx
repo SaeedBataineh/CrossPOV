@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Rail, TopBar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
-import { loadSettings, saveSettings } from "./lib/backend";
+import { isDesktop, loadSettings, saveSettings } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
@@ -51,6 +51,12 @@ export default function App() {
       <div className="body">
         <Rail page={page} onNavigate={setPage} />
         <main className="main">
+          {!isDesktop && (
+            <p className="notice info s12" role="note">
+              <b>Website demo with sample data.</b> Recording, playing clips and downloading streamer clips need the Windows app. The
+              Matches page can look up a real match. <a href="/">About CrossPOV</a>
+            </p>
+          )}
           {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
           <Suspense fallback={<p className="muted s12">Loading…</p>}>
             {page === "home" && <Home settings={settings} recorder={recorder} matchesState={matchesState} onNavigate={setPage} />}

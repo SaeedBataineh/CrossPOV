@@ -246,6 +246,7 @@ select.input { padding-right: 4px; }
 
 /* ---------- Banners and toasts ---------- */
 .notice { margin: 0; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--warn-line); background: #15120a; color: #f3dfb5; font-size: 12px; }
+.notice.info { border-color: var(--twitch-line); background: #110d1a; color: #d9c8ff; }
 .notice.bad { border-color: #6b2a28; background: #170c0c; color: #ffc9c7; }
 .notice .linkish, .linkish { border: 0; background: none; padding: 0; color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .toast-region { position: fixed; right: 20px; bottom: 20px; z-index: 10; pointer-events: none; }

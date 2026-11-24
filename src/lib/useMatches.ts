@@ -5,7 +5,6 @@ import {
   onStreamersUpdated,
   streamerStates,
   type MatchStreamers,
-  isDesktop,
   listMatches,
   matchesStatus,
   onMatchesStatus,
@@ -24,7 +23,6 @@ export function useMatches() {
   const putStreamers = useCallback((s: MatchStreamers) => setStreamers((prev) => ({ ...prev, [s.matchId]: s })), []);
 
   useEffect(() => {
-    if (!isDesktop) return;
     let alive = true;
     const unlisten: Array<() => void> = [];
     listMatches().then((m) => alive && setMatches(m), () => {});

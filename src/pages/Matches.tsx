@@ -248,12 +248,10 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
   );
 }
 
-/** Website demo: look up any Riot ID's latest match through this site's server. */
-function DemoLookup() {
+/** Website demo: look up any Riot ID's latest real match through this site's server. */
+function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, web: WebStreamer[] | "checking" | undefined) => void }) {
   const [riotId, setRiotId] = useState("");
   const [region, setRegion] = useState("eu");
-  const [match, setMatch] = useState<MatchSummary | null>(null);
-  const [web, setWeb] = useState<WebStreamer[] | "checking" | undefined>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -261,19 +259,17 @@ function DemoLookup() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    setWeb(undefined);
     try {
-      const m = await lookupLatestMatch(riotId.trim(), region);
-      setMatch(m);
-      setWeb("checking");
+      const id = riotId.trim();
+      const m = await lookupLatestMatch(id, region);
+      onFound(m, id, "checking");
       try {
-        setWeb(await lookupStreamers(m, findMe(m, riotId)?.puuid));
+        onFound(m, id, await lookupStreamers(m, findMe(m, id)?.puuid));
       } catch (err) {
-        setWeb(undefined);
+        onFound(m, id, undefined);
         setError(`Streamer check failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     } catch (err) {
-      setMatch(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
@@ -281,31 +277,24 @@ function DemoLookup() {
   }
 
   return (
-    <>
-      <Panel title="Try it: look up a match" color="var(--kick)" className="s4">
-        <form className="pad stack" onSubmit={(e) => void submit(e)}>
-          <span className="muted small">
-            Enter a Riot ID to load its latest finished match and check which players were streaming on Twitch, the same steps the
-            desktop app runs after each game. Clips themselves are made by the app on your PC.
-          </span>
-          <input className="input" aria-label="Riot ID" placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
+    <Panel title="Try it with a real match" color="var(--kick)">
+      <form className="pad stack" onSubmit={(e) => void submit(e)}>
+        <span className="muted small">
+          The matches below are sample data. Enter any Riot ID to load its latest real match and check which players were live on
+          Twitch, the same steps the app runs after each game.
+        </span>
+        <div className="row">
+          <input className="input grow" aria-label="Riot ID" placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
           <select className="input" aria-label="Region" value={region} onChange={(e) => setRegion(e.target.value)}>
             {REGIONS.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
+              <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
             ))}
           </select>
           <button type="submit" className="b r" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
-          {error && <span className="small bad" role="alert">{error}</span>}
-        </form>
-      </Panel>
-      <div className="s8 col">
-        {match ? (
-          <MatchDetail match={match} riotId={riotId} web={web} />
-        ) : (
-          <Panel title="Match"><div className="empty"><span>The match, both teams and any streamers show up here.</span></div></Panel>
-        )}
-      </div>
-    </>
+        </div>
+        {error && <span className="small bad" role="alert">{error}</span>}
+      </form>
+    </Panel>
   );
 }
 
@@ -325,10 +314,11 @@ export default function Matches({
   const [filter, setFilter] = useState<Filter>("all");
   const [rechecking, setRechecking] = useState(false);
   const [recheckError, setRecheckError] = useState("");
+  /** Website demo: a real match the visitor looked up. */
+  const [looked, setLooked] = useState<{ match: MatchSummary; riotId: string; web?: WebStreamer[] | "checking" } | null>(null);
 
-  if (!isDesktop) return <DemoLookup />;
-
-  const shown = matches.filter((m) =>
+  const all = looked ? [looked.match, ...matches.filter((m) => m.id !== looked.match.id)] : matches;
+  const shown = all.filter((m) =>
     filter === "streamers" ? (streamers[m.id]?.players.length ?? 0) > 0 : filter === "competitive" ? /competitive/i.test(m.mode) : true,
   );
   const match = shown.find((m) => m.id === selected) ?? shown[0];
@@ -357,10 +347,19 @@ export default function Matches({
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
 
+      <div className="s4 col">
+      {!isDesktop && (
+        <DemoLookup
+          onFound={(m, riotId, web) => {
+            setLooked({ match: m, riotId, web });
+            setSelected(m.id);
+            setFilter("all");
+          }}
+        />
+      )}
       <Panel
         title="Match history"
         color="var(--kick)"
-        className="s4"
         right={<button type="button" className="b sm" onClick={() => void checkNow()} disabled={checking || !status?.configured}>{checking ? "Checking…" : "Check now"}</button>}
       >
         <div className="row" style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
@@ -369,7 +368,8 @@ export default function Matches({
         {shown.length ? (
           <ul className="match-list">
             {shown.map((m) => {
-              const me = findMe(m, settings.riotId);
+              const isLooked = m.id === looked?.match.id;
+              const me = findMe(m, isLooked ? looked.riotId : settings.riotId);
               const r = result(m, me);
               const s = streamers[m.id];
               const n = s?.players.length ?? 0;
@@ -401,9 +401,12 @@ export default function Matches({
           {status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}. ` : ""}Each match is checked for streamers once, and a second time if nobody was live.
         </p>
       </Panel>
+      </div>
 
       <div className="s8 col">
-        {match ? (
+        {match && match.id === looked?.match.id ? (
+          <MatchDetail match={match} riotId={looked.riotId} web={looked.web} />
+        ) : match ? (
           <>
             <MatchDetail
               match={match}
@@ -411,7 +414,7 @@ export default function Matches({
               streamers={streamers[match.id]}
               actions={<button type="button" className="b sm" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? "Checking…" : "Check again"}</button>}
             />
-            <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />
+            {isDesktop && <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />}
           </>
         ) : (
           <Panel title="Match"><div className="empty"><span>Pick a match to see both teams, your rounds and any streamers.</span></div></Panel>

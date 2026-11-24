@@ -9,6 +9,10 @@ export const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" 
 
 const LOCAL_KEY = "crosspov.settings";
 
+/** Website demo: sample clips, matches and streamers, loaded only in the browser. */
+const demo = () => import("./demoData");
+const NEEDS_APP = (what: string) => new Error(`${what} needs the CrossPOV desktop app. This is the website demo.`);
+
 async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(cmd, args);
@@ -18,7 +22,8 @@ export async function loadSettings(): Promise<Settings> {
   if (isDesktop) return tauriInvoke<Settings>("get_settings");
   try {
     const raw = localStorage.getItem(LOCAL_KEY);
-    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+    const base = { ...DEFAULT_SETTINGS, riotId: (await demo()).DEMO_RIOT_ID, clipFolder: "C:\\Users\\you\\Videos\\CrossPOV" };
+    return raw ? { ...base, ...JSON.parse(raw) } : base;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -111,27 +116,30 @@ export async function saveClipNow(): Promise<void> {
 }
 
 export async function listClips(): Promise<ClipInfo[]> {
-  return isDesktop ? tauriInvoke<ClipInfo[]>("list_clips") : [];
+  return isDesktop ? tauriInvoke<ClipInfo[]>("list_clips") : (await demo()).demoClips();
 }
 
 export async function deleteClip(path: string): Promise<void> {
-  if (isDesktop) await tauriInvoke<void>("delete_clip", { path });
+  if (!isDesktop) throw NEEDS_APP("Deleting clips");
+  await tauriInvoke<void>("delete_clip", { path });
 }
 
 export async function openClip(path: string): Promise<void> {
-  if (isDesktop) await tauriInvoke<void>("open_clip", { path });
+  if (!isDesktop) throw NEEDS_APP("Playing clips");
+  await tauriInvoke<void>("open_clip", { path });
 }
 
 export async function revealClip(path: string): Promise<void> {
-  if (isDesktop) await tauriInvoke<void>("reveal_clip", { path });
+  if (!isDesktop) throw NEEDS_APP("Opening the clip folder");
+  await tauriInvoke<void>("reveal_clip", { path });
 }
 
 export async function listAudioApps(): Promise<AudioApp[]> {
-  return isDesktop ? tauriInvoke<AudioApp[]>("list_audio_apps") : [{ exe: "Discord.exe" }, { exe: "Spotify.exe" }];
+  return isDesktop ? tauriInvoke<AudioApp[]>("list_audio_apps") : [{ exe: "Discord.exe" }, { exe: "Spotify.exe" }, { exe: "chrome.exe" }];
 }
 
 export async function listMicDevices(): Promise<string[]> {
-  return isDesktop ? tauriInvoke<string[]>("list_mic_devices") : [];
+  return isDesktop ? tauriInvoke<string[]>("list_mic_devices") : ["Headset Microphone", "USB Microphone"];
 }
 
 /** URL the UI can load a local thumbnail from (desktop app only). */
@@ -172,14 +180,15 @@ export interface MatchesStatus {
 }
 
 export async function listMatches(): Promise<MatchSummary[]> {
-  return isDesktop ? tauriInvoke<MatchSummary[]>("list_matches") : [];
+  return isDesktop ? tauriInvoke<MatchSummary[]>("list_matches") : (await demo()).demoMatches();
 }
 
 export async function matchesStatus(): Promise<MatchesStatus> {
-  return isDesktop ? tauriInvoke<MatchesStatus>("matches_status") : { lastCheckMs: null, error: null, configured: false };
+  return isDesktop ? tauriInvoke<MatchesStatus>("matches_status") : { lastCheckMs: Date.now() - 120_000, error: null, configured: true };
 }
 
 export async function checkMatchesNow(): Promise<MatchSummary> {
+  if (!isDesktop) return (await demo()).demoMatches()[0];
   return tauriInvoke<MatchSummary>("check_matches_now");
 }
 
@@ -234,14 +243,20 @@ export interface MatchStreamers {
 }
 
 export async function streamerStates(): Promise<MatchStreamers[]> {
-  return isDesktop ? tauriInvoke<MatchStreamers[]>("streamer_states") : [];
+  return isDesktop ? tauriInvoke<MatchStreamers[]>("streamer_states") : (await demo()).demoStreamers();
 }
 
 export async function checkStreamersNow(matchId: string): Promise<MatchStreamers> {
+  if (!isDesktop) {
+    const found = (await demo()).demoStreamers().find((s) => s.matchId === matchId);
+    if (found) return { ...found, checkedMs: Date.now() };
+    throw NEEDS_APP("Checking this match");
+  }
   return tauriInvoke<MatchStreamers>("check_streamers_now", { matchId });
 }
 
 export async function addStreamerChannel(matchId: string, puuid: string, login: string): Promise<MatchStreamers> {
+  if (!isDesktop) throw NEEDS_APP("Adding a channel");
   return tauriInvoke<MatchStreamers>("add_streamer_channel", { matchId, puuid, login });
 }
 

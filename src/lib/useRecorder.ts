@@ -26,7 +26,7 @@ export function useRecorder() {
   }, []);
 
   const notify = useCallback((text: string, tone: Toast["tone"]) => {
-    setToast({ id: Date.now(), text, tone });
+    setToast({ id: Date.now(), text: text.replace(/^Error: /, ""), tone });
   }, []);
 
   useEffect(() => {
