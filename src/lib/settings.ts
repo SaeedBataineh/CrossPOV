@@ -13,7 +13,21 @@ export interface AppAudio {
   volume: number; // 0-200
 }
 
+export const REGIONS = [
+  { value: "eu", label: "Europe" },
+  { value: "na", label: "North America" },
+  { value: "ap", label: "Asia Pacific" },
+  { value: "kr", label: "Korea" },
+  { value: "br", label: "Brazil" },
+  { value: "latam", label: "Latin America" },
+] as const;
+
 export interface Settings {
+  // Account
+  /** "Name#TAG", used only to look up your own matches. */
+  riotId: string;
+  region: string;
+  serverUrl: string;
   // Recording
   fps: number;
   resolution: Resolution;
@@ -57,6 +71,9 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  riotId: "",
+  region: "eu",
+  serverUrl: "https://crosspov.batainehsaeed1.workers.dev",
   fps: 60,
   resolution: "1080p",
   quality: "high",

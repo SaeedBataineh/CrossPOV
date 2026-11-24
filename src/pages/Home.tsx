@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { Page } from "../components/Sidebar";
-import { cardFromClip, ClipCard, Notice, SampleBanner } from "../components/ui";
-import { isDesktop, saveClipNow, type RecorderStatus } from "../lib/backend";
-import { SAMPLE_MATCHES, STATUS_LABEL } from "../lib/sample";
+import { cardFromClip, ClipCard, Notice } from "../components/ui";
+import { findMe, isDesktop, saveClipNow, type MatchSummary, type RecorderStatus } from "../lib/backend";
 import type { Settings } from "../lib/settings";
+import { matchTimeAgo, scoreLine } from "../lib/useMatches";
 import type { useRecorder } from "../lib/useRecorder";
 
 /** 60 -> "01:00", like a recorder's display. */
@@ -57,15 +57,18 @@ function StatusLine({ status, bufferSeconds }: { status: RecorderStatus | null; 
 export default function Home({
   settings,
   recorder,
+  matches,
   onNavigate,
 }: {
   settings: Settings;
   recorder: ReturnType<typeof useRecorder>;
+  matches: MatchSummary[];
   onNavigate: (p: Page) => void;
 }) {
   const { status, clips, notify } = recorder;
   const [saving, setSaving] = useState(false);
-  const last = SAMPLE_MATCHES[0];
+  const last = matches[0];
+  const me = last ? findMe(last, settings.riotId) : undefined;
   const recording = status?.state === "recording";
   const recent = clips.slice(0, 4).map(cardFromClip);
 
@@ -140,22 +143,23 @@ export default function Home({
         </section>
 
         <section className="split-side card pad stack-16" aria-labelledby="last">
-          <div className="stack-4">
-            <h2 id="last">Last match</h2>
-            <span className="muted">{last.title} · {last.when}</span>
-          </div>
-          <SampleBanner>Sample data. Streamer detection arrives in step 4.</SampleBanner>
-          <ul className="plain">
-            {last.players.filter((p) => p.channel).map((p) => (
-              <li key={p.name} className="mini-player">
-                <strong>{p.name}</strong>
-                <span className={`status-text ${p.status}`}>
-                  {p.clips ? `${p.clips} clips` : STATUS_LABEL[p.status]}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <button type="button" className="link" onClick={() => onNavigate("streamers")}>See match details</button>
+          <h2 id="last">Last match</h2>
+          {last ? (
+            <>
+              <div className="stack-4">
+                <strong>{last.map} · {scoreLine(last, me?.team)}</strong>
+                <span className="muted small mono">{last.mode}{me ? ` · ${me.agent} · ${me.kills}/${me.deaths}/${me.assists}` : ""} · {matchTimeAgo(last.startedAt)}</span>
+              </div>
+              <span className="muted small">Streamer check for this lobby arrives in the next update.</span>
+            </>
+          ) : (
+            <span className="muted">
+              {settings.riotId ? "Your matches show up here after you play." : "Add your Riot ID in Settings to see your matches here."}
+            </span>
+          )}
+          <button type="button" className="link" style={{ alignSelf: "flex-start" }} onClick={() => onNavigate(settings.riotId ? "streamers" : "settings")}>
+            {settings.riotId ? "Match details" : "Open Settings"}
+          </button>
         </section>
       </div>
     </>

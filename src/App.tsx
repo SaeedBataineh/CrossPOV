@@ -3,6 +3,7 @@ import { Sidebar, type Page } from "./components/Sidebar";
 import { ToastView } from "./components/ui";
 import { loadSettings } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
+import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
 import Home from "./pages/Home";
 
@@ -16,6 +17,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
   const recorder = useRecorder();
+  const matchesState = useMatches();
 
   useEffect(() => {
     loadSettings().then(setSettings, (err) => setLoadError(String(err)));
@@ -29,9 +31,9 @@ export default function App() {
           <p className="error-banner" role="alert">Could not load settings, using defaults: {loadError}</p>
         )}
         <Suspense fallback={<p className="muted">Loading…</p>}>
-          {page === "home" && <Home settings={settings} recorder={recorder} onNavigate={setPage} />}
+          {page === "home" && <Home settings={settings} recorder={recorder} matches={matchesState.matches} onNavigate={setPage} />}
           {page === "clips" && <Clips recorder={recorder} />}
-          {page === "streamers" && <Streamers />}
+          {page === "streamers" && <Streamers settings={settings} matchesState={matchesState} onNavigate={setPage} />}
           {page === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
         </Suspense>
       </main>

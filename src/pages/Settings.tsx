@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Pills, Toggle, Volume } from "../components/ui";
 import { defaultClipFolder, isDesktop, listAudioApps, listMicDevices, pickFolder, saveSettings } from "../lib/backend";
-import { DEFAULT_SETTINGS, estimateClipMb, targetMbps, type AppAudio, type Settings as S } from "../lib/settings";
+import { DEFAULT_SETTINGS, estimateClipMb, REGIONS, targetMbps, type AppAudio, type Settings as S } from "../lib/settings";
 
 /** "Discord.exe" -> "Discord" */
 const appName = (exe: string) => exe.replace(/\.exe$/i, "");
@@ -116,6 +116,7 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
   }
 
   const mb = estimateClipMb(draft);
+  const riotIdOk = draft.riotId.trim() === "" || /^[^#]+#[^#\s]+$/.test(draft.riotId.trim());
   const secOpts = [3, 5, 10, 15].map((v) => ({ value: v, label: `${v} s` }));
 
   return (
@@ -138,6 +139,23 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
           </button>
         </div>
       </header>
+
+      <Section title="Your account" sub="Used to find your matches after each game, so CrossPOV can clip streamers you played against. Your PC never talks to Riot or the game.">
+        <Row label="Riot ID" help={riotIdOk ? "Your in-game name and tag." : "Type it as Name#TAG, e.g. Player#EUW."}>
+          <label className="row-wrap">
+            <span className="sr-only">Riot ID</span>
+            <input className="input" style={{ minWidth: 240 }} placeholder="Name#TAG" value={draft.riotId}
+              onChange={(e) => set("riotId", e.target.value)} aria-invalid={!riotIdOk} spellCheck={false} />
+          </label>
+        </Row>
+        <Row label="Region" help="Where you play. Match history is looked up there.">
+          <select className="input select" aria-label="Region" value={draft.region} onChange={(e) => set("region", e.target.value)}>
+            {REGIONS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </Row>
+      </Section>
 
       <Section title="Recording" sub="Applies to clips you save with the hotkey.">
         <Row label="Frame rate" help="Higher looks smoother but makes bigger files.">

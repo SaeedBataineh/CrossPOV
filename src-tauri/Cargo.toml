@@ -25,6 +25,7 @@ tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-notification = "2.8.1"
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+ureq = { version = "3.5.2", default-features = false, features = ["json", "native-tls", "gzip"] }
 
 # Small, fast release binary.
 [profile.release]

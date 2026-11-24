@@ -133,3 +133,73 @@ export async function listMicDevices(): Promise<string[]> {
 export function thumbSrc(path: string | null): string | undefined {
   return isDesktop && path ? convertFileSrc(path) : undefined;
 }
+
+// ---------- Matches (from the CrossPOV server) ----------
+
+export interface MatchPlayer {
+  puuid: string;
+  name: string;
+  tag: string;
+  team: string;
+  agent: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+}
+
+export interface MatchSummary {
+  id: string;
+  map: string;
+  mode: string;
+  region: string;
+  startedAt: string;
+  lengthMs: number;
+  teams: { id: string; won: boolean; roundsWon: number }[];
+  players: MatchPlayer[];
+  rounds: { index: number; winner: string | null; startMs: number | null }[];
+  kills: { round: number; atMs: number; inRoundMs: number; killer: string; victim: string; weapon: string | null }[];
+}
+
+export interface MatchesStatus {
+  lastCheckMs: number | null;
+  error: string | null;
+  configured: boolean;
+}
+
+export async function listMatches(): Promise<MatchSummary[]> {
+  return isDesktop ? tauriInvoke<MatchSummary[]>("list_matches") : [];
+}
+
+export async function matchesStatus(): Promise<MatchesStatus> {
+  return isDesktop ? tauriInvoke<MatchesStatus>("matches_status") : { lastCheckMs: null, error: null, configured: false };
+}
+
+export async function checkMatchesNow(): Promise<MatchSummary> {
+  return tauriInvoke<MatchSummary>("check_matches_now");
+}
+
+export const onMatchFound = (cb: (m: MatchSummary) => void) => listen("match-found", cb);
+export const onMatchesStatus = (cb: (s: MatchesStatus) => void) => listen("matches-status", cb);
+
+/**
+ * Website demo only: looks up a Riot ID's latest match through this site's
+ * own server (same origin), so reviewers can try it without the app.
+ */
+export async function lookupLatestMatch(riotId: string, region: string): Promise<MatchSummary> {
+  const i = riotId.lastIndexOf("#");
+  if (i < 1 || i === riotId.length - 1) throw new Error("Enter a Riot ID like Name#TAG.");
+  const q = new URLSearchParams({ region, name: riotId.slice(0, i).trim(), tag: riotId.slice(i + 1).trim() });
+  const res = await fetch(`/api/latest-match?${q}`);
+  const body = (await res.json().catch(() => ({}))) as { match?: MatchSummary; error?: string };
+  if (!res.ok || !body.match) throw new Error(body.error ?? `Server error (${res.status})`);
+  return body.match;
+}
+
+/** Finds the user's own entry in a match from their "Name#TAG". */
+export function findMe(m: MatchSummary, riotId: string): MatchPlayer | undefined {
+  const i = riotId.lastIndexOf("#");
+  if (i < 1) return undefined;
+  const name = riotId.slice(0, i).trim().toLowerCase();
+  const tag = riotId.slice(i + 1).trim().toLowerCase();
+  return m.players.find((p) => p.name.toLowerCase() === name && p.tag.toLowerCase() === tag);
+}

@@ -4,10 +4,10 @@ Save your best VALORANT plays with one hotkey. If a streamer was in your
 match, CrossPOV automatically finds the fight on their stream and clips it
 from their POV.
 
-> **Status: step 2 of the build plan.** Hotkey clips work: CrossPOV keeps a
-> replay buffer while VALORANT is open and saves the last N seconds when you
-> press the hotkey. Streamer matches and streamer clips shown in the app are
-> sample data until streamer detection (step 4) is added.
+> **Status: step 3 of the build plan.** Hotkey clips work, and after each
+> match the app fetches the full match (players, agents, every kill with its
+> exact time) from the CrossPOV server. Streamer detection and streamer clips
+> come in step 4.
 
 CrossPOV never reads game memory, injects code or talks to the game client.
 It only records your screen, like OBS.
@@ -46,6 +46,13 @@ and the installer adds it if it's missing.
   Delete, storage limit with oldest-first cleanup
 - Tray menu: "Save clip now"
 
+**Match data (step 3)**
+- Enter your Riot ID and region in Settings. While VALORANT is open (and for
+  10 minutes after), the app asks the CrossPOV server for your latest match
+  every 2 minutes and saves new ones. Your PC never contacts Riot.
+- Streamer matches shows each match's lobby: players, teams, agents, K/D/A.
+- The demo website (`/`) has a "look up a match" box so anyone can try it.
+
 **App**
 - Home, Clips, Streamer matches and Settings screens
 - All settings save to `%APPDATA%\app.crosspov.desktop\settings.json`:
@@ -78,6 +85,27 @@ cargo test --manifest-path src-tauri/Cargo.toml   # includes a real record-and-s
 
 FFmpeg ships as an LGPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds).
 
+### Server (Cloudflare Worker)
+
+One Worker serves the demo website and the API (`wrangler.jsonc`):
+
+| Route | What |
+|---|---|
+| `GET /api/health` | `{ ok, matchData }`: whether the match-data key is set |
+| `GET /api/latest-match?region=eu&name=…&tag=…` | Latest match for a Riot ID |
+| `GET /api/match/<region>/<id>` | A match by id |
+| everything else | The demo website (the app's UI) |
+
+Cloudflare rebuilds it on every push (`npm run build`, then `npx wrangler deploy`).
+The HenrikDev key is a Worker **secret** named `HENRIK_API_KEY`, set in the
+Cloudflare dashboard (Settings → Variables and Secrets). It is never in the repo.
+Responses are cached at the edge (latest match 60 s, finished matches 7 days).
+
+```bash
+npm run test:server        # server tests (fake upstream)
+npx wrangler dev           # run it locally; put HENRIK_API_KEY in a .dev.vars file (gitignored)
+```
+
 ### Layout
 
 | Path | What |
@@ -92,6 +120,9 @@ FFmpeg ships as an LGPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/
 | `src-tauri/src/audio.rs` | Audio mixer: game, apps and mic into one clocked stream |
 | `src-tauri/src/win_audio.rs` | Windows per-app audio capture, audio app list, beep |
 | `src-tauri/src/clips.rs` | Clip folder: list, delete, storage limit |
+| `src-tauri/src/matches.rs` | Asks the server for new matches, saves them locally |
+| `server/src/` | Cloudflare Worker: API routes, HenrikDev calls, caching |
+| `server/test/` | Server tests |
 | `scripts/get-ffmpeg.ps1` | Downloads the FFmpeg build that ships with the app |
 | `.github/workflows/build-windows.yml` | Builds the `.exe` and installer on Windows |
 
@@ -99,7 +130,7 @@ FFmpeg ships as an LGPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/
 
 1. ~~App skeleton, tray, settings, `.exe` build~~
 2. ~~Recorder (GPU encoding, replay buffer, per-app audio) and hotkey clips~~
-3. Server with match data
+3. ~~Server with match data~~
 4. Streamer detection and VOD sources
 5. Public demo website and video, then the Riot API application
 6. Sign in with Riot (RSO)

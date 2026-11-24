@@ -78,10 +78,20 @@ pub enum DownloadQuality {
     P720,
 }
 
+/// The CrossPOV server (Cloudflare Worker) the app gets match data from.
+pub const DEFAULT_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
+const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
+
 /// Missing fields (e.g. after an update adds a setting) fall back to defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    // Account
+    /// "Name#TAG". Used only to look up the user's own matches.
+    pub riot_id: String,
+    /// Match data region: na, eu, ap, kr, br or latam.
+    pub region: String,
+    pub server_url: String,
     // Recording
     pub fps: u32,
     pub resolution: Resolution,
@@ -128,6 +138,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            riot_id: String::new(),
+            region: "eu".into(),
+            server_url: DEFAULT_SERVER_URL.into(),
             fps: 60,
             resolution: Resolution::P1080,
             quality: Quality::High,
@@ -169,6 +182,15 @@ impl Default for Settings {
 impl Settings {
     /// Keeps numbers in the ranges the recorder supports, whatever the UI sent.
     pub fn sanitize(&mut self) {
+        self.riot_id = self.riot_id.trim().to_string();
+        self.region = self.region.trim().to_lowercase();
+        if !REGIONS.contains(&self.region.as_str()) {
+            self.region = Settings::default().region;
+        }
+        self.server_url = self.server_url.trim().trim_end_matches('/').to_string();
+        if !(self.server_url.starts_with("https://") || self.server_url.starts_with("http://localhost")) {
+            self.server_url = DEFAULT_SERVER_URL.into();
+        }
         self.fps = self.fps.clamp(24, 240);
         self.buffer_seconds = self.buffer_seconds.clamp(5, 300);
         self.seconds_before = self.seconds_before.min(60);
@@ -269,5 +291,17 @@ mod tests {
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn account_fields_are_cleaned() {
+        let mut s = Settings { region: " EU ".into(), server_url: "ftp://x/".into(), riot_id: " Me#EUW ".into(), ..Settings::default() };
+        s.sanitize();
+        assert_eq!(s.region, "eu");
+        assert_eq!(s.server_url, DEFAULT_SERVER_URL);
+        assert_eq!(s.riot_id, "Me#EUW");
+        let mut bad = Settings { region: "mars".into(), ..Settings::default() };
+        bad.sanitize();
+        assert_eq!(bad.region, "eu");
     }
 }

@@ -8,6 +8,7 @@
 mod audio;
 mod clips;
 mod ffmpeg;
+mod matches;
 mod procs;
 mod recorder;
 mod settings;
@@ -17,6 +18,7 @@ mod win_audio;
 use std::{path::PathBuf, str::FromStr, sync::Mutex, thread};
 
 use clips::ClipInfo;
+use matches::{MatchEvent, MatchStore, MatchSummary, MatchWatcher, MatchesStatus};
 use recorder::{Recorder, RecorderStatus};
 use settings::Settings;
 use tauri::{
@@ -37,6 +39,7 @@ struct AppState {
     settings: Mutex<Settings>,
     path: PathBuf,
     recorder: Recorder,
+    matches: MatchWatcher,
 }
 
 impl AppState {
@@ -174,6 +177,7 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Setti
         allow_clip_folder(&app, &PathBuf::from(&settings.clip_folder));
     }
     state.recorder.update_settings(settings.clone());
+    state.matches.update_settings(settings.clone());
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();
     Ok(settings)
 }
@@ -220,6 +224,23 @@ fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result
 fn reveal_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
     app.opener().reveal_item_in_dir(clip).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_matches(state: State<'_, AppState>) -> Vec<MatchSummary> {
+    state.matches.list()
+}
+
+#[tauri::command]
+fn matches_status(state: State<'_, AppState>) -> MatchesStatus {
+    state.matches.status()
+}
+
+/// Asks the server for the latest match right away (the "Check now" button).
+#[tauri::command]
+async fn check_matches_now(state: State<'_, AppState>) -> Result<MatchSummary, String> {
+    let watcher = state.matches.clone();
+    tauri::async_runtime::spawn_blocking(move || watcher.check_now()).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -303,8 +324,20 @@ pub fn run() {
                     let _ = emitter.emit("recorder-status", status);
                 }),
             );
+            let match_events = handle.clone();
+            let watcher = MatchWatcher::new(
+                MatchStore::new(handle.path().app_data_dir()?.join("matches")),
+                settings.clone(),
+                Box::new(move |event| {
+                    let _ = match event {
+                        MatchEvent::Found(m) => match_events.emit("match-found", m),
+                        MatchEvent::Status(s) => match_events.emit("matches-status", s),
+                    };
+                }),
+            );
             let hotkey = settings.hotkey.clone();
-            app.manage(AppState { settings: Mutex::new(settings), path, recorder: recorder.clone() });
+            app.manage(AppState { settings: Mutex::new(settings), path, recorder: recorder.clone(), matches: watcher.clone() });
+            watcher.spawn();
             apply_hotkey(&handle, &hotkey);
             recorder.spawn();
 
@@ -326,7 +359,10 @@ pub fn run() {
             open_clip,
             reveal_clip,
             list_audio_apps,
-            list_mic_devices
+            list_mic_devices,
+            list_matches,
+            matches_status,
+            check_matches_now
         ])
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");
