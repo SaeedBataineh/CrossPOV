@@ -387,7 +387,7 @@ impl Recorder {
         }
         let _ = run_ffmpeg(&ffmpeg_path, &ffmpeg::thumbnail_args(&out, &thumb));
         let duration = (take.len() as u32 * SEGMENT_SECONDS) as f64;
-        clips::write_meta(clip_root, &out, &ClipMeta { duration_sec: Some(duration) });
+        clips::write_meta(clip_root, &out, &ClipMeta { duration_sec: Some(duration), ..ClipMeta::default() });
         if settings.prune_oldest {
             clips::prune(clip_root, settings.storage_limit_gb);
         }
@@ -401,6 +401,10 @@ impl Recorder {
             created_ms: now_ms(),
             duration_sec: Some(duration),
             thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+            streamer: None,
+            round: None,
+            moment: None,
+            map: None,
         })
     }
 }

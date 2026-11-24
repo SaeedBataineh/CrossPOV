@@ -103,10 +103,15 @@ export interface CardClip {
 }
 
 export function cardFromClip(c: ClipInfo): CardClip {
+  const theirs = c.kind === "theirs";
   return {
     key: c.path,
-    title: c.name.replace(/^Clip_/, "").replace(/_/g, " "),
-    meta: `${c.kind === "mine" ? "Hotkey clip" : "Streamer clip"} · ${timeAgo(c.createdMs)}`,
+    title: theirs && c.streamer
+      ? `vs ${c.streamer}${c.round ? ` · round ${c.round}` : ""}`
+      : c.name.replace(/^Clip_/, "").replace(/_/g, " "),
+    meta: theirs
+      ? [c.moment ?? "Streamer clip", c.map, timeAgo(c.createdMs)].filter(Boolean).join(" · ")
+      : `Hotkey clip · ${timeAgo(c.createdMs)}`,
     length: formatDuration(c.durationSec),
     kind: c.kind,
     thumb: thumbSrc(c.thumb),

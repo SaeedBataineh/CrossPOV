@@ -59,6 +59,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/get-ffmpeg.ps1
 
+      - name: Download yt-dlp
+        shell: pwsh
+        run: ./scripts/get-ytdlp.ps1
+
       - name: Run Rust tests
         shell: pwsh
         run: |
@@ -72,10 +76,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          # Portable version: CrossPOV.exe + ffmpeg.exe side by side, zipped.
+          # Portable version: CrossPOV.exe + ffmpeg.exe + yt-dlp.exe side by side, zipped.
           New-Item -ItemType Directory -Force portable | Out-Null
           Copy-Item src-tauri/target/release/crosspov.exe portable/CrossPOV.exe
           Copy-Item src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe portable/ffmpeg.exe
+          Copy-Item src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe portable/yt-dlp.exe
           Compress-Archive -Path portable/* -DestinationPath out/CrossPOV-portable.zip
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe out/
           Get-ChildItem out | Format-Table Name, Length

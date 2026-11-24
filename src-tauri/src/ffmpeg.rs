@@ -41,14 +41,13 @@ pub fn locate() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    let ok = Command::new(FFMPEG_EXE)
-        .arg("-version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .no_window()
-        .status()
-        .is_ok_and(|s| s.success());
-    ok.then(|| PathBuf::from(FFMPEG_EXE))
+    which(FFMPEG_EXE)
+}
+
+/// Full path of a program on PATH (other tools need a real path, not a bare name).
+pub fn which(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).map(|dir| dir.join(name)).find(|p| p.is_file())
 }
 
 /// Stops a console window flashing up for every FFmpeg run on Windows.

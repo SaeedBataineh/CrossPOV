@@ -117,3 +117,29 @@ test("finds players who were streaming during the match", async () => {
 test("explains missing credentials", async () => {
   await assert.rejects(findStreamers({}, MATCH), /missing its Twitch credentials/);
 });
+
+test("checks a channel the user names for a player", async () => {
+  const { checkChannel } = await import("../src/twitch.ts");
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const reply = (data: unknown) => Response.json({ data });
+    if (url.host === "id.test") return Response.json({ access_token: "tok", expires_in: 3600 });
+    if (url.pathname === "/helix/users") return reply(url.searchParams.get("login") === "hiddenname" ? [{ id: "7", login: "hiddenname", display_name: "HiddenName" }] : []);
+    if (url.pathname === "/helix/streams") return reply([]);
+    if (url.pathname === "/helix/videos")
+      return reply([{ id: "v7", url: "https://www.twitch.tv/videos/v7", created_at: new Date(startMs - 600_000).toISOString(), duration: "3h", type: "archive", stream_id: "s7" }]);
+    throw new Error("unexpected " + url);
+  }) as typeof fetch;
+  try {
+    const found = await checkChannel(ENV, MATCH, "p2", "HiddenName");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].puuid, "p2", "linked to the player the user picked");
+    assert.equal(found[0].vod?.offsetSec, 600);
+    assert.equal(found[0].vod?.live, false);
+    await assert.rejects(checkChannel(ENV, MATCH, "p2", "nobodyhere"), /no Twitch channel/);
+    assert.deepEqual(await checkChannel(ENV, MATCH, "not-in-match", "hiddenname"), []);
+  } finally {
+    globalThis.fetch = real;
+  }
+});

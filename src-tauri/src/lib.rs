@@ -12,6 +12,7 @@ mod matches;
 mod procs;
 mod recorder;
 mod settings;
+mod streamers;
 #[cfg(windows)]
 mod win_audio;
 
@@ -21,6 +22,7 @@ use clips::ClipInfo;
 use matches::{MatchEvent, MatchStore, MatchSummary, MatchWatcher, MatchesStatus};
 use recorder::{Recorder, RecorderStatus};
 use settings::Settings;
+use streamers::{MatchStreamers, StreamerStore, StreamerWorker};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -40,6 +42,7 @@ struct AppState {
     path: PathBuf,
     recorder: Recorder,
     matches: MatchWatcher,
+    streamers: StreamerWorker,
 }
 
 impl AppState {
@@ -178,6 +181,7 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Setti
     }
     state.recorder.update_settings(settings.clone());
     state.matches.update_settings(settings.clone());
+    state.streamers.update(settings.clone(), clip_folder(&app, &settings));
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();
     Ok(settings)
 }
@@ -241,6 +245,25 @@ fn matches_status(state: State<'_, AppState>) -> MatchesStatus {
 async fn check_matches_now(state: State<'_, AppState>) -> Result<MatchSummary, String> {
     let watcher = state.matches.clone();
     tauri::async_runtime::spawn_blocking(move || watcher.check_now()).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn streamer_states(state: State<'_, AppState>) -> Vec<MatchStreamers> {
+    state.streamers.all()
+}
+
+/// Re-checks one match for streamers and downloads any clips that are ready.
+#[tauri::command]
+async fn check_streamers_now(state: State<'_, AppState>, match_id: String) -> Result<MatchStreamers, String> {
+    let worker = state.streamers.clone();
+    tauri::async_runtime::spawn_blocking(move || worker.check_now(&match_id)).await.map_err(|e| e.to_string())?
+}
+
+/// "Played against a streamer it missed?": the user names a player's channel.
+#[tauri::command]
+async fn add_streamer_channel(state: State<'_, AppState>, match_id: String, puuid: String, login: String) -> Result<MatchStreamers, String> {
+    let worker = state.streamers.clone();
+    tauri::async_runtime::spawn_blocking(move || worker.add_manual(&match_id, &puuid, &login)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -335,9 +358,40 @@ pub fn run() {
                     };
                 }),
             );
+            let data_dir = handle.path().app_data_dir()?.join("matches");
+            let streamer_events = handle.clone();
+            let streamer_worker = StreamerWorker::new(
+                MatchStore::new(data_dir.clone()),
+                StreamerStore::new(data_dir),
+                settings.clone(),
+                clip_folder(&handle, &settings),
+                Box::new(move |state, clip| {
+                    let _ = streamer_events.emit("streamers-updated", state);
+                    if let Some(clip) = clip {
+                        let _ = streamer_events.emit("clip-saved", clip);
+                        let notify = streamer_events.state::<AppState>().get().notifications;
+                        if notify {
+                            let who = clip.streamer.clone().unwrap_or_default();
+                            let _ = streamer_events
+                                .notification()
+                                .builder()
+                                .title("Streamer clip saved")
+                                .body(format!("Your fight with {who}, from their POV"))
+                                .show();
+                        }
+                    }
+                }),
+            );
             let hotkey = settings.hotkey.clone();
-            app.manage(AppState { settings: Mutex::new(settings), path, recorder: recorder.clone(), matches: watcher.clone() });
+            app.manage(AppState {
+                settings: Mutex::new(settings),
+                path,
+                recorder: recorder.clone(),
+                matches: watcher.clone(),
+                streamers: streamer_worker.clone(),
+            });
             watcher.spawn();
+            streamer_worker.spawn();
             apply_hotkey(&handle, &hotkey);
             recorder.spawn();
 
@@ -362,7 +416,10 @@ pub fn run() {
             list_mic_devices,
             list_matches,
             matches_status,
-            check_matches_now
+            check_matches_now,
+            streamer_states,
+            check_streamers_now,
+            add_streamer_channel
         ])
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");

@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { SearchIcon } from "../components/Icons";
-import { cardFromClip, cardFromSample, ClipCard, type CardClip } from "../components/ui";
+import { cardFromClip, ClipCard, type CardClip } from "../components/ui";
 import { deleteClip, isDesktop, openClip, openClipFolder, revealClip } from "../lib/backend";
-import { SAMPLE_CLIPS } from "../lib/sample";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
 
 type Tab = "all" | "mine" | "theirs";
@@ -18,12 +17,7 @@ export default function Clips({ recorder }: { recorder: ReturnType<typeof useRec
   const [query, setQuery] = useState("");
 
   const sizeByKey = useMemo(() => new Map(clips.map((c) => [c.path, c.sizeBytes])), [clips]);
-  const cards: CardClip[] = useMemo(() => {
-    const real = clips.map(cardFromClip);
-    // Streamer clips come in step 4; until then show labelled samples.
-    const samples = SAMPLE_CLIPS.filter((c) => c.kind === "theirs").map(cardFromSample);
-    return [...real, ...samples];
-  }, [clips]);
+  const cards: CardClip[] = useMemo(() => clips.map(cardFromClip), [clips]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -89,7 +83,9 @@ export default function Clips({ recorder }: { recorder: ReturnType<typeof useRec
           ))}
         </div>
       ) : (
-        <p className="muted">{clips.length || tab !== "mine" ? "No clips match." : "No clips yet. Press your hotkey in game to save one."}</p>
+        <p className="muted">
+          {query ? "No clips match." : tab === "theirs" ? "No streamer clips yet. They appear here after you play against someone who was streaming." : "No clips yet. Press your hotkey in game to save one."}
+        </p>
       )}
     </>
   );

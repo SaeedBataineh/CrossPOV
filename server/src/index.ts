@@ -10,7 +10,7 @@
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
-import { findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
+import { checkChannel, findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
 
 export interface Env extends TwitchEnv {
   HENRIK_API_KEY?: string;
@@ -121,6 +121,20 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
   return json(body, 200, STREAMERS_TTL);
 }
 
+async function channel(region: string, id: string, url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  const login = (url.searchParams.get("login") ?? "").trim().toLowerCase();
+  const puuid = url.searchParams.get("puuid") ?? "";
+  if (!/^[a-z0-9_]{3,25}$/.test(login)) throw new HttpError(400, "That isn't a Twitch channel name.");
+  if (!/^[\w-]{1,100}$/.test(puuid)) throw new HttpError(400, "Bad player id.");
+  const match = await loadMatch(region, id, env, ctx);
+  try {
+    return json({ matchId: match.id, checkedAt: new Date().toISOString(), streamers: await checkChannel(env, match, puuid, login) });
+  } catch (err) {
+    if (err instanceof TwitchError) throw new HttpError(err.message.startsWith("There's no") ? 404 : 503, err.message);
+    throw err;
+  }
+}
+
 export async function handleApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
@@ -140,6 +154,8 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
       });
     }
     if (url.pathname === "/api/latest-match") return await latestMatch(url, env, ctx);
+    const c = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/channel$/);
+    if (c) return await channel(c[1], c[2], url, env, ctx);
     const s = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/streamers$/);
     if (s) return await streamers(s[1], s[2], url, env, ctx);
     const m = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)$/);

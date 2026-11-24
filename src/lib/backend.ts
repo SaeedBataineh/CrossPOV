@@ -71,6 +71,11 @@ export interface ClipInfo {
   createdMs: number;
   durationSec: number | null;
   thumb: string | null;
+  /** Streamer clips only. */
+  streamer: string | null;
+  round: number | null;
+  moment: string | null;
+  map: string | null;
 }
 
 export interface AudioApp {
@@ -203,3 +208,41 @@ export function findMe(m: MatchSummary, riotId: string): MatchPlayer | undefined
   const tag = riotId.slice(i + 1).trim().toLowerCase();
   return m.players.find((p) => p.name.toLowerCase() === name && p.tag.toLowerCase() === tag);
 }
+
+// ---------- Streamers (step 4) ----------
+
+export type StreamerStatus = "working" | "clipped" | "noFights" | "noVod" | "subOnly" | "failed";
+
+export interface StreamerPlayer {
+  puuid: string;
+  name: string;
+  channel: { id: string; login: string; displayName: string };
+  vod: { id: string; url: string; startedAt: string; durationSec: number; offsetSec: number; live: boolean } | null;
+  status: StreamerStatus;
+  clips: number;
+  fights: number;
+  message: string | null;
+  manual: boolean;
+}
+
+export interface MatchStreamers {
+  matchId: string;
+  checkedMs: number | null;
+  error: string | null;
+  players: StreamerPlayer[];
+  finished: boolean;
+}
+
+export async function streamerStates(): Promise<MatchStreamers[]> {
+  return isDesktop ? tauriInvoke<MatchStreamers[]>("streamer_states") : [];
+}
+
+export async function checkStreamersNow(matchId: string): Promise<MatchStreamers> {
+  return tauriInvoke<MatchStreamers>("check_streamers_now", { matchId });
+}
+
+export async function addStreamerChannel(matchId: string, puuid: string, login: string): Promise<MatchStreamers> {
+  return tauriInvoke<MatchStreamers>("add_streamer_channel", { matchId, puuid, login });
+}
+
+export const onStreamersUpdated = (cb: (s: MatchStreamers) => void) => listen("streamers-updated", cb);

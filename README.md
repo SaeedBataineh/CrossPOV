@@ -4,10 +4,9 @@ Save your best VALORANT plays with one hotkey. If a streamer was in your
 match, CrossPOV automatically finds the fight on their stream and clips it
 from their POV.
 
-> **Status: step 3 of the build plan.** Hotkey clips work, and after each
-> match the app fetches the full match (players, agents, every kill with its
-> exact time) from the CrossPOV server. Streamer detection and streamer clips
-> come in step 4.
+> **Status: step 4 (first part).** Hotkey clips, match data, and automatic
+> streamer clips from Twitch VODs work. Still to come in step 4: the shared
+> streamer list, VOD archive sites, YouTube/Kick, and stream-delay correction.
 
 CrossPOV never reads game memory, injects code or talks to the game client.
 It only records your screen, like OBS.
@@ -53,6 +52,16 @@ and the installer adds it if it's missing.
 - Streamer matches shows each match's lobby: players, teams, agents, K/D/A.
 - The demo website (`/`) has a "look up a match" box so anyone can try it.
 
+**Streamer clips (step 4)**
+- After each match the server checks every other player: does a Twitch
+  channel with that name exist, and was it broadcasting when the match
+  started? Only those count, which filters out same-name accounts.
+- For each streamer, the app finds your fights with them from the kill
+  timestamps, converts them to VOD times, and downloads only those seconds
+  (yt-dlp). Still-live streams are clipped as soon as the VOD catches up.
+- Sub-only VODs are skipped. "Played against a streamer it missed?" lets you
+  link a player to a channel by hand.
+
 **App**
 - Home, Clips, Streamer matches and Settings screens
 - All settings save to `%APPDATA%\app.crosspov.desktop\settings.json`:
@@ -94,11 +103,14 @@ One Worker serves the demo website and the API (`wrangler.jsonc`):
 | `GET /api/health` | `{ ok, matchData }`: whether the match-data key is set |
 | `GET /api/latest-match?region=eu&name=…&tag=…` | Latest match for a Riot ID |
 | `GET /api/match/<region>/<id>` | A match by id |
+| `GET /api/match/<region>/<id>/streamers?me=<puuid>` | Players who were live on Twitch during the match, with VOD and offset |
+| `GET /api/match/<region>/<id>/channel?login=…&puuid=…` | Check a channel the user names for a player |
 | everything else | The demo website (the app's UI) |
 
 Cloudflare rebuilds it on every push (`npm run build`, then `npx wrangler deploy`).
-The HenrikDev key is a Worker **secret** named `HENRIK_API_KEY`, set in the
-Cloudflare dashboard (Settings → Variables and Secrets). It is never in the repo.
+Secrets, set in the Cloudflare dashboard (Settings → Variables and Secrets,
+type **Secret**), never in the repo: `HENRIK_API_KEY`, `TWITCH_CLIENT_ID`,
+`TWITCH_CLIENT_SECRET`.
 Responses are cached at the edge (latest match 60 s, finished matches 7 days).
 
 ```bash
@@ -123,6 +135,8 @@ npx wrangler dev           # run it locally; put HENRIK_API_KEY in a .dev.vars f
 | `src-tauri/src/matches.rs` | Asks the server for new matches, saves them locally |
 | `server/src/` | Cloudflare Worker: API routes, HenrikDev calls, caching |
 | `server/test/` | Server tests |
+| `src-tauri/src/streamers.rs` | Streamer clips: fights → VOD times → yt-dlp section downloads |
+| `scripts/get-ytdlp.ps1` | Downloads the yt-dlp build that ships with the app |
 | `scripts/get-ffmpeg.ps1` | Downloads the FFmpeg build that ships with the app |
 | `.github/workflows/build-windows.yml` | Builds the `.exe` and installer on Windows |
 

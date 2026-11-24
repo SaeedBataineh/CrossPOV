@@ -29,6 +29,15 @@ pub enum ClipKind {
 #[serde(rename_all = "camelCase")]
 pub struct ClipMeta {
     pub duration_sec: Option<f64>,
+    /// Streamer clips only: whose POV, which round, what happened, which map.
+    #[serde(default)]
+    pub streamer: Option<String>,
+    #[serde(default)]
+    pub round: Option<u32>,
+    #[serde(default)]
+    pub moment: Option<String>,
+    #[serde(default)]
+    pub map: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,6 +51,10 @@ pub struct ClipInfo {
     pub created_ms: u64,
     pub duration_sec: Option<f64>,
     pub thumb: Option<String>,
+    pub streamer: Option<String>,
+    pub round: Option<u32>,
+    pub moment: Option<String>,
+    pub map: Option<String>,
 }
 
 fn is_video(p: &Path) -> bool {
@@ -99,6 +112,10 @@ pub fn list(root: &Path) -> Vec<ClipInfo> {
                 created_ms: modified_ms(&meta),
                 duration_sec: details.duration_sec,
                 thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+                streamer: details.streamer,
+                round: details.round,
+                moment: details.moment,
+                map: details.map,
             });
         }
     }

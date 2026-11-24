@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   checkMatchesNow,
+  checkStreamersNow,
+  onStreamersUpdated,
+  streamerStates,
+  type MatchStreamers,
   isDesktop,
   listMatches,
   matchesStatus,
@@ -15,6 +19,9 @@ export function useMatches() {
   const [matches, setMatches] = useState<MatchSummary[]>([]);
   const [status, setStatus] = useState<MatchesStatus | null>(null);
   const [checking, setChecking] = useState(false);
+  const [streamers, setStreamers] = useState<Record<string, MatchStreamers>>({});
+
+  const putStreamers = useCallback((s: MatchStreamers) => setStreamers((prev) => ({ ...prev, [s.matchId]: s })), []);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -24,11 +31,21 @@ export function useMatches() {
     matchesStatus().then((s) => alive && setStatus(s), () => {});
     onMatchFound((m) => setMatches((prev) => [m, ...prev.filter((p) => p.id !== m.id)])).then((u) => unlisten.push(u));
     onMatchesStatus((s) => setStatus(s)).then((u) => unlisten.push(u));
+    streamerStates().then((all) => alive && setStreamers(Object.fromEntries(all.map((s) => [s.matchId, s]))), () => {});
+    onStreamersUpdated(putStreamers).then((u) => unlisten.push(u));
     return () => {
       alive = false;
       unlisten.forEach((u) => u());
     };
-  }, []);
+  }, [putStreamers]);
+
+  /** Re-checks one match for streamers now. */
+  const checkStreamers = useCallback(
+    async (matchId: string) => {
+      putStreamers(await checkStreamersNow(matchId));
+    },
+    [putStreamers],
+  );
 
   /** Asks the server now; errors land in `status.error`. */
   const checkNow = useCallback(async () => {
@@ -43,7 +60,7 @@ export function useMatches() {
     }
   }, []);
 
-  return { matches, status, checking, checkNow };
+  return { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers };
 }
 
 export function matchTimeAgo(iso: string, now = Date.now()): string {

@@ -156,6 +156,11 @@ export async function findStreamers(env: TwitchEnv, match: MatchSummary, exclude
   }
   if (chosen.size === 0) return [];
 
+  return checkChannels(env, match, chosen, matchStart);
+}
+
+/** Keeps the chosen channels whose broadcast covered the match start. */
+async function checkChannels(env: TwitchEnv, match: MatchSummary, chosen: Map<string, HUser>, matchStart: number): Promise<StreamerResult[]> {
   // 2. Who is live right now (one call).
   const live = await helix<HStream>(env, "streams", [...chosen.values()].map((u) => ["user_id", u.id]));
 
@@ -189,4 +194,18 @@ export async function findStreamers(env: TwitchEnv, match: MatchSummary, exclude
     });
   }
   return results;
+}
+
+
+/**
+ * The user says `login` is the channel of player `puuid` in this match
+ * ("Played against a streamer it missed?"). Same timing check as above.
+ */
+export async function checkChannel(env: TwitchEnv, match: MatchSummary, puuid: string, login: string): Promise<StreamerResult[]> {
+  if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET) throw new TwitchError("Server is missing its Twitch credentials.");
+  if (!match.players.some((p) => p.puuid === puuid)) return [];
+  const matchStart = Date.parse(match.startedAt);
+  const users = await helix<HUser>(env, "users", [["login", login.toLowerCase()]]);
+  if (users.length === 0) throw new TwitchError(`There's no Twitch channel called ${login}.`);
+  return checkChannels(env, match, new Map([[puuid, users[0]]]), matchStart);
 }
