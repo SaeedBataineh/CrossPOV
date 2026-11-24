@@ -9,3 +9,4 @@ src-tauri/binaries/
 .wrangler/
 .dev.vars
 *.dev.vars
+__pycache__/
