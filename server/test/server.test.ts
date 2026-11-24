@@ -260,3 +260,9 @@ test("download links point at the newest release", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("version endpoint reports the newest release", async () => {
+  const r = await call("/api/version", () => Response.json({ version: "0.4.2", pub_date: "2026-11-24T20:41:51Z", platforms: {} }), { LATEST_JSON_URL: "https://feed.test/latest.json" });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { version: "0.4.2", releasedAt: "2026-11-24T20:41:51.000Z" });
+});

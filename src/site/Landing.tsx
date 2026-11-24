@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Logo } from "../components/Icons";
 import "./site.css";
 
@@ -31,7 +32,25 @@ function WindowsIcon() {
   );
 }
 
+/** The newest release, e.g. { version: "0.1.2", date: "24 Nov 2026" }, from our own server. */
+function useLatestVersion() {
+  const [latest, setLatest] = useState<{ version: string; date: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/version")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { version?: string; releasedAt?: string } | null) => {
+        if (!b?.version) return;
+        const d = b.releasedAt ? new Date(b.releasedAt) : null;
+        const date = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+        setLatest({ version: b.version, date });
+      })
+      .catch(() => {});
+  }, []);
+  return latest;
+}
+
 export default function Landing() {
+  const latest = useLatestVersion();
   return (
     <div className="site">
       <header className="site-nav">
@@ -62,7 +81,9 @@ export default function Landing() {
               <a href="/download" className="site-btn primary"><WindowsIcon /> Download for Windows</a>
               <a href="/demo" className="site-btn">Try the demo</a>
             </div>
-            <p className="site-fine">Free · Windows 10 and 11 · one file, no setup · updates itself</p>
+            <p className="site-fine">
+              {latest ? `Version ${latest.version} · ` : ""}Free · Windows 10 and 11 · one file, no setup · updates itself
+            </p>
           </div>
 
           <figure className="duel" aria-label="Illustration: the same fight from your POV and the streamer's POV, synced">
@@ -157,7 +178,9 @@ export default function Landing() {
             <a className="dl-card main" href="/download">
               <span className="dl-name"><WindowsIcon /> CrossPOV.exe</span>
               <span className="dl-desc">One file. Double-click to run, nothing to install. Updates itself.</span>
-              <span className="dl-meta mono">about 38 MB</span>
+              <span className="dl-meta mono">
+                {latest ? `Version ${latest.version}${latest.date ? ` · released ${latest.date}` : ""} · ` : ""}about 38 MB
+              </span>
             </a>
           </div>
           <div className="dl-note">

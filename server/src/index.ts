@@ -1,6 +1,7 @@
 // CrossPOV server (Cloudflare Worker).
 //
 // GET /api/health
+// GET /api/version         newest app release, for the website
 // GET /api/latest-match?region=eu&name=<name>&tag=<tag>
 // GET /api/match/<region>/<matchId>
 // GET /api/match/<region>/<matchId>/streamers?me=<puuid>
@@ -247,6 +248,12 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
         matchData: Boolean(env.HENRIK_API_KEY),
         twitch: Boolean(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET),
       });
+    }
+    if (url.pathname === "/api/version") {
+      // For the website's download button: the newest release, from the update feed.
+      const latest = await latestRelease(env, ctx);
+      if (!latest) return json({ error: "Release info isn't available right now." }, 503);
+      return json({ version: latest.version, releasedAt: new Date(latest.publishedMs).toISOString() }, 200, 300);
     }
     if (url.pathname === "/api/latest-match") return await latestMatch(url, env, ctx);
     const c = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/channel$/);
