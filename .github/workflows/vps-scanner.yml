@@ -69,8 +69,21 @@ jobs:
           # Credentials go over SSH stdin into a file only the crosspov user can read.
           printf 'TWITCH_CLIENT_ID=%s\nTWITCH_CLIENT_SECRET=%s\n' "$TID" "$TSECRET" | ssh vps 'umask 077 && cat > /opt/crosspov/.env'
 
-      - name: Run the scoreboard sweep on the VPS
+      - name: Check the server can reach Twitch
         run: |
+          ssh vps 'for h in id.twitch.tv api.twitch.tv static-cdn.jtvnw.net; do
+            if getent hosts "$h" > /dev/null; then echo "DNS ok: $h"; else echo "DNS FAILED: $h"; fail=1; fi
+          done
+          echo "Resolver: $(grep -m1 ^nameserver /etc/resolv.conf)"
+          [ -z "$fail" ]' || {
+            echo "::error::The server can't look up Twitch's address (DNS). Log in as root and run: systemctl restart systemd-resolved"
+            exit 1
+          }
+
+      - name: Run the scoreboard sweep on the VPS
+        shell: bash
+        run: |
+          set -o pipefail
           LIMIT="${{ github.event.inputs.limit || '1500' }}"
           [ "$LIMIT" = "0" ] && LIMIT=100000
           # Stop any sweep left over from a previous run first.
