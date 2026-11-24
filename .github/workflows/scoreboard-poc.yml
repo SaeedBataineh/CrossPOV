@@ -1,0 +1,54 @@
+name: Scoreboard proof of concept
+
+# One-off test: how many live VALORANT streams have a readable scoreboard?
+# Runs only when started by hand (Actions tab -> this workflow -> Run
+# workflow) or when the test code changes. No schedule: this is a test,
+# not a service.
+#
+# Needs repository secrets TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET
+# (Settings -> Secrets and variables -> Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "How many streams to read (most-watched first)"
+        default: "600"
+  push:
+    paths:
+      - "tools/scoreboard_poc/**"
+      - ".github/workflows/scoreboard-poc.yml"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+        run: |
+          if [ -z "$TWITCH_CLIENT_ID" ]; then
+            echo "::error::Add TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET under Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+
+      - name: Install OCR
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr
+          pip install -q pillow pytesseract requests
+
+      - name: Sweep live VALORANT streams
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        run: python tools/scoreboard_poc/poc.py --limit "${{ github.event.inputs.limit || '600' }}" --out poc-out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoreboard-poc
+          path: poc-out/
+          if-no-files-found: ignore
