@@ -89,7 +89,7 @@ function Lobby({
                   <td>
                     {me?.puuid === p.puuid ? null : ws ? (
                       <span className="stack-2">
-                        <a href={`https://www.twitch.tv/${ws.channel.login}`} target="_blank" rel="noreferrer">twitch.tv/{ws.channel.login}</a>
+                        <a className="chip twitch" href={`https://www.twitch.tv/${ws.channel.login}`} target="_blank" rel="noreferrer"><span className="pf-dot twitch" />{ws.channel.displayName}</a>
                         <span className={`status-text ${ws.vod ? "clipped" : "novod"}`}>
                           {ws.vod
                             ? me
@@ -102,7 +102,7 @@ function Lobby({
                       <span className="muted">Checking Twitch…</span>
                     ) : st && label ? (
                       <span className="stack-2">
-                        <a href={`https://www.twitch.tv/${st.channel.login}`} target="_blank" rel="noreferrer">twitch.tv/{st.channel.login}</a>
+                        <a className="chip twitch" href={`https://www.twitch.tv/${st.channel.login}`} target="_blank" rel="noreferrer"><span className="pf-dot twitch" />{st.channel.displayName}</a>
                         <span className={`status-text ${label.tone}`} title={st.message ?? undefined}>{label.text}</span>
                       </span>
                     ) : (

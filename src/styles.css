@@ -236,3 +236,82 @@ td strong { color: var(--text); }
   .content { height: auto; padding: 20px 16px; }
   .split-narrow { max-width: none; }
 }
+
+/* ===== Refresh: platform colours, status widgets, richer cards ===== */
+:root {
+  --twitch: #9146ff;
+  --twitch-text: #b48bff;
+  --youtube: #ff3b3b;
+  --kick: #53fc18;
+  --raised-2: #1a1a1a;
+}
+
+/* Brand: the three platform colours as a thin rule under the wordmark. */
+.brand { position: relative; padding-bottom: 20px; margin-bottom: 8px; }
+.brand::after {
+  content: ""; position: absolute; left: 10px; right: 10px; bottom: 6px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--kick) 0 33.3%, var(--youtube) 33.3% 66.6%, var(--twitch) 66.6% 100%);
+  opacity: 0.85;
+}
+
+/* Sidebar active item gets a bar on the left. */
+.nav-item { position: relative; }
+.nav-item[aria-current="page"]::before {
+  content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--text);
+}
+
+/* Sidebar status box: visible on every page. */
+.side-status {
+  margin-top: auto; padding: 12px; border: 1px solid var(--line); border-radius: 6px;
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted);
+}
+.side-status .rec, .side-status .idle { font: 500 12px var(--mono); }
+.side-status .idle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.side-status .idle::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #5a5a5a; }
+.side-status kbd { font: 500 11px var(--mono); padding: 0 5px; border: 1px solid var(--line-2); border-radius: 3px; color: var(--text-2); }
+.sidebar-foot { margin-top: 10px; }
+
+/* Platform chips and dots. */
+.pf-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pf-dot.twitch { background: var(--twitch); }
+.pf-dot.youtube { background: var(--youtube); }
+.pf-dot.kick { background: var(--kick); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--line-2); color: var(--text-2); }
+.chip.twitch { border-color: #5b2fb0; color: var(--twitch-text); }
+
+/* Home: the live status panel. */
+.hero-status {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 8px; padding: 22px 24px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 24px; align-items: center;
+  background: radial-gradient(120% 140% at 0% 0%, #1a1212 0%, transparent 55%), var(--bg);
+}
+.hero-status.idle { background: var(--bg); }
+.hero-status h2 { font-size: 22px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+.hero-status .sub { color: var(--muted); font: 13px var(--mono); }
+.hero-status .meter { grid-column: 1 / -1; }
+.meter { display: flex; flex-direction: column; gap: 8px; }
+.meter-bar { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 14px; }
+.meter-bar span { border-radius: 2px; background: #1f1f1f; }
+.meter-bar.live span { background: var(--rec); opacity: 0.85; animation: meter 2.4s ease-in-out infinite; }
+.meter-bar.live span:nth-child(odd) { animation-delay: 0.2s; }
+.meter-legend { display: flex; justify-content: space-between; color: var(--muted); font: 11px var(--mono); }
+@keyframes meter { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.95; } }
+@media (prefers-reduced-motion: reduce) { .meter-bar.live span { animation: none; } }
+
+/* Clip cards: lift on hover, play button appears. */
+.clip { transition: border-color 0.15s, transform 0.15s; }
+.clip:hover { border-color: var(--line-2); transform: translateY(-2px); }
+.thumb .play {
+  position: absolute; inset: 0; margin: auto; width: 46px; height: 46px; border-radius: 50%;
+  background: #000a; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s; z-index: 1;
+}
+.clip:hover .thumb .play { opacity: 1; }
+.badge.theirs { background: var(--twitch); color: #fff; }
+.clip.theirs { border-color: #2a1d45; }
+.clip.theirs:hover { border-color: #4a2f80; }
+
+/* Section headings with a small count. */
+.count { color: var(--muted); font: 12px var(--mono); margin-left: 8px; }
+
+@media (prefers-reduced-motion: reduce) { .clip, .clip:hover { transition: none; transform: none; } }

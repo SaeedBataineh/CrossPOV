@@ -25,7 +25,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar page={page} onNavigate={setPage} />
+      <Sidebar page={page} onNavigate={setPage} status={recorder.status} hotkey={settings.hotkey} bufferSeconds={settings.bufferSeconds} />
       <main className="content">
         {loadError && (
           <p className="error-banner" role="alert">Could not load settings, using defaults: {loadError}</p>

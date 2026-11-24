@@ -84,16 +84,30 @@ export default function Home({
 
   return (
     <>
-      <header className="page-head">
+      <h1>Home</h1>
+
+      <section className={recording ? "hero-status" : "hero-status idle"} aria-label="Recorder">
         <div className="stack-6">
-          <h1>Home</h1>
+          <h2>{recording ? "Recording" : status?.state === "error" || status?.state === "noFfmpeg" ? "Recorder stopped" : "Ready"}</h2>
           <StatusLine status={status} bufferSeconds={settings.bufferSeconds} />
         </div>
         <button type="button" className="btn primary big" disabled={!recording || saving} onClick={() => void save()}
           title={recording ? undefined : "Clips can be saved while VALORANT is open"}>
           Save clip <kbd>{settings.hotkey}</kbd>
         </button>
-      </header>
+        <div className="meter" aria-hidden="true">
+          <div className={recording ? "meter-bar live" : "meter-bar"}>
+            {Array.from({ length: Math.min(60, Math.ceil(settings.bufferSeconds / 2)) }, (_, i) => (
+              <span key={i} />
+            ))}
+          </div>
+          <div className="meter-legend">
+            <span>−{settings.bufferSeconds}s</span>
+            <span>{recording ? "replay buffer · always the latest" : "replay buffer · fills when the game opens"}</span>
+            <span>now</span>
+          </div>
+        </div>
+      </section>
 
       {status?.hotkeyError && <Notice tone="warn">{status.hotkeyError}</Notice>}
       {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}

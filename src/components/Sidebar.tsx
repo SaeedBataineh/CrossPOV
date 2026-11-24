@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { isDesktop } from "../lib/backend";
+import { isDesktop, type RecorderStatus } from "../lib/backend";
 import { ClipsIcon, GearIcon, HomeIcon, Logo, StreamIcon } from "./Icons";
 
 export type Page = "home" | "clips" | "streamers" | "settings";
@@ -11,7 +11,20 @@ const ITEMS: { id: Page; label: string; icon: ReactNode }[] = [
   { id: "settings", label: "Settings", icon: <GearIcon /> },
 ];
 
-export function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (p: Page) => void }) {
+export function Sidebar({
+  page,
+  onNavigate,
+  status,
+  hotkey,
+  bufferSeconds,
+}: {
+  page: Page;
+  onNavigate: (p: Page) => void;
+  status: RecorderStatus | null;
+  hotkey: string;
+  bufferSeconds: number;
+}) {
+  const recording = status?.state === "recording";
   return (
     <nav className="sidebar" aria-label="Main">
       <div className="brand">
@@ -30,6 +43,12 @@ export function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (p: Page
           {item.label}
         </button>
       ))}
+      <div className="side-status" aria-live="polite">
+        {recording ? <span className="rec">REC</span> : <span className="idle">{isDesktop ? "Not recording" : "Demo"}</span>}
+        <span>
+          {recording ? <>Press <kbd>{hotkey}</kbd> to save the last {bufferSeconds}s</> : isDesktop ? "Starts when VALORANT opens" : "Recording needs the app"}
+        </span>
+      </div>
       <div className="sidebar-foot">
         {!isDesktop && (
           <p style={{ margin: "0 0 8px" }}>

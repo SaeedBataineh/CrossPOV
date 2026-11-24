@@ -124,16 +124,25 @@ export function cardFromSample(c: Clip): CardClip {
 
 export function ClipCard({ clip, actions }: { clip: CardClip; actions?: ReactNode }) {
   const theirs = clip.kind === "theirs";
+  const cls = ["card", "clip", theirs ? "theirs" : "", clip.sample ? "sample" : ""].filter(Boolean).join(" ");
   return (
-    <article className={clip.sample ? "card clip sample" : "card clip"}>
+    <article className={cls}>
       <div className="thumb">
         {clip.thumb ? <img src={clip.thumb} alt="" loading="lazy" decoding="async" /> : <PlayIcon />}
+        {clip.thumb && (
+          <span className="play" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z" /></svg>
+          </span>
+        )}
         <span className={theirs ? "badge theirs" : "badge mine"} title={theirs ? "Their POV" : "Your POV"}>{theirs ? "THEM" : "YOU"}</span>
         {clip.length && <span className="duration">{clip.length}</span>}
       </div>
       <div className="clip-body">
         <span className="clip-title">{clip.title}</span>
-        <span className="muted small">{clip.meta}</span>
+        <span className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {theirs && <span className="pf-dot twitch" title="From Twitch" />}
+          {clip.meta}
+        </span>
       </div>
       {actions && <div className="clip-actions">{actions}</div>}
     </article>
