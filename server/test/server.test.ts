@@ -183,3 +183,10 @@ test("an out-of-date app gets 426 instead of match data", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+import { collapseSlashes } from "../src/index.ts";
+
+test("double slashes in a path serve the normal file", () => {
+  assert.equal(collapseSlashes(new URL("https://crosspov.com//riot.txt")), "https://crosspov.com/riot.txt");
+  assert.equal(collapseSlashes(new URL("https://crosspov.com/riot.txt")), null);
+});

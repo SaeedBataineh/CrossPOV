@@ -216,6 +216,15 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
   }
 }
 
+/** "https://crosspov.com//riot.txt" -> "https://crosspov.com/riot.txt"; null if nothing to change. */
+export function collapseSlashes(url: URL): string | null {
+  const path = url.pathname.replace(/\/{2,}/g, "/");
+  if (path === url.pathname) return null;
+  const to = new URL(url.toString());
+  to.pathname = path;
+  return to.toString();
+}
+
 /** www.crosspov.com/anything -> crosspov.com/anything */
 export function wwwRedirect(url: URL): string | null {
   if (!url.hostname.startsWith("www.")) return null;
@@ -230,8 +239,11 @@ export default {
     const www = wwwRedirect(url);
     if (www) return Response.redirect(www, 301);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
-    // Everything else is the demo website.
-    if (env.ASSETS) return env.ASSETS.fetch(request);
+    // Everything else is the demo website. "//riot.txt" (as Riot's verifier asks for) serves "/riot.txt".
+    if (env.ASSETS) {
+      const clean = collapseSlashes(url);
+      return env.ASSETS.fetch(clean ? new Request(clean, request) : request);
+    }
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
