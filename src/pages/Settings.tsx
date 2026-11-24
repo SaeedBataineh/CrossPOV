@@ -276,10 +276,10 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
         <Row label="Auto-clip streamers in my matches" help="Turn off to only use manual checks.">
           <Toggle label="Auto-clip streamers" checked={draft.streamerAuto} onChange={(v) => set("streamerAuto", v)} />
         </Row>
-        <Row label="When they killed you" help="Clip their POV of killing you.">
+        <Row label="When they killed you" help="Download their POV of killing you. Turn off to skip every clip where the streamer killed you.">
           <Toggle label="When they killed you" checked={draft.clipKilledYou} onChange={(v) => set("clipKilledYou", v)} />
         </Row>
-        <Row label="When you killed them" help="Clip their POV of you killing them.">
+        <Row label="When you killed them" help="Download their POV of you killing them. Turn off to skip these.">
           <Toggle label="When you killed them" checked={draft.clipYouKilled} onChange={(v) => set("clipYouKilled", v)} />
         </Row>
         <Row label="Whole rounds you both fought in" help="Bigger clips with the full round.">

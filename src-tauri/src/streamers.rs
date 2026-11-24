@@ -145,7 +145,10 @@ pub fn fight_windows(m: &MatchSummary, me: &str, them: &str, s: &Settings) -> Ve
         let mut rounds: Vec<u32> = m
             .kills
             .iter()
-            .filter(|k| (k.killer == me && k.victim == them) || (k.killer == them && k.victim == me))
+            .filter(|k| {
+                (s.clip_you_killed && k.killer == me && k.victim == them)
+                    || (s.clip_killed_you && k.killer == them && k.victim == me)
+            })
             .map(|k| k.round)
             .collect();
         rounds.dedup();
@@ -693,6 +696,17 @@ mod tests {
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].moment, Moment::KilledYou);
+    }
+
+    #[test]
+    fn can_skip_deaths_to_the_streamer() {
+        let s = Settings { clip_killed_you: false, ..five_sec() };
+        let w = fight_windows(&sample(), "me", "st", &s);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].moment, Moment::YouKilled);
+        // Whole-round mode must skip rounds where the only fight was them killing you.
+        let whole = Settings { clip_whole_round: true, ..s };
+        assert!(fight_windows(&sample(), "me", "st", &whole).iter().all(|w| w.round != 1));
     }
 
     #[test]
