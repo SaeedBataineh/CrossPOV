@@ -309,6 +309,9 @@ pub struct MatchStreamers {
     pub players: Vec<PlayerState>,
     /// Nothing left to do for this match.
     pub finished: bool,
+    /// How many times the server has been asked about this match.
+    #[serde(default)]
+    pub checks: u32,
 }
 
 fn now_ms() -> u64 {
@@ -373,6 +376,8 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
 const RECHECK: Duration = Duration::from_secs(10 * 60);
 const TICK: Duration = Duration::from_secs(60);
 const MAX_FAILURES: u32 = 3;
+/// Checks with no streamer found before a match is marked done.
+const NO_STREAMER_CHECKS: u32 = 2;
 
 pub type StreamerListener = Box<dyn Fn(&MatchStreamers, Option<&ClipInfo>) + Send + Sync>;
 
@@ -502,6 +507,7 @@ impl StreamerWorker {
                 Err(e) => state.error = Some(e),
             }
             state.checked_ms = Some(now_ms());
+            state.checks += 1;
             self.store.put(&state);
             (self.listener)(&state, None);
         }
@@ -513,8 +519,12 @@ impl StreamerWorker {
         }
 
         // Done when every streamer is settled and no VOD is still growing.
+        // Most matches have no streamers at all: two clean checks (10 min
+        // apart) are enough, so they aren't re-checked for an hour.
         let settled = state.players.iter().all(|p| p.status != StreamerStatus::Working);
-        if settled && state.checked_ms.is_some() && state.error.is_none() && now_ms().saturating_sub(started) > m.length_ms + 3_600_000 {
+        let nobody_streaming = state.players.is_empty() && state.checks >= NO_STREAMER_CHECKS && state.error.is_none();
+        let all_done = settled && state.checked_ms.is_some() && state.error.is_none() && now_ms().saturating_sub(started) > m.length_ms + 3_600_000;
+        if nobody_streaming || all_done {
             state.finished = true;
         }
         self.store.put(&state);
@@ -727,6 +737,23 @@ mod tests {
         assert_eq!(classify_error("ERROR: [twitch:vod] 123: This video is only available for subscribers"), DownloadError::SubOnly);
         assert_eq!(classify_error("ERROR: Video 123 does not exist"), DownloadError::Gone);
         assert!(matches!(classify_error("ERROR: network\nERROR: timed out"), DownloadError::Other(m) if m == "ERROR: timed out"));
+    }
+
+    #[test]
+    fn a_match_with_no_streamers_is_done_after_two_checks() {
+        let dir = std::env::temp_dir().join(format!("crosspov-nostreamers-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let m = sample();
+        let store = StreamerStore::new(dir.clone());
+        // Two clean checks, no streamers found.
+        store.put(&MatchStreamers { match_id: m.id.clone(), checked_ms: Some(now_ms()), checks: 2, ..Default::default() });
+        let st = store.get(&m.id);
+        let nobody = st.players.is_empty() && st.checks >= NO_STREAMER_CHECKS && st.error.is_none();
+        assert!(nobody);
+        // Older saved state without the counter still loads (counts as 0).
+        fs::write(dir.join(format!("{}.streamers.json", m.id)), br#"{"matchId":"x","checkedMs":1,"error":null,"players":[],"finished":false}"#).unwrap();
+        assert_eq!(store.get(&m.id).checks, 0);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

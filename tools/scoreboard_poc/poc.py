@@ -14,6 +14,12 @@ Args: --limit N (streams to read, most-watched first; default 1500), --out DIR
 
 from __future__ import annotations
 
+import os
+
+# Tesseract starts several threads per run by default; with one OCR process
+# per core that oversubscribes the CPU badly. One thread each is far faster.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 import argparse
 import base64
 import io

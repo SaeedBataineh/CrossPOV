@@ -110,15 +110,21 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
   const me = url.searchParams.get("me") ?? undefined;
   if (me !== undefined && !/^[\w-]{1,100}$/.test(me)) throw new HttpError(400, "Bad player id.");
   const match = await loadMatch(region, id, env, ctx);
-  const body = await cachedData(`streamers/${id.toLowerCase()}/${me ?? "all"}`, STREAMERS_TTL, ctx, async () => {
+  // One Twitch check per match for everyone: the result covers all ten
+  // players and is cached; each caller just has themselves filtered out.
+  // Recent matches are re-checked every few minutes (VODs appear and grow);
+  // older ones hardly change, so they're kept longer.
+  const ageMs = Date.now() - Date.parse(match.startedAt) - match.lengthMs;
+  const ttl = ageMs > 6 * 3_600_000 ? 6 * 3600 : STREAMERS_TTL;
+  const all = await cachedData(`streamers/${id.toLowerCase()}`, ttl, ctx, async () => {
     try {
-      return { matchId: match.id, checkedAt: new Date().toISOString(), streamers: await findStreamers(env, match, me) };
+      return { matchId: match.id, checkedAt: new Date().toISOString(), streamers: await findStreamers(env, match) };
     } catch (err) {
       if (err instanceof TwitchError) throw new HttpError(503, err.message);
       throw err;
     }
   });
-  return json(body, 200, STREAMERS_TTL);
+  return json({ ...all, streamers: all.streamers.filter((s) => s.puuid !== me) }, 200, ttl);
 }
 
 async function channel(region: string, id: string, url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {

@@ -89,7 +89,7 @@ jobs:
           # Stop any sweep left over from a previous run first.
           # "[p]oc" matches a running scanner but not this command itself.
           ssh vps 'pkill -f "[p]oc\.py" || true'
-          ssh vps "cd /opt/crosspov && set -a && . ./.env && set +a && rm -rf out && ./venv/bin/python -u poc.py --limit $LIMIT --out out" | tee run.log
+          ssh vps "cd /opt/crosspov && set -a && . ./.env && set +a && export OMP_THREAD_LIMIT=1 && rm -rf out && timeout 25m ./venv/bin/python -u poc.py --limit $LIMIT --out out" | tee run.log
           sed -n '/^## Scoreboard/,$p' run.log > summary.md
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
 
