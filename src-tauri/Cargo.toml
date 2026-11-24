@@ -28,6 +28,11 @@ ureq = { version = "3.5.2", default-features = false, features = ["json", "nativ
 tauri-plugin-updater = "2"
 time = { version = "0.3", features = ["local-offset", "parsing", "formatting", "macros"] }
 
+[features]
+# One self-contained CrossPOV.exe: FFmpeg and yt-dlp are embedded and unpacked
+# on first run, and the app updates by replacing its own exe.
+single-exe = []
+
 # Small, fast release binary.
 [profile.release]
 codegen-units = 1
@@ -47,4 +52,5 @@ windows = { version = "0.62.2", features = [
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Threading",
   "Win32_System_Variant",
+  "Win32_UI_WindowsAndMessaging",
 ] }

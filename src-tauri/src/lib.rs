@@ -13,6 +13,7 @@ mod procs;
 mod recorder;
 mod settings;
 mod streamers;
+mod tools;
 mod updater;
 #[cfg(windows)]
 mod win_audio;
@@ -34,11 +35,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt as _, Shortcut, ShortcutSta
 use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 /// Sent to the CrossPOV server with every request.
 pub(crate) const USER_AGENT: &str = concat!("CrossPOV/", env!("CARGO_PKG_VERSION"));
 /// Passed by the "Start with Windows" entry so the app starts in the tray.
-const MINIMIZED_ARG: &str = "--minimized";
+pub(crate) const MINIMIZED_ARG: &str = "--minimized";
 
 pub(crate) struct AppState {
     settings: Mutex<Settings>,
@@ -327,8 +328,43 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The window needs Microsoft Edge WebView2 (part of Windows 11 and updated
+/// Windows 10). The installer adds it when missing; the single exe can't, so
+/// it says what's needed instead of failing silently.
+#[cfg(windows)]
+fn webview_available() -> bool {
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONINFORMATION, MB_YESNO};
+    if tauri::webview_version().is_ok() {
+        return true;
+    }
+    let answer = unsafe {
+        MessageBoxW(
+            None,
+            w!("CrossPOV needs Microsoft Edge WebView2, which is missing on this PC.\n\nOpen Microsoft's download page now? Install the \"Evergreen Bootstrapper\", then start CrossPOV again."),
+            w!("CrossPOV"),
+            MB_YESNO | MB_ICONINFORMATION,
+        )
+    };
+    if answer == IDYES {
+        let _ = std::process::Command::new("explorer").arg("https://developer.microsoft.com/microsoft-edge/webview2/").spawn();
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn webview_available() -> bool {
+    true
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Single-exe update: the old copy started us and is closing; wait for it
+    // so the one-instance check doesn't hand control back to it.
+    updater::finish_self_update();
+    if !webview_available() {
+        return;
+    }
     let app = tauri::Builder::default()
         // Must be first: a second launch just brings the running app forward.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
@@ -348,6 +384,10 @@ pub fn run() {
         )
         .setup(|app| {
             let handle = app.handle().clone();
+            // Single-exe build: put FFmpeg and yt-dlp where the app can run them (once per version).
+            if let Err(err) = handle.path().app_local_data_dir().map_err(|e| e.to_string()).and_then(|d| tools::unpack(&d)) {
+                eprintln!("{err}");
+            }
             let path = handle.path().app_config_dir()?.join("settings.json");
             let mut settings = Settings::load(&path);
             if settings.clip_folder.is_empty() {

@@ -1,6 +1,6 @@
 name: Build Windows app
 
-# Builds CrossPOV.exe (portable) and the installer on a Windows machine.
+# Builds the single CrossPOV.exe (no setup) and the installer on a Windows machine.
 # Download them from the run's "Artifacts" section, or from Releases.
 # To release: Actions > Build Windows app > Run workflow, tick "release".
 # It tags the current version (from tauri.conf.json) and publishes it, and
@@ -157,16 +157,26 @@ jobs:
             npx tauri build --config src-tauri/no-updater.json
           }
 
+      - name: Build the single CrossPOV.exe (no setup)
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          # Same app with FFmpeg and yt-dlp packed inside; it unpacks them on first run
+          # and updates by replacing its own file.
+          npx tauri build --no-bundle --features single-exe
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src-tauri/target/release/crosspov.exe out/CrossPOV.exe
+          "CrossPOV.exe: {0:N1} MB" -f ((Get-Item out/CrossPOV.exe).Length / 1MB)
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            npx tauri signer sign --password "" out/CrossPOV.exe
+            if (-not (Test-Path out/CrossPOV.exe.sig)) { throw "CrossPOV.exe was not signed" }
+          }
+
       - name: Collect files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
-          # Portable version: CrossPOV.exe + ffmpeg.exe + yt-dlp.exe side by side, zipped.
-          New-Item -ItemType Directory -Force portable | Out-Null
-          Copy-Item src-tauri/target/release/crosspov.exe portable/CrossPOV.exe
-          Copy-Item src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe portable/ffmpeg.exe
-          Copy-Item src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe portable/yt-dlp.exe
-          Compress-Archive -Path portable/* -DestinationPath out/CrossPOV-portable.zip
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe out/
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe.sig out/ -ErrorAction SilentlyContinue
           Get-ChildItem out | Format-Table Name, Length
@@ -177,13 +187,19 @@ jobs:
         run: |
           $setup = Get-ChildItem out/*-setup.exe | Select-Object -First 1
           $sig = Get-Content "$($setup.FullName).sig" -Raw
+          $singleSig = Get-Content out/CrossPOV.exe.sig -Raw
           $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
           $url = "https://github.com/${{ github.repository }}/releases/download/$($env:TAG)/$($setup.Name)"
           @{
             version = $version
             notes = "CrossPOV $version"
             pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            platforms = @{ "windows-x86_64" = @{ signature = $sig.Trim(); url = $url } }
+            platforms = @{
+              # Installed copies update with the installer...
+              "windows-x86_64" = @{ signature = $sig.Trim(); url = $url }
+              # ...the single CrossPOV.exe replaces itself.
+              "windows-x86_64-single" = @{ signature = $singleSig.Trim(); url = "https://github.com/${{ github.repository }}/releases/download/$($env:TAG)/CrossPOV.exe" }
+            }
           } | ConvertTo-Json -Depth 4 | Set-Content out/latest.json -Encoding utf8NoBOM
           Get-Content out/latest.json
 

@@ -196,6 +196,9 @@ pub fn locate_ytdlp() -> Option<PathBuf> {
             return Some(p);
         }
     }
+    if let Some(p) = crate::tools::get(YTDLP_EXE) {
+        return Some(p);
+    }
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
         let p = dir.join(YTDLP_EXE);
         if p.is_file() {

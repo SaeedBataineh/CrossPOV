@@ -13,14 +13,15 @@ It only records your screen, like OBS.
 
 ## Download (Windows)
 
-1. Open the repository's **Actions** tab → **Build Windows app** → the latest
-   successful run.
-2. Download **CrossPOV-windows** under *Artifacts* and unzip it:
-   - `CrossPOV-portable.zip`: unzip and run `CrossPOV.exe`, nothing to install.
-     Keep `ffmpeg.exe` next to it.
-   - `CrossPOV_x.y.z_x64-setup.exe`: installer with a Start menu entry.
+Get the newest version from **Releases** (github.com/SaeedBataineh/CrossPOV/releases/latest):
 
-Pushing a tag like `v0.1.0` also attaches both files to a GitHub Release.
+- `CrossPOV.exe`: one file, double-click to run, nothing to install. FFmpeg
+  and yt-dlp are inside it; it unpacks them on first run and updates itself.
+- `CrossPOV_x.y.z_x64-setup.exe`: installer with a Start menu entry and an
+  uninstaller. Also updates itself.
+
+Every push also builds both files: Actions → **Build Windows app** → the run's
+*Artifacts*. To publish a release, run that workflow with **release** ticked.
 
 Needs Windows 10 or 11 with Microsoft Edge WebView2. It's built into Windows 11,
 and the installer adds it if it's missing.

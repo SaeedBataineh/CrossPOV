@@ -5,9 +5,14 @@
 //!
 //! Releases are signed: the app only installs an update whose signature
 //! matches the public key in `tauri.conf.json`.
+//!
+//! The installer build updates by running the new installer. The single-exe
+//! build downloads the new CrossPOV.exe, swaps it for its own file (Windows
+//! lets a running program rename itself) and starts it.
 
 use std::{
-    sync::{Arc, Mutex},
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -16,6 +21,54 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::procs::{self, Procs};
+
+/// The exe this process started from, remembered before any update renames it.
+static START_EXE: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// Passed to the new copy after a single-exe update: "--after-update=<old pid>".
+const AFTER_UPDATE: &str = "--after-update=";
+/// latest.json entry for the single exe (the installer uses "windows-x86_64").
+const SINGLE_EXE_TARGET: &str = "windows-x86_64-single";
+
+fn start_exe() -> Option<PathBuf> {
+    START_EXE.get_or_init(|| std::env::current_exe().ok()).clone()
+}
+
+/// Runs first thing in `run()`. After a single-exe update, waits for the old
+/// copy to close and deletes its file.
+pub fn finish_self_update() {
+    let exe = start_exe();
+    let old_pid = std::env::args().find_map(|a| a.strip_prefix(AFTER_UPDATE).and_then(|p| p.parse::<u32>().ok()));
+    if let Some(pid) = old_pid {
+        for _ in 0..150 {
+            if !Procs::new().pid_running(pid) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    if let Some(old) = exe.map(|e| old_path(&e)) {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+fn old_path(exe: &std::path::Path) -> PathBuf {
+    let mut name = exe.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".old");
+    exe.with_file_name(name)
+}
+
+/// Replaces the running exe with `bytes`, keeping the old one aside until the new one runs.
+fn swap_exe(bytes: &[u8]) -> Result<PathBuf, String> {
+    let exe = start_exe().ok_or("Can't find CrossPOV.exe")?;
+    let old = old_path(&exe);
+    let _ = std::fs::remove_file(&old);
+    std::fs::rename(&exe, &old).map_err(|e| format!("Couldn't replace CrossPOV.exe: {e}"))?;
+    if let Err(e) = std::fs::write(&exe, bytes) {
+        let _ = std::fs::rename(&old, &exe); // put the working copy back
+        return Err(format!("Couldn't write the new CrossPOV.exe: {e}"));
+    }
+    Ok(exe)
+}
 
 /// How often a running app looks for a new version.
 const RECHECK: Duration = Duration::from_secs(3 * 60 * 60);
@@ -106,9 +159,11 @@ impl Updates {
 
     async fn find(&self, app: &AppHandle) -> Result<Option<Update>, String> {
         let recorder = app.state::<crate::AppState>().recorder.clone();
-        let updater = app
-            .updater_builder()
-            .timeout(CHECK_TIMEOUT)
+        let mut builder = app.updater_builder().timeout(CHECK_TIMEOUT);
+        if crate::tools::EMBEDDED {
+            builder = builder.target(SINGLE_EXE_TARGET);
+        }
+        let updater = builder
             .on_before_exit(move || {
                 // The installer replaces ffmpeg.exe and yt-dlp.exe, so nothing may still be using them.
                 recorder.halt();
@@ -125,19 +180,41 @@ impl Updates {
         self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded: 0, total: None });
         let mut downloaded = 0u64;
         let mut last_emit = 0u64;
-        let result = update
-            .download_and_install(
-                |chunk, total| {
-                    downloaded += chunk as u64;
-                    // About every 2 MB, so the progress bar moves without flooding the UI.
-                    if downloaded - last_emit > 2_000_000 || Some(downloaded) == total {
-                        last_emit = downloaded;
-                        self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded, total });
-                    }
-                },
-                || self.set(app, UpdateStatus::Installing { version: version.clone() }),
-            )
+        let progress = |chunk: usize, total: Option<u64>| {
+            downloaded += chunk as u64;
+            // About every 2 MB, so the progress bar moves without flooding the UI.
+            if downloaded - last_emit > 2_000_000 || Some(downloaded) == total {
+                last_emit = downloaded;
+                self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded, total });
+            }
+        };
+        let finished = || self.set(app, UpdateStatus::Installing { version: version.clone() });
+
+        if crate::tools::EMBEDDED {
+            let result = async {
+                let bytes = update.download(progress, finished).await.map_err(|e| e.to_string())?;
+                update.verify(&bytes).map_err(|e| e.to_string())?; // signed by us, or nothing happens
+                let recorder = app.state::<crate::AppState>().recorder.clone();
+                recorder.halt();
+                kill_helpers();
+                let exe = swap_exe(&bytes)?;
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg(format!("{AFTER_UPDATE}{}", std::process::id()));
+                if app.get_webview_window(crate::MAIN_WINDOW).is_none() {
+                    cmd.arg(crate::MINIMIZED_ARG); // it was in the tray, keep it there
+                }
+                cmd.spawn().map_err(|e| format!("Couldn't start the new version: {e}"))?;
+                Ok::<(), String>(())
+            }
             .await;
+            match result {
+                Ok(()) => app.exit(0),
+                Err(message) => self.set(app, UpdateStatus::Failed { version, message }),
+            }
+            return;
+        }
+
+        let result = update.download_and_install(progress, finished).await;
         match result {
             // Windows exits inside download_and_install and the installer starts the new version.
             Ok(()) => app.restart(),
@@ -156,9 +233,24 @@ fn game_running() -> bool {
     p.is_running(&procs::game_exe())
 }
 
-/// Stops FFmpeg / yt-dlp copies started from the app's own folder.
+/// Stops FFmpeg / yt-dlp copies started from the app's own folder (or, in
+/// the single-exe build, from the folder they were unpacked to).
 fn kill_helpers() {
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-        Procs::new().kill_in_dir(&dir, std::process::id());
+    let procs = Procs::new();
+    if let Some(dir) = start_exe().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+        procs.kill_in_dir(&dir, std::process::id());
+    }
+    if let Some(dir) = crate::tools::dir() {
+        procs.kill_in_dir(dir, std::process::id());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_copy_sits_next_to_the_exe() {
+        assert_eq!(old_path(std::path::Path::new("C:/Games/CrossPOV.exe")), PathBuf::from("C:/Games/CrossPOV.exe.old"));
     }
 }

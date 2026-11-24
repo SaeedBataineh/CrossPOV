@@ -42,6 +42,10 @@ impl Procs {
         }
     }
 
+    pub fn pid_running(&self, pid: u32) -> bool {
+        self.sys.as_ref().is_some_and(|s| s.process(sysinfo::Pid::from_u32(pid)).is_some())
+    }
+
     pub fn is_running(&self, exe: &str) -> bool {
         let Some(sys) = &self.sys else { return false };
         sys.processes_by_exact_name(OsStr::new(exe)).next().is_some()

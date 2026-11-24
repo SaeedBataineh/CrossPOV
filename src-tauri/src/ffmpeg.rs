@@ -35,6 +35,9 @@ pub fn locate() -> Option<PathBuf> {
             return Some(p);
         }
     }
+    if let Some(p) = crate::tools::get(FFMPEG_EXE) {
+        return Some(p);
+    }
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
         let p = dir.join(FFMPEG_EXE);
         if p.is_file() {
