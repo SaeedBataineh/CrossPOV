@@ -67,7 +67,13 @@ struct ErrorResponse {
 }
 
 fn agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder().provider(ureq::tls::TlsProvider::NativeTls).build();
+    // Windows' own TLS and its own list of trusted certificate authorities, like a
+    // browser. (ureq's default, Mozilla's list, can reject valid chains that
+    // Windows builds to a different root.)
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
     ureq::Agent::config_builder()
         .tls_config(tls)
         .timeout_global(Some(Duration::from_secs(30)))
@@ -85,7 +91,7 @@ pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Resu
     if let Some(me) = me {
         req = req.query("me", me);
     }
-    let mut res = req.call().map_err(|e| format!("Couldn't reach the CrossPOV server: {e}"))?;
+    let mut res = req.call().map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status == 200 {
         let body: StreamersResponse = res.body_mut().read_json().map_err(|e| format!("Unexpected answer from the server: {e}"))?;
@@ -445,7 +451,7 @@ pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -
         .query("login", login)
         .query("puuid", puuid)
         .call()
-        .map_err(|e| format!("Couldn't reach the CrossPOV server: {e}"))?;
+        .map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status != 200 {
         return Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")));

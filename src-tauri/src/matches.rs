@@ -116,7 +116,13 @@ pub fn split_riot_id(riot_id: &str) -> Option<(String, String)> {
 pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSummary, String> {
     let (name, tag) = split_riot_id(riot_id).ok_or("Enter your Riot ID as Name#TAG in Settings.")?;
     // Native TLS: Windows' own SChannel (no C compiler needed, uses the system certificate store).
-    let tls = ureq::tls::TlsConfig::builder().provider(ureq::tls::TlsProvider::NativeTls).build();
+    // Windows' own TLS and its own list of trusted certificate authorities, like a
+    // browser. (ureq's default, Mozilla's list, can reject valid chains that
+    // Windows builds to a different root.)
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .tls_config(tls)
         .timeout_global(Some(Duration::from_secs(20)))
@@ -132,7 +138,7 @@ pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSu
         .query("name", &name)
         .query("tag", &tag)
         .call()
-        .map_err(|e| format!("Couldn't reach the CrossPOV server: {e}"))?;
+        .map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status == 200 {
         let body: LatestResponse = res.body_mut().read_json().map_err(|e| format!("Unexpected answer from the server: {e}"))?;

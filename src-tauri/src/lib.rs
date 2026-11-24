@@ -36,6 +36,21 @@ use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
 pub(crate) const MAIN_WINDOW: &str = "main";
+/// A network error in words people can act on.
+pub(crate) fn net_error(detail: &str) -> String {
+    let d = detail.to_lowercase();
+    let why = if d.contains("resolution") || d.contains("resolve") || d.contains("dns") || d.contains("11001") || d.contains("11002") {
+        "your internet or DNS didn't answer"
+    } else if d.contains("timed out") || d.contains("timeout") {
+        "the connection timed out"
+    } else if d.contains("cert") || d.contains("tls") || d.contains("ssl") {
+        "the secure connection couldn't be checked (antivirus or a network filter can cause this)"
+    } else {
+        "no connection"
+    };
+    format!("Can't reach the CrossPOV server right now: {why}. CrossPOV tries again by itself. ({detail})")
+}
+
 /// Sent to the CrossPOV server with every request.
 pub(crate) const USER_AGENT: &str = concat!("CrossPOV/", env!("CARGO_PKG_VERSION"));
 /// Passed by the "Start with Windows" entry so the app starts in the tray.
@@ -509,4 +524,29 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod net_tests {
+    use super::net_error;
+
+    #[test]
+    fn network_errors_are_readable() {
+        let dns = net_error("io: This is usually a temporary error during hostname resolution (os error 11002)");
+        assert!(dns.contains("internet or DNS"), "{dns}");
+        let tls = net_error("native-tls: unable to find any user-specified roots in the final cert chain");
+        assert!(tls.contains("secure connection"), "{tls}");
+        assert!(dns.contains("tries again by itself"));
+    }
+
+    /// Real HTTPS request with the same TLS settings as the app (run with --ignored).
+    #[test]
+    #[ignore]
+    fn reaches_the_live_server() {
+        let m = crate::matches::fetch_latest("https://crosspov.com", "eu", "x#1");
+        // Any answer from the server (even "not found") proves TLS works; only network/TLS errors fail.
+        if let Err(e) = &m {
+            assert!(!e.contains("Can't reach"), "{e}");
+        }
+    }
 }

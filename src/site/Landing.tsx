@@ -159,11 +159,6 @@ export default function Landing() {
               <span className="dl-desc">One file. Double-click to run, nothing to install. Updates itself.</span>
               <span className="dl-meta mono">about 38 MB</span>
             </a>
-            <a className="dl-card" href="/download/installer">
-              <span className="dl-name">Installer</span>
-              <span className="dl-desc">Adds CrossPOV to the Start menu, with an uninstaller. Also updates itself.</span>
-              <span className="dl-meta mono">about 28 MB</span>
-            </a>
           </div>
           <div className="dl-note">
             <strong>Windows says &ldquo;Windows protected your PC&rdquo;?</strong> Click <b>More info</b>, then <b>Run anyway</b>.
@@ -171,7 +166,7 @@ export default function Landing() {
             the Riot client; it only records your screen, like OBS.
           </div>
           <p className="muted small">
-            Needs Windows 10 or 11 (64-bit). All versions and release notes are on{" "}
+            Needs Windows 10 or 11 (64-bit). All versions are on{" "}
             <a href="https://github.com/SaeedBataineh/CrossPOV/releases" target="_blank" rel="noreferrer">GitHub</a>.
           </p>
         </section>
