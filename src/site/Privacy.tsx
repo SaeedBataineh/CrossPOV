@@ -2,7 +2,7 @@ import { Logo } from "../components/Icons";
 import "./site.css";
 
 /** Where people can reach the developer. Shown on the page only when set. */
-const CONTACT = "";
+const CONTACT = "contact@crosspov.com";
 const UPDATED = "24 November 2026";
 
 export default function Privacy() {
@@ -69,7 +69,7 @@ export default function Privacy() {
         <ul>
           <li>Turn off automatic streamer clips, or remove your Riot ID, in Settings.</li>
           <li>Delete clips from the app or your clip folder; uninstalling removes the app&rsquo;s data folder.</li>
-          {CONTACT && <li>Questions or removal requests: {CONTACT}</li>}
+          {CONTACT && <li>Questions or removal requests: <a href={`mailto:${CONTACT}`}>{CONTACT}</a></li>}
         </ul>
 
         <p className="muted small">

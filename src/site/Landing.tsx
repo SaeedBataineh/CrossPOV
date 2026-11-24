@@ -94,7 +94,7 @@ export default function Landing() {
 
       <footer className="site-footer">
         <p>
-          <a href="/demo">Demo</a> · <a href="/privacy">Privacy</a>
+          <a href="/demo">Demo</a> · <a href="/privacy">Privacy</a> · <a href="mailto:contact@crosspov.com">contact@crosspov.com</a>
         </p>
         <p className="muted small">
           CrossPOV isn&rsquo;t endorsed by Riot Games and doesn&rsquo;t reflect the views or opinions of Riot Games or anyone

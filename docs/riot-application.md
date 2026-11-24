@@ -15,6 +15,10 @@ CrossPOV
 
 https://crosspov.com
 
+## Contact
+
+contact@crosspov.com
+
 ## Description (paste as-is)
 
 CrossPOV is a Windows desktop app for VALORANT players. It keeps a rolling
@@ -102,7 +106,7 @@ voice-over are enough.
 
 - [ ] Website loads: `/`, `/demo`, `/privacy`
 - [ ] `/demo` lookup works with your own Riot ID
-- [ ] Contact email added to the privacy page (`src/site/Privacy.tsx`, `CONTACT`)
+- [x] Contact email on the site: contact@crosspov.com
 - [ ] Demo video uploaded (Unlisted) and link pasted above
 - [ ] Description above re-read and accurate
 - [ ] Your HenrikDev key rotated (the first one was shared in chat)
