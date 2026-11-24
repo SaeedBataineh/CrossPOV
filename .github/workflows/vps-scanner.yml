@@ -74,7 +74,8 @@ jobs:
           LIMIT="${{ github.event.inputs.limit || '1500' }}"
           [ "$LIMIT" = "0" ] && LIMIT=100000
           # Stop any sweep left over from a previous run first.
-          ssh vps 'pkill -f "poc.py" || true'
+          # "[p]oc" matches a running scanner but not this command itself.
+          ssh vps 'pkill -f "[p]oc\.py" || true'
           ssh vps "cd /opt/crosspov && set -a && . ./.env && set +a && rm -rf out && ./venv/bin/python -u poc.py --limit $LIMIT --out out" | tee run.log
           sed -n '/^## Scoreboard/,$p' run.log > summary.md
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
