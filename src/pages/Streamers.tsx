@@ -1,10 +1,56 @@
+import { useEffect, useState } from "react";
 import type { Page } from "../components/Shell";
 import { Notice, Panel, Row, Seg, Stat, Toggle } from "../components/ui";
-import { isDesktop } from "../lib/backend";
+import { isDesktop, linkedChannels, removeLinkedChannel, type LinkedChannel } from "../lib/backend";
 import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
 import type { useRecorder } from "../lib/useRecorder";
+
+/** Channels the user linked to players by hand. Stored on this PC only. */
+function LinkedChannels({ notify }: { notify: (text: string, tone: "good" | "bad" | "info") => void }) {
+  const [links, setLinks] = useState<LinkedChannel[] | null>(null);
+  useEffect(() => {
+    linkedChannels().then(setLinks, () => setLinks([]));
+  }, []);
+  async function remove(l: LinkedChannel) {
+    try {
+      await removeLinkedChannel(l.puuid);
+      setLinks((all) => (all ?? []).filter((x) => x.puuid !== l.puuid));
+    } catch (err) {
+      notify(String(err), "bad");
+    }
+  }
+  return (
+    <Panel title="Channels you linked" color="var(--warn)" right={<span className="m tiny dim">on this PC only</span>}>
+      {links && links.length > 0 ? (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead><tr><th>Channel</th><th>Player when linked</th><th>Found again</th><th /></tr></thead>
+            <tbody>
+              {links.map((l) => (
+                <tr key={l.puuid}>
+                  <td><span className="ini">{ini(l.login)}</span><a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.login}</b></a></td>
+                  <td className="small">{l.label}</td>
+                  <td className="m small">{l.seen ? `${l.seen}×` : "not yet"}</td>
+                  <td style={{ textAlign: "right" }}><button type="button" className="b sm" onClick={() => void remove(l)}>Forget</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="empty">
+          <span>
+            Played a streamer on a smurf or a name CrossPOV didn't recognise? Open the match on the <b>Matches</b> page and use
+            "Missed a streamer?". The link stays on this PC and is checked automatically next time you meet them.
+          </span>
+        </div>
+      )}
+      <p className="note">Riot names are never stored or shown. The list lives only on this PC: the server is asked about one match at a time and keeps nothing, and links are never shared with other players.</p>
+    </Panel>
+  );
+}
 
 const PADS = [15, 30, 60, 90, 120].map((v) => ({ value: v, label: String(v) }));
 const TONE_COLOR: Record<string, string> = {
@@ -97,11 +143,13 @@ export default function Streamers({
           )}
         </Panel>
 
+        <LinkedChannels notify={recorder.notify} />
+
         <Panel title="How a streamer clip is made" color="var(--kick)">
           <div className="pad stats" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
             <Stat label="1 · Match ends" value={<span style={{ fontSize: 12 }}>players + kill times</span>} />
             <Stat label="2 · Check once" value={<span style={{ fontSize: 12 }}>who was live?</span>} />
-            <Stat label="3 · Find VOD" value={<span style={{ fontSize: 12 }}>Twitch, then archives</span>} />
+            <Stat label="3 · Find VOD" value={<span style={{ fontSize: 12 }}>their Twitch VOD</span>} />
             <Stat label="4 · Cut" value={<span style={{ fontSize: 12 }}>fight −{settings.secondsBefore} / +{settings.secondsAfter} s</span>} />
           </div>
         </Panel>

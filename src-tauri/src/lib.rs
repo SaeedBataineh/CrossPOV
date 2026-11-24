@@ -24,7 +24,7 @@ use clips::ClipInfo;
 use matches::{MatchEvent, MatchStore, MatchSummary, MatchWatcher, MatchesStatus};
 use recorder::{Recorder, RecorderStatus};
 use settings::Settings;
-use streamers::{MatchStreamers, StreamerStore, StreamerWorker};
+use streamers::{Link, LinkStore, MatchStreamers, StreamerStore, StreamerWorker};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -284,6 +284,16 @@ async fn list_mic_devices() -> Vec<String> {
 }
 
 #[tauri::command]
+fn linked_channels(state: State<'_, AppState>) -> Vec<Link> {
+    state.streamers.links()
+}
+
+#[tauri::command]
+fn remove_linked_channel(state: State<'_, AppState>, puuid: String) {
+    state.streamers.remove_link(&puuid);
+}
+
+#[tauri::command]
 fn update_status(state: State<'_, AppState>) -> updater::UpdateStatus {
     state.updates.status()
 }
@@ -415,11 +425,14 @@ pub fn run() {
                     };
                 }),
             );
+            // Channels you linked by hand live only here, on this PC.
+            let links = LinkStore::new(handle.path().app_data_dir()?.join("linked-channels.json"));
             let data_dir = handle.path().app_data_dir()?.join("matches");
             let streamer_events = handle.clone();
             let streamer_worker = StreamerWorker::new(
                 MatchStore::new(data_dir.clone()),
                 StreamerStore::new(data_dir),
+                links,
                 settings.clone(),
                 clip_folder(&handle, &settings),
                 Box::new(move |state, clip| {
@@ -481,7 +494,9 @@ pub fn run() {
             check_streamers_now,
             add_streamer_channel,
             update_status,
-            retry_update
+            retry_update,
+            linked_channels,
+            remove_linked_channel
         ])
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");

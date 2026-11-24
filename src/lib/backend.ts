@@ -302,3 +302,25 @@ export async function retryUpdate(): Promise<void> {
 }
 
 export const onUpdateStatus = (cb: (s: UpdateStatus) => void) => listen("update-status", cb);
+
+// ---------- Channels you linked (kept on this PC only) ----------
+
+export interface LinkedChannel {
+  puuid: string;
+  login: string;
+  /** e.g. "Enemy · Raze": the player when you linked them. Riot names are never stored. */
+  label: string;
+  addedMs: number;
+  /** Later matches where the link found them live. */
+  seen: number;
+}
+
+export async function linkedChannels(): Promise<LinkedChannel[]> {
+  if (isDesktop) return tauriInvoke<LinkedChannel[]>("linked_channels");
+  return [{ puuid: "demo", login: "nightowl_val", label: "Enemy · Clove", addedMs: Date.now() - 2 * 86_400_000, seen: 1 }];
+}
+
+export async function removeLinkedChannel(puuid: string): Promise<void> {
+  if (!isDesktop) throw new Error("Removing links needs the CrossPOV desktop app. This is the website demo.");
+  await tauriInvoke<void>("remove_linked_channel", { puuid });
+}

@@ -149,7 +149,8 @@ function MatchDetail({
                         <tr key={p.puuid}>
                           <td className="ellipsis" style={{ maxWidth: 200 }}>
                             <span className="ag" title={p.agent}>{ini(p.agent)}</span>
-                            <b>{p.name}</b> <span className="m tiny dim">#{p.tag}</span>
+                            {/* Other players' Riot names are never shown: some hide them on purpose. */}
+                            {p.puuid === me?.puuid ? <><b>{p.name}</b> <span className="m tiny dim">#{p.tag}</span></> : <b>{p.agent}</b>}
                           </td>
                           <td className="m">{p.kills}/{p.deaths}/{p.assists}</td>
                           <td>
@@ -231,12 +232,16 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
   return (
     <Panel title="Missed a streamer?" color="var(--warn)">
       <form className="pad stack" onSubmit={(e) => void submit(e)}>
-        <span className="muted small">Pick the player and paste their channel. CrossPOV checks they were live during this match, then clips your fights from their VOD.</span>
+        <span className="muted small">
+          Pick the player and paste their channel. CrossPOV checks they were live during this match, then clips your fights from their VOD.
+          It also remembers the link <b>on this PC only</b> and checks that channel when you meet the same player again, even on a renamed account.
+          The server checks one match at a time and keeps nothing; links are never shared with other players.
+        </span>
         <div className="row-wrap">
           <select className="input" aria-label="Player" value={puuid} onChange={(e) => setPuuid(e.target.value)}>
             <option value="">Which player?</option>
             {others.map((p) => (
-              <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {p.agent}</option>
+              <option key={p.puuid} value={p.puuid}>{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent} · {p.kills}/{p.deaths}/{p.assists}</option>
             ))}
           </select>
           <input className="input grow" aria-label="Twitch channel" placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />

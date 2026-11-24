@@ -367,6 +367,103 @@ impl StreamerStore {
     }
 }
 
+/// A channel the user linked to a player by hand ("Missed a streamer?").
+/// Kept only on this PC: the server never stores it, and it is never shared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Link {
+    /// Riot's permanent player id; stays the same when they rename the account.
+    pub puuid: String,
+    pub login: String,
+    /// What the player was when linked, e.g. "Enemy · Raze", so the user can tell links apart.
+    pub label: String,
+    pub added_ms: u64,
+    /// Later matches where this link found the streamer live.
+    pub seen: u32,
+}
+
+#[derive(Clone)]
+pub struct LinkStore {
+    path: PathBuf,
+    lock: Arc<Mutex<()>>,
+}
+
+impl LinkStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, lock: Arc::new(Mutex::new(())) }
+    }
+    pub fn all(&self) -> Vec<Link> {
+        fs::read(&self.path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    fn write(&self, links: &[Link]) {
+        if let Some(dir) = self.path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        if let Ok(json) = serde_json::to_vec_pretty(links) {
+            let tmp = self.path.with_extension("json.tmp");
+            if fs::write(&tmp, json).is_ok() {
+                let _ = fs::rename(&tmp, &self.path);
+            }
+        }
+    }
+    /// Adds or updates the link for a player.
+    pub fn save(&self, puuid: &str, login: &str, label: &str) {
+        let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut links = self.all();
+        links.retain(|l| l.puuid != puuid);
+        links.push(Link { puuid: puuid.into(), login: login.into(), label: label.into(), added_ms: now_ms(), seen: 0 });
+        self.write(&links);
+    }
+    pub fn remove(&self, puuid: &str) {
+        let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut links = self.all();
+        links.retain(|l| l.puuid != puuid);
+        self.write(&links);
+    }
+    fn mark_seen(&self, puuid: &str) {
+        let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut links = self.all();
+        if let Some(l) = links.iter_mut().find(|l| l.puuid == puuid) {
+            l.seen += 1;
+        }
+        self.write(&links);
+    }
+}
+
+/// A Twitch login from what the user typed ("twitch.tv/Name", a full URL, or just the name).
+pub fn clean_login(input: &str) -> Option<String> {
+    let l = input.trim().trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.").trim_start_matches("twitch.tv/");
+    let l = l.split(['/', '?', '#']).next().unwrap_or("").to_lowercase();
+    (3..=25).contains(&l.len()).then_some(l).filter(|l| l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+}
+
+/// Asks the server whether `login` was live during this match as player `puuid`.
+pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -> Result<Option<StreamerHit>, String> {
+    let url = format!("{}/api/match/{}/{}/channel", server.trim_end_matches('/'), m.region, m.id);
+    let mut res = agent()
+        .get(&url)
+        .query("login", login)
+        .query("puuid", puuid)
+        .call()
+        .map_err(|e| format!("Couldn't reach the CrossPOV server: {e}"))?;
+    let status = res.status().as_u16();
+    if status != 200 {
+        return Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")));
+    }
+    let hits: StreamersResponse = res.body_mut().read_json().map_err(|e| e.to_string())?;
+    Ok(hits.streamers.into_iter().next())
+}
+
+/// "Enemy · Raze": how a player is shown, without their Riot name.
+pub fn player_label(player: &crate::matches::MatchPlayer, me: Option<&crate::matches::MatchPlayer>) -> String {
+    let side = match me {
+        Some(me) if me.team == player.team => "Teammate",
+        Some(_) => "Enemy",
+        None => "Player",
+    };
+    format!("{side} · {}", player.agent)
+}
+
 /// Merges a fresh server answer into what we already know for a match.
 pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchSummary, me: Option<&str>, s: &Settings) {
     for hit in hits {
@@ -407,6 +504,7 @@ pub type StreamerListener = Box<dyn Fn(&MatchStreamers, Option<&ClipInfo>) + Sen
 pub struct StreamerWorker {
     matches: MatchStore,
     store: StreamerStore,
+    links: LinkStore,
     settings: Arc<Mutex<Settings>>,
     clip_root: Arc<Mutex<PathBuf>>,
     listener: Arc<StreamerListener>,
@@ -414,10 +512,11 @@ pub struct StreamerWorker {
 }
 
 impl StreamerWorker {
-    pub fn new(matches: MatchStore, store: StreamerStore, settings: Settings, clip_root: PathBuf, listener: StreamerListener) -> Self {
+    pub fn new(matches: MatchStore, store: StreamerStore, links: LinkStore, settings: Settings, clip_root: PathBuf, listener: StreamerListener) -> Self {
         Self {
             matches,
             store,
+            links,
             settings: Arc::new(Mutex::new(settings)),
             clip_root: Arc::new(Mutex::new(clip_root)),
             listener: Arc::new(listener),
@@ -468,28 +567,19 @@ impl StreamerWorker {
         Ok(self.store.get(match_id))
     }
 
-    /// Adds a channel the user says belongs to a player in this match.
+    /// Adds a channel the user says belongs to a player in this match, and
+    /// remembers it on this PC so later matches against them are checked too.
     pub fn add_manual(&self, match_id: &str, puuid: &str, login: &str) -> Result<MatchStreamers, String> {
         let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let m = self.matches.list().into_iter().find(|m| m.id == match_id).ok_or("Match not found")?;
         let player = m.players.iter().find(|p| p.puuid == puuid).ok_or("Player not in this match")?;
-        let login = login.trim().trim_start_matches("https://").trim_start_matches("www.").trim_start_matches("twitch.tv/").trim_matches('/').to_lowercase();
-        let url = format!("{}/api/match/{}/{}/channel", s.server_url.trim_end_matches('/'), m.region, m.id);
-        let mut res = agent()
-            .get(&url)
-            .query("login", &login)
-            .query("puuid", puuid)
-            .call()
-            .map_err(|e| format!("Couldn't reach the CrossPOV server: {e}"))?;
-        let status = res.status().as_u16();
-        if status != 200 {
-            return Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")));
-        }
-        let hits: StreamersResponse = res.body_mut().read_json().map_err(|e| e.to_string())?;
-        let hit = hits.streamers.into_iter().next().ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
+        let login = clean_login(login).ok_or("That isn't a Twitch channel name.")?;
+        let hit = fetch_channel(&s.server_url, &m, puuid, &login)?.ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
+        let me_player = find_me(&m, &s.riot_id);
+        self.links.save(puuid, &login, &player_label(player, me_player));
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.store.get(&m.id);
-        let me = find_me(&m, &s.riot_id).map(|p| p.puuid.clone());
+        let me = me_player.map(|p| p.puuid.clone());
         state.players.retain(|p| p.puuid != player.puuid);
         merge_hits(&mut state, vec![hit], &m, me.as_deref(), &s);
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == player.puuid) {
@@ -500,6 +590,39 @@ impl StreamerWorker {
         (self.listener)(&state, None);
         drop(_guard);
         self.check_now(&m.id)
+    }
+
+    /// Channels the user linked, newest first.
+    pub fn links(&self) -> Vec<Link> {
+        let mut l = self.links.all();
+        l.sort_by(|a, b| b.added_ms.cmp(&a.added_ms));
+        l
+    }
+
+    pub fn remove_link(&self, puuid: &str) {
+        self.links.remove(puuid);
+    }
+
+    /// Players in this match the user linked before: ask whether their channel was live.
+    fn check_links(&self, m: &MatchSummary, s: &Settings, me: Option<&str>, state: &mut MatchStreamers) {
+        let links = self.links.all();
+        for p in &m.players {
+            if Some(p.puuid.as_str()) == me || state.players.iter().any(|x| x.puuid == p.puuid) {
+                continue;
+            }
+            let Some(link) = links.iter().find(|l| l.puuid == p.puuid) else { continue };
+            match fetch_channel(&s.server_url, m, &p.puuid, &link.login) {
+                Ok(Some(hit)) => {
+                    merge_hits(state, vec![hit], m, me, s);
+                    if let Some(x) = state.players.iter_mut().find(|x| x.puuid == p.puuid) {
+                        x.manual = true;
+                    }
+                    self.links.mark_seen(&p.puuid);
+                }
+                Ok(None) => {} // not streaming this time
+                Err(e) => eprintln!("linked channel {}: {e}", link.login),
+            }
+        }
     }
 
     fn process(&self, m: &MatchSummary, force: bool, may_download: bool) -> Result<(), String> {
@@ -529,6 +652,11 @@ impl StreamerWorker {
                     state.error = None;
                 }
                 Err(e) => state.error = Some(e),
+            }
+            // Channels you linked before (smurfs, odd names). Checked on the
+            // first two checks only, like everything else, so it stays cheap.
+            if state.checks < NO_STREAMER_CHECKS {
+                self.check_links(m, &s, me.as_deref(), &mut state);
             }
             state.checked_ms = Some(now_ms());
             state.checks += 1;
@@ -761,6 +889,32 @@ mod tests {
         assert!(j.contains("-f best[height<=1080]/best"));
         assert!(j.contains("-o /c/vs_st.%(ext)s"));
         assert!(j.ends_with("-- https://www.twitch.tv/videos/1"), "the URL can never be read as an option");
+    }
+
+    #[test]
+    fn cleans_typed_channel_names() {
+        assert_eq!(clean_login("https://www.twitch.tv/Some_Streamer/videos").as_deref(), Some("some_streamer"));
+        assert_eq!(clean_login("twitch.tv/abc?x=1").as_deref(), Some("abc"));
+        assert_eq!(clean_login("  Name123 ").as_deref(), Some("name123"));
+        assert_eq!(clean_login("ab"), None);
+        assert_eq!(clean_login("../etc"), None);
+    }
+
+    #[test]
+    fn links_are_remembered_and_removed() {
+        let path = std::env::temp_dir().join(format!("crosspov-links-{}.json", std::process::id()));
+        let store = LinkStore::new(path.clone());
+        store.save("p1", "streamer_one", "Enemy · Raze");
+        store.save("p2", "other", "Teammate · Sova");
+        store.save("p1", "renamed", "Enemy · Raze");
+        let all = store.all();
+        assert_eq!(all.len(), 2, "one link per player");
+        assert_eq!(all.iter().find(|l| l.puuid == "p1").unwrap().login, "renamed");
+        store.mark_seen("p2");
+        assert_eq!(store.all().iter().find(|l| l.puuid == "p2").unwrap().seen, 1);
+        store.remove("p1");
+        assert_eq!(store.all().len(), 1);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
