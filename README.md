@@ -79,7 +79,7 @@ and the installer adds it if it's missing.
 Requirements: Node 22+, Rust (stable) and, on Windows, the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
-On Windows, fetch FFmpeg once with `pwsh scripts/get-ffmpeg.ps1`.
+On Windows, fetch FFmpeg once with `pwsh scripts/get-ffmpeg.ps1` (a full build, fine for development). Releases ship a small FFmpeg with only what CrossPOV uses, built by `scripts/build-ffmpeg.sh`.
 
 Testing without VALORANT: set `CROSSPOV_ALWAYS_RECORD=1` to record all the
 time, or `CROSSPOV_GAME_EXE=SomeGame.exe` to treat another game as the game.
@@ -137,7 +137,8 @@ npx wrangler dev           # run it locally; put HENRIK_API_KEY in a .dev.vars f
 | `server/test/` | Server tests |
 | `src-tauri/src/streamers.rs` | Streamer clips: fights → VOD times → yt-dlp section downloads |
 | `scripts/get-ytdlp.ps1` | Downloads the yt-dlp build that ships with the app |
-| `scripts/get-ffmpeg.ps1` | Downloads the FFmpeg build that ships with the app |
+| `scripts/get-ffmpeg.ps1` | Downloads a full FFmpeg build for development |
+| `scripts/build-ffmpeg.sh` | Builds the small FFmpeg that ships with the app (about 7 MB) |
 | `.github/workflows/build-windows.yml` | Builds the `.exe` and installer on Windows |
 
 ## Roadmap

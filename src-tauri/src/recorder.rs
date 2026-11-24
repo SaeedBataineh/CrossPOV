@@ -378,7 +378,10 @@ impl Recorder {
             Container::Mp4 => "mp4",
             Container::Mkv => "mkv",
         };
-        let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+        let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+        let stamp = now
+            .format(time::macros::format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]"))
+            .unwrap_or_else(|_| now_ms().to_string());
         let mut out = out_dir.join(format!("Clip_{stamp}.{ext}"));
         let mut n = 2;
         while out.exists() {

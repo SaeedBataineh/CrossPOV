@@ -26,6 +26,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ffmpeg:
+    # A small FFmpeg with only what CrossPOV uses (~7 MB instead of ~130 MB).
+    # Cached: it only rebuilds when scripts/build-ffmpeg.sh changes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: ffmpeg-out/ffmpeg.exe
+          key: ffmpeg-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+      - name: Build FFmpeg
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mingw-w64 nasm pkg-config
+          scripts/build-ffmpeg.sh ffmpeg-out/ffmpeg.exe "$RUNNER_TEMP/ffbuild"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-small
+          path: ffmpeg-out/ffmpeg.exe
+          retention-days: 3
+
   server:
     runs-on: ubuntu-latest
     steps:
@@ -41,6 +64,7 @@ jobs:
         run: npm run test:server
 
   build:
+    needs: ffmpeg
     runs-on: windows-latest
     permissions:
       contents: write # only used to create the Release
@@ -66,11 +90,33 @@ jobs:
       - name: Type-check and build the UI
         run: npm run build
 
-      - name: Download FFmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-small
+          path: ffmpeg-small
+
+      - name: Check the small FFmpeg has everything CrossPOV uses
         shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/get-ffmpeg.ps1
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item ffmpeg-small/ffmpeg.exe src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
+          $ff = "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+          "FFmpeg size: {0:N1} MB" -f ((Get-Item $ff).Length / 1MB)
+          $need = @{ "-filters" = "ddagrab","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
+          foreach ($k in $need.Keys) {
+            $list = & $ff -hide_banner $k 2>&1 | Out-String
+            foreach ($n in $need[$k]) { if ($list -notmatch "\b$n\b") { throw "FFmpeg is missing $n ($k)" } }
+          }
+          # The whole clip pipeline on Windows' own encoder: record segments, join them, make a thumbnail.
+          $t = Join-Path $env:RUNNER_TEMP "fftest"; New-Item -ItemType Directory -Force $t | Out-Null
+          & $ff -hide_banner -loglevel error -f lavfi -i "testsrc2=size=1280x720:rate=30" -t 6 -vf format=nv12 -c:v h264_mf -g 60 -f segment -segment_time 2 -segment_format mpegts "$t/seg%03d.ts"
+          if ($LASTEXITCODE) { throw "recording test failed" }
+          Get-ChildItem "$t/seg*.ts" | ForEach-Object { "file '$($_.FullName -replace '\\','/')'" } | Set-Content "$t/list.txt"
+          & $ff -hide_banner -loglevel error -f concat -safe 0 -i "$t/list.txt" -c copy -movflags +faststart "$t/clip.mp4"
+          if ($LASTEXITCODE) { throw "joining test failed" }
+          & $ff -hide_banner -loglevel error -ss 1 -i "$t/clip.mp4" -frames:v 1 -vf scale=480:-2 -q:v 4 "$t/thumb.jpg"
+          if ($LASTEXITCODE -or -not (Test-Path "$t/thumb.jpg")) { throw "thumbnail test failed" }
+          "FFmpeg pipeline OK"
 
       - name: Download yt-dlp
         shell: pwsh

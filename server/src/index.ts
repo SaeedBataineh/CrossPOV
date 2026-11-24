@@ -216,6 +216,23 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
   }
 }
 
+/** Browser protections for the website: only our own code runs, nobody can frame it. */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy":
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "x-frame-options": "DENY",
+  "permissions-policy": "camera=(), microphone=(), geolocation=()",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+};
+
+export function withSecurityHeaders(res: Response): Response {
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v);
+  return out;
+}
+
 /** "https://crosspov.com//riot.txt" -> "https://crosspov.com/riot.txt"; null if nothing to change. */
 export function collapseSlashes(url: URL): string | null {
   const path = url.pathname.replace(/\/{2,}/g, "/");
@@ -242,7 +259,7 @@ export default {
     // Everything else is the demo website. "//riot.txt" (as Riot's verifier asks for) serves "/riot.txt".
     if (env.ASSETS) {
       const clean = collapseSlashes(url);
-      return env.ASSETS.fetch(clean ? new Request(clean, request) : request);
+      return withSecurityHeaders(await env.ASSETS.fetch(clean ? new Request(clean, request) : request));
     }
     return new Response("Not found", { status: 404 });
   },

@@ -71,10 +71,12 @@ fn clip_folder(app: &AppHandle, s: &Settings) -> PathBuf {
     }
 }
 
-/// Lets the UI show thumbnails from the clip folder (and nothing else).
-fn allow_clip_folder(app: &AppHandle, folder: &PathBuf) {
-    let _ = std::fs::create_dir_all(folder);
-    if let Err(err) = app.asset_protocol_scope().allow_directory(folder, true) {
+/// Lets the UI show thumbnails, and nothing else: only the clip folder's
+/// thumbnail subfolder, not the clips or anything around them.
+fn allow_clip_folder(app: &AppHandle, folder: &std::path::Path) {
+    let thumbs = folder.join(clips::THUMBS);
+    let _ = std::fs::create_dir_all(&thumbs);
+    if let Err(err) = app.asset_protocol_scope().allow_directory(&thumbs, false) {
         eprintln!("could not allow clip folder for thumbnails: {err}");
     }
 }

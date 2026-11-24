@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MY_CLIPS: &str = "My Clips";
 pub const STREAMER_CLIPS: &str = "Streamer POV";
-const THUMBS: &str = ".thumbs";
+pub const THUMBS: &str = ".thumbs";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

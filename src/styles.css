@@ -269,3 +269,11 @@ select.input { padding-right: 4px; }
 .update-bar i.indeterminate { width: 35%; animation: update-slide 1.2s ease-in-out infinite; }
 @keyframes update-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 @media (prefers-reduced-motion: reduce) { .update-bar i.indeterminate { animation: none; width: 100%; opacity: 0.5; } }
+
+/* ---------- Feels like an app, not a web page ---------- */
+/* No text highlighting when dragging with the mouse, no I-beam cursor over
+   labels, and images can't be dragged out. Typing fields still work normally. */
+.app, .update-gate { -webkit-user-select: none; user-select: none; cursor: default; }
+.app input, .app textarea, .app select { -webkit-user-select: text; user-select: text; cursor: text; }
+.app select { cursor: pointer; }
+.app img, .app svg { -webkit-user-drag: none; user-drag: none; }

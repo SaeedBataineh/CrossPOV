@@ -74,6 +74,8 @@ impl NoWindow for Command {
 pub enum VideoEncoder {
     Nvenc,
     Amf,
+    /// Intel (and other) GPUs through Windows' Media Foundation encoder in
+    /// hardware mode. Serialised as "qsv" for older settings and logs.
     Qsv,
     Cpu,
 }
@@ -83,6 +85,9 @@ impl VideoEncoder {
         match self {
             VideoEncoder::Nvenc => "h264_nvenc",
             VideoEncoder::Amf => "h264_amf",
+            #[cfg(windows)]
+            VideoEncoder::Qsv => "h264_mf",
+            #[cfg(not(windows))]
             VideoEncoder::Qsv => "h264_qsv",
             #[cfg(windows)]
             VideoEncoder::Cpu => "h264_mf",
@@ -95,13 +100,24 @@ impl VideoEncoder {
         match self {
             VideoEncoder::Nvenc => "NVIDIA NVENC",
             VideoEncoder::Amf => "AMD AMF",
-            VideoEncoder::Qsv => "Intel Quick Sync",
+            VideoEncoder::Qsv => "Intel / Windows hardware",
             VideoEncoder::Cpu => "CPU",
         }
     }
 
-    fn is_gpu(self) -> bool {
-        self != VideoEncoder::Cpu
+    /// NVENC and AMF take the captured frames straight from the GPU; the
+    /// Media Foundation encoders get them copied to normal memory first.
+    fn takes_gpu_frames(self) -> bool {
+        matches!(self, VideoEncoder::Nvenc | VideoEncoder::Amf)
+    }
+
+    /// Extra options needed for a quick "does this work" test encode.
+    fn probe_args(self) -> &'static [&'static str] {
+        if cfg!(windows) && self == VideoEncoder::Qsv {
+            &["-hw_encoding", "1"]
+        } else {
+            &[]
+        }
     }
 }
 
@@ -109,7 +125,9 @@ impl VideoEncoder {
 fn encoder_works(ffmpeg: &Path, enc: VideoEncoder) -> bool {
     Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-frames:v", "3"])
-        .args(["-pix_fmt", "nv12", "-c:v", enc.codec(), "-f", "null", "-"])
+        .args(["-pix_fmt", "nv12", "-c:v", enc.codec()])
+        .args(enc.probe_args())
+        .args(["-f", "null", "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -235,18 +253,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let height = target_height(s.resolution);
     let on_gpu = plan.source == VideoSource::Desktop;
     let mut vf: Vec<String> = Vec::new();
-    if on_gpu && (height.is_some() || !plan.encoder.is_gpu() || plan.compat) {
+    if on_gpu && (height.is_some() || !plan.encoder.takes_gpu_frames() || plan.compat) {
         vf.push("hwdownload".into());
         vf.push("format=bgra".into());
     }
     if let Some(h) = height {
         vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
     }
-    let needs_upload_for_qsv = plan.encoder == VideoEncoder::Qsv && on_gpu && vf.is_empty();
-    if needs_upload_for_qsv {
-        vf.push("hwmap=derive_device=qsv".into());
-        vf.push("format=qsv".into());
-    } else if !vf.is_empty() || !on_gpu {
+    if !vf.is_empty() || !on_gpu {
         vf.push("format=nv12".into());
     }
 
@@ -295,6 +309,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     match plan.encoder {
         VideoEncoder::Nvenc => push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]),
         VideoEncoder::Amf => push(&mut a, &["-usage", "transcoding", "-quality", "balanced", "-rc", "vbr_peak"]),
+        #[cfg(windows)]
+        VideoEncoder::Qsv => push(&mut a, &["-hw_encoding", "1", "-rate_control", "cbr", "-scenario", "display_remoting"]),
+        #[cfg(not(windows))]
         VideoEncoder::Qsv => push(&mut a, &["-preset", "medium", "-look_ahead", "0"]),
         #[cfg(windows)]
         VideoEncoder::Cpu => push(&mut a, &["-rate_control", "cbr", "-scenario", "display_remoting"]),
@@ -382,10 +399,10 @@ mod tests {
     }
 
     #[test]
-    fn qsv_maps_frames_on_the_gpu() {
+    fn media_foundation_gets_frames_in_normal_memory() {
         let s = Settings { resolution: Resolution::Native, ..Settings::default() };
         let args = joined(&s, &plan(VideoSource::Desktop, VideoEncoder::Qsv, false));
-        assert!(args.contains("hwmap=derive_device=qsv,format=qsv"), "{args}");
+        assert!(args.contains("[0:v]hwdownload,format=bgra,format=nv12[v]"), "{args}");
     }
 
     #[test]

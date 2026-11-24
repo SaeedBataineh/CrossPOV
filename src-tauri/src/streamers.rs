@@ -227,8 +227,22 @@ pub fn ytdlp_args(vod_url: &str, from: f64, to: f64, quality: DownloadQuality, f
         "mp4".into(),
         "-o".into(),
         format!("{}.%(ext)s", out_stem.to_string_lossy()),
+        // "--": whatever comes next is a URL, never an option.
+        "--".into(),
         vod_url.into(),
     ]
+}
+
+/// Only plain Twitch VOD links are downloaded, whatever the server says.
+pub fn is_twitch_vod_url(url: &str) -> bool {
+    url.strip_prefix("https://www.twitch.tv/videos/")
+        .is_some_and(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// A channel name or match id made safe for a file name: letters, digits and _ only.
+pub fn file_safe(s: &str, max: usize) -> String {
+    let out: String = s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(max).collect();
+    if out.is_empty() { "unknown".into() } else { out }
 }
 
 #[derive(Debug, PartialEq)]
@@ -492,7 +506,9 @@ impl StreamerWorker {
         if state.finished && !force {
             return Ok(());
         }
-        let started = chrono::DateTime::parse_from_rfc3339(&m.started_at).map(|t| t.timestamp_millis() as u64).unwrap_or(0);
+        let started = time::OffsetDateTime::parse(&m.started_at, &time::format_description::well_known::Rfc3339)
+            .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as u64)
+            .unwrap_or(0);
         let window_ms = u64::from(s.vod_wait_hours) * 3_600_000;
         if !force && now_ms().saturating_sub(started) > window_ms + m.length_ms {
             state.finished = true;
@@ -568,9 +584,14 @@ impl StreamerWorker {
                     waiting = true; // VOD hasn't caught up yet (still live / processing).
                     continue;
                 }
+                if !is_twitch_vod_url(&vod.url) {
+                    state.players[i].status = StreamerStatus::Failed;
+                    state.players[i].message = Some("The server sent an unexpected video link, so nothing was downloaded.".into());
+                    break;
+                }
                 let _ = fs::create_dir_all(&out_dir);
-                let short = &m.id[..m.id.len().min(8)];
-                let stem = out_dir.join(format!("{}_R{}_{}_{}", p.channel.login, w.round + 1, w.moment.slug(), short));
+                let short = file_safe(&m.id, 8);
+                let stem = out_dir.join(format!("{}_R{}_{}_{}", file_safe(&p.channel.login, 40), w.round + 1, w.moment.slug(), short));
                 match download(&ytdlp, &ff, ytdlp_args(&vod.url, from, to, s.download_quality, &ff, &stem)) {
                     Ok(()) => {
                         let clip = stem.with_extension("mp4");
@@ -736,7 +757,18 @@ mod tests {
         assert!(j.contains("--download-sections *3625.0-3635.5"), "{j}");
         assert!(j.contains("-f best[height<=1080]/best"));
         assert!(j.contains("-o /c/vs_st.%(ext)s"));
-        assert!(j.ends_with("https://www.twitch.tv/videos/1"));
+        assert!(j.ends_with("-- https://www.twitch.tv/videos/1"), "the URL can never be read as an option");
+    }
+
+    #[test]
+    fn only_twitch_vod_links_and_safe_file_names() {
+        assert!(is_twitch_vod_url("https://www.twitch.tv/videos/2290000000"));
+        for bad in ["--exec calc", "https://evil.example/videos/1", "https://www.twitch.tv/videos/1?x=--exec", "https://www.twitch.tv/videos/", "file:///c/x"] {
+            assert!(!is_twitch_vod_url(bad), "{bad}");
+        }
+        assert_eq!(file_safe("../../Windows/x", 40), "Windowsx");
+        assert_eq!(file_safe("streamer_two", 40), "streamer_two");
+        assert_eq!(file_safe("..", 40), "unknown");
     }
 
     /// Runs the real yt-dlp + FFmpeg download path against an HLS stream named

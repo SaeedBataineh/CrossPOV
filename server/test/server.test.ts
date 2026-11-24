@@ -190,3 +190,12 @@ test("double slashes in a path serve the normal file", () => {
   assert.equal(collapseSlashes(new URL("https://crosspov.com//riot.txt")), "https://crosspov.com/riot.txt");
   assert.equal(collapseSlashes(new URL("https://crosspov.com/riot.txt")), null);
 });
+
+import { withSecurityHeaders } from "../src/index.ts";
+
+test("website responses carry security headers", () => {
+  const res = withSecurityHeaders(new Response("<!doctype html>", { headers: { "content-type": "text/html" } }));
+  assert.match(res.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(res.headers.get("content-type"), "text/html", "keeps the original headers");
+});

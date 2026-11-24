@@ -73,7 +73,7 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
             <Seg label="Quality" value={draft.quality} onChange={(v) => set("quality", v)} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Med" }, { value: "high", label: "High" }, { value: "max", label: "Max" }]} />
           </Row>
           <Row label="Encoder" help="GPU keeps your FPS up">
-            <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "QSV" }, { value: "cpu", label: "CPU" }]} />
+            <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "Intel" }, { value: "cpu", label: "CPU" }]} />
           </Row>
           <Row label="File type" help="MKV survives crashes">
             <Seg label="File type" value={draft.format} onChange={(v) => set("format", v)} options={[{ value: "mp4", label: "MP4" }, { value: "mkv", label: "MKV" }]} />
