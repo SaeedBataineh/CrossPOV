@@ -114,7 +114,7 @@ export function cardFromClip(c: ClipInfo): CardClip {
 }
 
 export function cardFromSample(c: Clip): CardClip {
-  return { key: c.id, title: c.title, meta: `${c.meta} · sample`, length: c.length, kind: c.kind, sample: true };
+  return { key: c.id, title: c.title, meta: c.meta, length: c.length, kind: c.kind, sample: true };
 }
 
 export function ClipCard({ clip, actions }: { clip: CardClip; actions?: ReactNode }) {
@@ -123,7 +123,7 @@ export function ClipCard({ clip, actions }: { clip: CardClip; actions?: ReactNod
     <article className={clip.sample ? "card clip sample" : "card clip"}>
       <div className="thumb">
         {clip.thumb ? <img src={clip.thumb} alt="" loading="lazy" decoding="async" /> : <PlayIcon />}
-        <span className={theirs ? "badge theirs" : "badge mine"}>{theirs ? "Their POV" : "My POV"}</span>
+        <span className={theirs ? "badge theirs" : "badge mine"} title={theirs ? "Their POV" : "Your POV"}>{theirs ? "THEM" : "YOU"}</span>
         {clip.length && <span className="duration">{clip.length}</span>}
       </div>
       <div className="clip-body">

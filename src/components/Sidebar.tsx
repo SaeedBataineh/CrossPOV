@@ -14,7 +14,7 @@ export function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (p: Page
   return (
     <nav className="sidebar" aria-label="Main">
       <div className="brand">
-        <Logo />
+        <Logo size={24} />
         <span>CrossPOV</span>
       </div>
       {ITEMS.map((item) => (

@@ -6,20 +6,51 @@ import { SAMPLE_MATCHES, STATUS_LABEL } from "../lib/sample";
 import type { Settings } from "../lib/settings";
 import type { useRecorder } from "../lib/useRecorder";
 
-const RES_LABEL = { native: "Native", "1440p": "1440p", "1080p": "1080p", "720p": "720p" } as const;
+/** 60 -> "01:00", like a recorder's display. */
+const clock = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+
+/** "1080p60", or "Native 60" at native resolution. */
+const videoLabel = (s: Settings) => (s.resolution === "native" ? `Native ${s.fps}` : `${s.resolution}${s.fps}`);
+
+function audioSummary(s: Settings): string {
+  if (!s.gameAudio && !s.apps.some((a) => a.enabled)) return "Game muted";
+  if (s.audioMode === "desktop") return "Everything";
+  const apps = s.apps.filter((a) => a.enabled).map((a) => a.exe.replace(/\.exe$/i, ""));
+  return [s.gameAudio ? "Game" : null, ...apps].filter(Boolean).join(", ");
+}
 const QUALITY_LABEL = { low: "Low", medium: "Medium", high: "High", max: "Max" } as const;
 
-function statusLine(s: RecorderStatus | null, bufferSeconds: number): { text: string; dot: string } {
-  switch (s?.state) {
+function StatusLine({ status, bufferSeconds }: { status: RecorderStatus | null; bufferSeconds: number }) {
+  switch (status?.state) {
     case "recording":
-      return { text: `Recording · last ${bufferSeconds} s ready to save · ${s.encoder ?? ""}`, dot: "live" };
+      return (
+        <span className="status-line">
+          <span className="rec">REC</span>
+          VALORANT · buffer {bufferSeconds}s{status.encoder ? ` · ${status.encoder}` : ""}
+        </span>
+      );
     case "waiting":
-      return { text: isDesktop ? "Waiting for VALORANT to open" : "Website demo · recording needs the desktop app", dot: "idle" };
+      return (
+        <span className="status-line">
+          <span className="dot" />
+          {isDesktop ? "Waiting for VALORANT" : "Website demo · recording needs the desktop app"}
+        </span>
+      );
     case "noFfmpeg":
     case "error":
-      return { text: s.message ?? "The recorder stopped", dot: "bad" };
+      return (
+        <span className="status-line">
+          <span className="dot bad" />
+          {status.message ?? "The recorder stopped"}
+        </span>
+      );
     default:
-      return { text: "Getting the recorder ready…", dot: "idle" };
+      return (
+        <span className="status-line">
+          <span className="dot" />
+          Getting ready…
+        </span>
+      );
   }
 }
 
@@ -35,7 +66,6 @@ export default function Home({
   const { status, clips, notify } = recorder;
   const [saving, setSaving] = useState(false);
   const last = SAMPLE_MATCHES[0];
-  const line = statusLine(status, settings.bufferSeconds);
   const recording = status?.state === "recording";
   const recent = clips.slice(0, 4).map(cardFromClip);
 
@@ -54,10 +84,7 @@ export default function Home({
       <header className="page-head">
         <div className="stack-6">
           <h1>Home</h1>
-          <span className="status-line">
-            <span className={`dot ${line.dot}`} />
-            {line.text}
-          </span>
+          <StatusLine status={status} bufferSeconds={settings.bufferSeconds} />
         </div>
         <button type="button" className="btn primary big" disabled={!recording || saving} onClick={() => void save()}
           title={recording ? undefined : "Clips can be saved while VALORANT is open"}>
@@ -68,30 +95,25 @@ export default function Home({
       {status?.hotkeyError && <Notice tone="warn">{status.hotkeyError}</Notice>}
       {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}
 
-      <section className="stat-grid" aria-label="Status">
-        <div className="card stat">
+      <section className="stat-grid" aria-label="Recorder settings">
+        <div className="stat">
           <span className="eyebrow">Replay buffer</span>
-          <span className="stat-value">Last {settings.bufferSeconds} s</span>
-          <span className="muted">
-            {RES_LABEL[settings.resolution]} · {settings.fps} fps · {QUALITY_LABEL[settings.quality]}
-          </span>
+          <span className="stat-value">{clock(settings.bufferSeconds)}</span>
         </div>
-        <div className="card stat">
-          <span className="eyebrow">Clip hotkey</span>
-          <span className="stat-value">{settings.hotkey}</span>
-          <span className="muted">Press after a play to save it</span>
+        <div className="stat">
+          <span className="eyebrow">Video</span>
+          <span className="stat-value">{videoLabel(settings)}</span>
+          <span className="stat-sub">{QUALITY_LABEL[settings.quality]} quality</span>
         </div>
-        <div className="card stat">
-          <span className="eyebrow">Audio in clips</span>
-          <span className="stat-value">
-            {settings.audioMode === "desktop" ? "Everything" : `Game${settings.apps.some((a) => a.enabled) ? " + apps" : " only"}`}
-          </span>
-          <span className="muted">{settings.microphone ? "Mic on" : "Mic off"}</span>
+        <div className="stat">
+          <span className="eyebrow">Audio</span>
+          <span className="stat-value">{audioSummary(settings)}</span>
+          <span className="stat-sub">{settings.microphone ? "Mic on" : "Mic off"}</span>
         </div>
-        <div className="card stat">
+        <div className="stat">
           <span className="eyebrow">Storage limit</span>
           <span className="stat-value">{settings.storageLimitGb ? `${settings.storageLimitGb} GB` : "None"}</span>
-          <span className="muted">{settings.pruneOldest ? "Oldest clips removed when full" : "Never deletes clips"}</span>
+          <span className="stat-sub">{settings.pruneOldest ? "Oldest clips go first" : "Never deletes clips"}</span>
         </div>
       </section>
 
@@ -123,15 +145,12 @@ export default function Home({
             <span className="muted">{last.title} · {last.when}</span>
           </div>
           <SampleBanner>Sample data. Streamer detection arrives in step 4.</SampleBanner>
-          <ul className="plain stack-10">
+          <ul className="plain">
             {last.players.filter((p) => p.channel).map((p) => (
               <li key={p.name} className="mini-player">
-                <span className={`avatar ${p.status}`}>{p.name.slice(0, 2).toUpperCase()}</span>
-                <span className="stack-2">
-                  <strong>{p.name}</strong>
-                  <span className={`status-text ${p.status}`}>
-                    {STATUS_LABEL[p.status]}{p.clips ? ` · ${p.clips} clips` : ""}
-                  </span>
+                <strong>{p.name}</strong>
+                <span className={`status-text ${p.status}`}>
+                  {p.clips ? `${p.clips} clips` : STATUS_LABEL[p.status]}
                 </span>
               </li>
             ))}

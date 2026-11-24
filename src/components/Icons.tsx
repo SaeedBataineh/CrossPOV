@@ -34,7 +34,7 @@ export const SearchIcon = ({ size = 16 }: P) => (
 
 export const Logo = ({ size = 28 }: P) => (
   <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
-    <rect x="1" y="1" width="26" height="26" rx="7" stroke="#6B9BFF" strokeWidth="2" />
-    <path d="M8 14h12M14 8v12" stroke="#FFA24C" strokeWidth="2.5" strokeLinecap="round" />
+    <circle cx="14" cy="14" r="12" stroke="#F0F0F0" strokeWidth="2" />
+    <circle cx="14" cy="14" r="5" fill="#E5332F" />
   </svg>
 );
