@@ -70,7 +70,7 @@ export default function Home({
   const last = matches[0];
   const me = last ? findMe(last, settings.riotId) : undefined;
   const recording = status?.state === "recording";
-  const recent = clips.slice(0, 4).map(cardFromClip);
+  const recent = clips.slice(0, 6).map(cardFromClip);
 
   async function save() {
     setSaving(true);
