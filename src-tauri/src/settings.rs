@@ -82,6 +82,8 @@ pub enum DownloadQuality {
 pub const DEFAULT_SERVER_URL: &str = "https://crosspov.com";
 /// Where the server lived before crosspov.com; saved settings move over.
 const OLD_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
+/// Longest lead-in / follow-through for a streamer clip, in seconds.
+pub const MAX_PADDING: u32 = 120;
 const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
 
 /// Missing fields (e.g. after an update adds a setting) fall back to defaults.
@@ -163,8 +165,8 @@ impl Default for Settings {
             clip_killed_you: true,
             clip_you_killed: true,
             clip_whole_round: false,
-            seconds_before: 5,
-            seconds_after: 5,
+            seconds_before: 60,
+            seconds_after: 60,
             download_quality: DownloadQuality::Source,
             side_by_side: true,
             grab_after_match: true,
@@ -198,8 +200,8 @@ impl Settings {
         }
         self.fps = self.fps.clamp(24, 240);
         self.buffer_seconds = self.buffer_seconds.clamp(5, 300);
-        self.seconds_before = self.seconds_before.min(60);
-        self.seconds_after = self.seconds_after.min(60);
+        self.seconds_before = self.seconds_before.min(MAX_PADDING);
+        self.seconds_after = self.seconds_after.min(MAX_PADDING);
         self.vod_wait_hours = self.vod_wait_hours.clamp(1, 168);
         self.hotkey = self.hotkey.trim().to_string();
         if self.hotkey.is_empty() {

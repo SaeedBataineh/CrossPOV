@@ -117,7 +117,7 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
 
   const mb = estimateClipMb(draft);
   const riotIdOk = draft.riotId.trim() === "" || /^[^#]+#[^#\s]+$/.test(draft.riotId.trim());
-  const secOpts = [3, 5, 10, 15].map((v) => ({ value: v, label: `${v} s` }));
+  const secOpts = [10, 30, 60, 90, 120].map((v) => ({ value: v, label: `${v} s` }));
 
   return (
     <div className="settings-page">
@@ -285,10 +285,10 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
         <Row label="Whole rounds you both fought in" help="Bigger clips with the full round.">
           <Toggle label="Whole rounds" checked={draft.clipWholeRound} onChange={(v) => set("clipWholeRound", v)} />
         </Row>
-        <Row label="Seconds before the moment" help="Lead-in before the kill.">
+        <Row label="Seconds before the moment" help="How much of their stream to keep before the fight (up to 2 minutes).">
           <Pills label="Seconds before" value={draft.secondsBefore} onChange={(v) => set("secondsBefore", v)} options={secOpts} />
         </Row>
-        <Row label="Seconds after the moment" help="Time kept after the kill.">
+        <Row label="Seconds after the moment" help="How much to keep after the fight (up to 2 minutes).">
           <Pills label="Seconds after" value={draft.secondsAfter} onChange={(v) => set("secondsAfter", v)} options={secOpts} />
         </Row>
         <Row label="Download quality" help="Source keeps the streamer's original quality.">

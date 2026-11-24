@@ -627,6 +627,20 @@ mod tests {
     use super::*;
     use crate::matches::{MatchKill, MatchPlayer, MatchRound};
 
+    fn five_sec() -> Settings {
+        Settings { seconds_before: 5, seconds_after: 5, ..Settings::default() }
+    }
+
+    #[test]
+    fn default_padding_gives_a_full_two_minute_clip() {
+        let w = fight_windows(&sample(), "me", "st", &Settings::default());
+        // Kill at 30 s (60 s before is clamped at the match start) and death
+        // at 150 s: with a minute each side the two clips touch, so they
+        // become one clip from 0:00 to 3:30 instead of two overlapping ones.
+        assert_eq!(w.len(), 1);
+        assert_eq!((w[0].start, w[0].end), (0.0, 210.0));
+    }
+
     fn kill(round: u32, at: u64, killer: &str, victim: &str) -> MatchKill {
         MatchKill { round, at_ms: at, in_round_ms: 0, killer: killer.into(), victim: victim.into(), weapon: None }
     }
@@ -666,7 +680,7 @@ mod tests {
 
     #[test]
     fn finds_fights_between_you_and_the_streamer() {
-        let s = Settings::default(); // 5 s before, 5 s after
+        let s = five_sec(); // 5 s before, 5 s after
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 2);
         assert_eq!((w[0].start, w[0].end, w[0].moment), (25.0, 35.0, Moment::YouKilled));
@@ -675,7 +689,7 @@ mod tests {
 
     #[test]
     fn respects_which_moments_to_clip() {
-        let s = Settings { clip_you_killed: false, ..Settings::default() };
+        let s = Settings { clip_you_killed: false, ..five_sec() };
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].moment, Moment::KilledYou);
@@ -686,7 +700,7 @@ mod tests {
         let mut m = sample();
         m.kills.push(kill(0, 36_000, "st", "me"));
         m.kills.sort_by_key(|k| k.at_ms);
-        let w = fight_windows(&m, "me", "st", &Settings::default());
+        let w = fight_windows(&m, "me", "st", &five_sec());
         assert_eq!((w[0].start, w[0].end), (25.0, 41.0), "kill at 30s and death at 36s become one clip");
     }
 
@@ -768,12 +782,12 @@ mod tests {
             vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
             live_game: Some("VALORANT".into()),
         };
-        merge_hits(&mut state, vec![hit.clone()], &m, Some("me"), &Settings::default());
+        merge_hits(&mut state, vec![hit.clone()], &m, Some("me"), &five_sec());
         assert_eq!(state.players.len(), 1);
         assert_eq!(state.players[0].fights, 2);
         assert_eq!(state.players[0].status, StreamerStatus::Working);
         // A later answer updates, never duplicates.
-        merge_hits(&mut state, vec![hit], &m, Some("me"), &Settings::default());
+        merge_hits(&mut state, vec![hit], &m, Some("me"), &five_sec());
         assert_eq!(state.players.len(), 1);
     }
 }
