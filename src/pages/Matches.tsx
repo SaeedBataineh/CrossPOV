@@ -149,8 +149,7 @@ function MatchDetail({
                         <tr key={p.puuid}>
                           <td className="ellipsis" style={{ maxWidth: 200 }}>
                             <span className="ag" title={p.agent}>{ini(p.agent)}</span>
-                            {/* Other players' Riot names are never shown: some hide them on purpose. */}
-                            {p.puuid === me?.puuid ? <><b>{p.name}</b> <span className="m tiny dim">#{p.tag}</span></> : <b>{p.agent}</b>}
+                            <b>{p.name}</b> <span className="m tiny dim">#{p.tag}</span>
                           </td>
                           <td className="m">{p.kills}/{p.deaths}/{p.assists}</td>
                           <td>
@@ -241,7 +240,7 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
           <select className="input" aria-label="Player" value={puuid} onChange={(e) => setPuuid(e.target.value)}>
             <option value="">Which player?</option>
             {others.map((p) => (
-              <option key={p.puuid} value={p.puuid}>{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent} · {p.kills}/{p.deaths}/{p.assists}</option>
+              <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · {p.agent}</option>
             ))}
           </select>
           <input className="input grow" aria-label="Twitch channel" placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />

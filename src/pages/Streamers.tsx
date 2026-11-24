@@ -47,7 +47,7 @@ function LinkedChannels({ notify }: { notify: (text: string, tone: "good" | "bad
           </span>
         </div>
       )}
-      <p className="note">Riot names are never stored or shown. The list lives only on this PC: the server is asked about one match at a time and keeps nothing, and links are never shared with other players.</p>
+      <p className="note">Links store the channel, not Riot names. The list lives only on this PC: the server is asked about one match at a time and keeps nothing, and links are never shared with other players.</p>
     </Panel>
   );
 }
