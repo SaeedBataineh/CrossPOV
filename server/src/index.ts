@@ -3,14 +3,16 @@
 // GET /api/health
 // GET /api/latest-match?region=eu&name=<name>&tag=<tag>
 // GET /api/match/<region>/<matchId>
+// GET /api/match/<region>/<matchId>/streamers?me=<puuid>
 //
 // The HenrikDev API key lives only here, as the HENRIK_API_KEY secret.
 // Responses are cached at Cloudflare's edge so each match is fetched from
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
+import { findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
 
-export interface Env {
+export interface Env extends TwitchEnv {
   HENRIK_API_KEY?: string;
   /** Optional override, used by tests. */
   HENRIK_BASE?: string;
@@ -21,6 +23,7 @@ const VERSION = "1";
 const REGIONS = new Set(["na", "eu", "ap", "kr", "br", "latam"]);
 const LATEST_TTL = 60; // seconds: a new match can appear at any time
 const MATCH_TTL = 60 * 60 * 24 * 7; // finished matches never change
+const STREAMERS_TTL = 5 * 60; // VODs appear and grow, so re-check every few minutes
 
 class HttpError extends Error {
   status: number;
@@ -60,18 +63,18 @@ async function henrik(env: Env, path: string): Promise<unknown> {
 }
 
 /** Runs `load` once per cache key per TTL, using Cloudflare's edge cache. */
-async function cached(key: string, ttl: number, ctx: ExecutionContext | undefined, load: () => Promise<unknown>): Promise<Response> {
+async function cachedData<T>(key: string, ttl: number, ctx: ExecutionContext | undefined, load: () => Promise<T>): Promise<T> {
   const cache = typeof caches !== "undefined" ? caches.default : undefined;
   const cacheKey = new Request(`https://cache.crosspov.internal/${VERSION}/${key}`);
   const hit = cache ? await cache.match(cacheKey) : undefined;
-  if (hit) return hit;
-  const res = json(await load(), 200, ttl);
+  if (hit) return (await hit.json()) as T;
+  const data = await load();
   if (cache) {
-    const put = cache.put(cacheKey, res.clone());
+    const put = cache.put(cacheKey, json(data, 200, ttl));
     if (ctx) ctx.waitUntil(put);
     else await put;
   }
-  return res;
+  return data;
 }
 
 async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -82,24 +85,40 @@ async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<
   if (!validRiotId(name, tag)) throw new HttpError(400, "Enter a Riot ID like Name#TAG.");
 
   const key = `latest/${region}/${encodeURIComponent(name.toLowerCase())}/${encodeURIComponent(tag.toLowerCase())}`;
-  return cached(key, LATEST_TTL, ctx, async () => {
+  const body = await cachedData(key, LATEST_TTL, ctx, async () => {
     const path = `/valorant/v4/matches/${region}/pc/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=1`;
-    const body = (await henrik(env, path)) as { data?: HMatch[] };
-    const first = body.data?.[0];
+    const res = (await henrik(env, path)) as { data?: HMatch[] };
+    const first = res.data?.[0];
     if (!first) throw new HttpError(404, "No recent matches found.");
     const match: MatchSummary = fromHenrikV4(first);
     return { match };
   });
+  return json(body, 200, LATEST_TTL);
 }
 
-async function matchById(region: string, id: string, env: Env, ctx?: ExecutionContext): Promise<Response> {
+async function loadMatch(region: string, id: string, env: Env, ctx?: ExecutionContext): Promise<MatchSummary> {
   if (!REGIONS.has(region)) throw new HttpError(400, "Unknown region.");
   if (!MATCH_ID.test(id)) throw new HttpError(400, "That isn't a match id.");
-  return cached(`match/${id.toLowerCase()}`, MATCH_TTL, ctx, async () => {
-    const body = (await henrik(env, `/valorant/v4/match/${region}/${id}`)) as { data?: HMatch };
-    if (!body.data) throw new HttpError(404, "Match not found.");
-    return { match: fromHenrikV4(body.data) };
+  return cachedData(`match/${id.toLowerCase()}`, MATCH_TTL, ctx, async () => {
+    const res = (await henrik(env, `/valorant/v4/match/${region}/${id}`)) as { data?: HMatch };
+    if (!res.data) throw new HttpError(404, "Match not found.");
+    return fromHenrikV4(res.data);
   });
+}
+
+async function streamers(region: string, id: string, url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  const me = url.searchParams.get("me") ?? undefined;
+  if (me !== undefined && !/^[\w-]{1,100}$/.test(me)) throw new HttpError(400, "Bad player id.");
+  const match = await loadMatch(region, id, env, ctx);
+  const body = await cachedData(`streamers/${id.toLowerCase()}/${me ?? "all"}`, STREAMERS_TTL, ctx, async () => {
+    try {
+      return { matchId: match.id, checkedAt: new Date().toISOString(), streamers: await findStreamers(env, match, me) };
+    } catch (err) {
+      if (err instanceof TwitchError) throw new HttpError(503, err.message);
+      throw err;
+    }
+  });
+  return json(body, 200, STREAMERS_TTL);
 }
 
 export async function handleApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -113,11 +132,18 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
   if (request.method !== "GET") return json({ error: "Only GET is supported." }, 405);
   try {
     if (url.pathname === "/api/health") {
-      return json({ ok: true, version: VERSION, matchData: Boolean(env.HENRIK_API_KEY) });
+      return json({
+        ok: true,
+        version: VERSION,
+        matchData: Boolean(env.HENRIK_API_KEY),
+        twitch: Boolean(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET),
+      });
     }
     if (url.pathname === "/api/latest-match") return await latestMatch(url, env, ctx);
+    const s = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/streamers$/);
+    if (s) return await streamers(s[1], s[2], url, env, ctx);
     const m = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)$/);
-    if (m) return await matchById(m[1], m[2], env, ctx);
+    if (m) return json({ match: await loadMatch(m[1], m[2], env, ctx) }, 200, MATCH_TTL);
     return json({ error: "Not found." }, 404);
   } catch (err) {
     if (err instanceof HttpError) return json({ error: err.message }, err.status);
