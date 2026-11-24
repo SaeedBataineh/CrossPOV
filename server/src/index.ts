@@ -135,8 +135,25 @@ async function channel(region: string, id: string, url: URL, env: Env, ctx?: Exe
   }
 }
 
+// Best-effort limit per visitor IP (per server instance): keeps a public
+// demo from using up the HenrikDev and Twitch quotas. Health is exempt.
+const LIMIT_PER_MINUTE = 30;
+const hits = new Map<string, number[]>();
+
+export function rateLimited(ip: string, now = Date.now()): boolean {
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < 60_000);
+  recent.push(now);
+  hits.set(ip, recent);
+  if (hits.size > 5000) hits.clear(); // never grow without bound
+  return recent.length > LIMIT_PER_MINUTE;
+}
+
 export async function handleApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const ip = request.headers.get("cf-connecting-ip");
+  if (ip && url.pathname !== "/api/health" && rateLimited(ip)) {
+    return json({ error: "Too many requests. Wait a minute and try again." }, 429);
+  }
   if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,

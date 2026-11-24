@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { isDesktop } from "../lib/backend";
 import { ClipsIcon, GearIcon, HomeIcon, Logo, StreamIcon } from "./Icons";
 
 export type Page = "home" | "clips" | "streamers" | "settings";
@@ -30,6 +31,11 @@ export function Sidebar({ page, onNavigate }: { page: Page; onNavigate: (p: Page
         </button>
       ))}
       <div className="sidebar-foot">
+        {!isDesktop && (
+          <p style={{ margin: "0 0 8px" }}>
+            Website demo · <a href="/">About CrossPOV</a>
+          </p>
+        )}
         v{__APP_VERSION__} · Not endorsed by Riot Games
       </div>
     </nav>

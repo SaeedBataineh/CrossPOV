@@ -246,3 +246,24 @@ export async function addStreamerChannel(matchId: string, puuid: string, login: 
 }
 
 export const onStreamersUpdated = (cb: (s: MatchStreamers) => void) => listen("streamers-updated", cb);
+
+/** A streamer found in a match, as the server reports it (website demo). */
+export interface WebStreamer {
+  puuid: string;
+  channel: { login: string; displayName: string };
+  vod: { url: string; offsetSec: number; durationSec: number; live: boolean } | null;
+}
+
+/** Website demo only: which players in a match were live on Twitch. */
+export async function lookupStreamers(match: MatchSummary, mePuuid?: string): Promise<WebStreamer[]> {
+  const q = mePuuid ? `?${new URLSearchParams({ me: mePuuid })}` : "";
+  const res = await fetch(`/api/match/${match.region || "eu"}/${match.id}/streamers${q}`);
+  const body = (await res.json().catch(() => ({}))) as { streamers?: WebStreamer[]; error?: string };
+  if (!res.ok || !body.streamers) throw new Error(body.error ?? `Server error (${res.status})`);
+  return body.streamers;
+}
+
+/** How many times two players killed each other in a match. */
+export function fightsBetween(m: MatchSummary, a: string, b: string): number {
+  return m.kills.filter((k) => (k.killer === a && k.victim === b) || (k.killer === b && k.victim === a)).length;
+}

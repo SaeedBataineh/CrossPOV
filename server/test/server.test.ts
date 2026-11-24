@@ -127,3 +127,12 @@ test("unknown routes and methods", async () => {
   const res = await handleApi(new Request("https://crosspov.test/api/health", { method: "POST" }), {});
   assert.equal(res.status, 405);
 });
+
+test("limits each visitor to 30 lookups a minute", async () => {
+  const { rateLimited } = await import("../src/index.ts");
+  const t = 1_000_000;
+  for (let i = 0; i < 30; i++) assert.equal(rateLimited("9.9.9.9", t + i), false);
+  assert.equal(rateLimited("9.9.9.9", t + 31), true, "31st in a minute is refused");
+  assert.equal(rateLimited("8.8.8.8", t + 31), false, "other visitors unaffected");
+  assert.equal(rateLimited("9.9.9.9", t + 61_000 + 40), false, "allowed again after a minute");
+});

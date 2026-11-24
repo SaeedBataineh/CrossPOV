@@ -4,6 +4,9 @@ import { Notice } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
+  fightsBetween,
+  lookupStreamers,
+  type WebStreamer,
   isDesktop,
   lookupLatestMatch,
   type MatchStreamers,
@@ -33,13 +36,24 @@ function streamerLabel(s: StreamerPlayer): { text: string; tone: string } {
   }
 }
 
-function Lobby({ match, riotId, streamers }: { match: MatchSummary; riotId: string; streamers?: MatchStreamers }) {
+function Lobby({
+  match,
+  riotId,
+  streamers,
+  web,
+}: {
+  match: MatchSummary;
+  riotId: string;
+  streamers?: MatchStreamers;
+  /** Website demo: the server's answer, or "checking". */
+  web?: WebStreamer[] | "checking";
+}) {
   const me = findMe(match, riotId);
   const players = [...match.players].sort((a, b) => {
     const team = (p: typeof a) => (me && p.team === me.team ? 0 : 1);
     return team(a) - team(b) || b.kills - a.kills;
   });
-  const checked = Boolean(streamers?.checkedMs);
+  const checked = Boolean(streamers?.checkedMs) || Array.isArray(web);
   return (
     <div className="card pad stack-16">
       <div className="row-between">
@@ -61,6 +75,7 @@ function Lobby({ match, riotId, streamers }: { match: MatchSummary; riotId: stri
             {players.map((p) => {
               const st = streamers?.players.find((s) => s.puuid === p.puuid);
               const label = st ? streamerLabel(st) : null;
+              const ws = Array.isArray(web) ? web.find((w) => w.puuid === p.puuid) : undefined;
               return (
                 <tr key={p.puuid}>
                   <td>
@@ -72,7 +87,20 @@ function Lobby({ match, riotId, streamers }: { match: MatchSummary; riotId: stri
                   <td>{p.agent}</td>
                   <td className="mono">{p.kills} / {p.deaths} / {p.assists}</td>
                   <td>
-                    {me?.puuid === p.puuid ? null : st && label ? (
+                    {me?.puuid === p.puuid ? null : ws ? (
+                      <span className="stack-2">
+                        <a href={`https://www.twitch.tv/${ws.channel.login}`} target="_blank" rel="noreferrer">twitch.tv/{ws.channel.login}</a>
+                        <span className={`status-text ${ws.vod ? "clipped" : "novod"}`}>
+                          {ws.vod
+                            ? me
+                              ? `VOD found · ${fightsBetween(match, me.puuid, p.puuid)} fights to clip`
+                              : "VOD found"
+                            : "Was live · no VOD saved"}
+                        </span>
+                      </span>
+                    ) : web === "checking" ? (
+                      <span className="muted">Checking Twitch…</span>
+                    ) : st && label ? (
                       <span className="stack-2">
                         <a href={`https://www.twitch.tv/${st.channel.login}`} target="_blank" rel="noreferrer">twitch.tv/{st.channel.login}</a>
                         <span className={`status-text ${label.tone}`} title={st.message ?? undefined}>{label.text}</span>
@@ -143,6 +171,7 @@ function DemoLookup() {
   const [riotId, setRiotId] = useState("");
   const [region, setRegion] = useState("eu");
   const [match, setMatch] = useState<MatchSummary | null>(null);
+  const [web, setWeb] = useState<WebStreamer[] | "checking" | undefined>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -150,8 +179,17 @@ function DemoLookup() {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setWeb(undefined);
     try {
-      setMatch(await lookupLatestMatch(riotId.trim(), region));
+      const m = await lookupLatestMatch(riotId.trim(), region);
+      setMatch(m);
+      setWeb("checking");
+      try {
+        setWeb(await lookupStreamers(m, findMe(m, riotId)?.puuid));
+      } catch (err) {
+        setWeb(undefined);
+        setError(`Streamer check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } catch (err) {
       setMatch(null);
       setError(err instanceof Error ? err.message : String(err));
@@ -164,7 +202,10 @@ function DemoLookup() {
     <>
       <form className="card pad stack-12" onSubmit={(e) => void submit(e)}>
         <h2 className="h3">Try it: look up a match</h2>
-        <span className="muted">Enter a Riot ID to load its latest match, the same data the desktop app uses after each game.</span>
+        <span className="muted">
+          Enter a Riot ID to load its latest finished match and check which players were streaming on Twitch, the same
+          steps the desktop app runs after each game. (Clips themselves are made by the app on your PC.)
+        </span>
         <div className="row-wrap">
           <label htmlFor="demo-riot" className="sr-only">Riot ID</label>
           <input id="demo-riot" className="input grow" placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
@@ -178,7 +219,7 @@ function DemoLookup() {
         </div>
         {error && <Notice tone="bad">{error}</Notice>}
       </form>
-      {match && <Lobby match={match} riotId={riotId} />}
+      {match && <Lobby match={match} riotId={riotId} web={web} />}
     </>
   );
 }
