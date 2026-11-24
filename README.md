@@ -21,7 +21,8 @@ Get the newest version from **Releases** (github.com/SaeedBataineh/CrossPOV/rele
   uninstaller. Also updates itself.
 
 Every push also builds both files: Actions → **Build Windows app** → the run's
-*Artifacts*. To publish a release, run that workflow with **release** ticked.
+*Artifacts*. To publish a release, run `node scripts/bump-version.mjs <version>`,
+commit and push: the build publishes any version that isn't released yet.
 
 Needs Windows 10 or 11 with Microsoft Edge WebView2. It's built into Windows 11,
 and the installer adds it if it's missing.

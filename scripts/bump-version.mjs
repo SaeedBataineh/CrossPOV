@@ -1,6 +1,6 @@
 // Sets the app version everywhere it lives, e.g. `node scripts/bump-version.mjs 0.2.0`.
-// Then commit, tag v0.2.0 and push the tag: GitHub builds the release and
-// every installed copy updates itself.
+// Then commit and push: the build sees a version that hasn't been released
+// yet, publishes it, and every installed copy updates itself.
 import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
@@ -17,4 +17,4 @@ edit("package-lock.json", (t) => t.replace(/("name": "crosspov",\s*"version": ")
 edit("src-tauri/tauri.conf.json", setJsonVersion);
 edit("src-tauri/Cargo.toml", (t) => t.replace(/^version = "[^"]+"/m, `version = "${version}"`));
 edit("src-tauri/Cargo.lock", (t) => t.replace(/(name = "crosspov"\nversion = ")[^"]+(")/, `$1${version}$2`));
-console.log(`Version set to ${version}. Commit, then: git tag v${version} && git push origin v${version}`);
+console.log(`Version set to ${version}. Commit and push to release it.`);
