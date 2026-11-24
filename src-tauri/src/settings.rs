@@ -79,7 +79,9 @@ pub enum DownloadQuality {
 }
 
 /// The CrossPOV server (Cloudflare Worker) the app gets match data from.
-pub const DEFAULT_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
+pub const DEFAULT_SERVER_URL: &str = "https://crosspov.com";
+/// Where the server lived before crosspov.com; saved settings move over.
+const OLD_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
 const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
 
 /// Missing fields (e.g. after an update adds a setting) fall back to defaults.
@@ -188,6 +190,9 @@ impl Settings {
             self.region = Settings::default().region;
         }
         self.server_url = self.server_url.trim().trim_end_matches('/').to_string();
+        if self.server_url == OLD_SERVER_URL {
+            self.server_url = DEFAULT_SERVER_URL.into();
+        }
         if !(self.server_url.starts_with("https://") || self.server_url.starts_with("http://localhost")) {
             self.server_url = DEFAULT_SERVER_URL.into();
         }
@@ -300,6 +305,9 @@ mod tests {
         assert_eq!(s.region, "eu");
         assert_eq!(s.server_url, DEFAULT_SERVER_URL);
         assert_eq!(s.riot_id, "Me#EUW");
+        let mut old = Settings { server_url: "https://crosspov.batainehsaeed1.workers.dev/".into(), ..Settings::default() };
+        old.sanitize();
+        assert_eq!(old.server_url, "https://crosspov.com", "old address moves to the domain");
         let mut bad = Settings { region: "mars".into(), ..Settings::default() };
         bad.sanitize();
         assert_eq!(bad.region, "eu");

@@ -136,3 +136,10 @@ test("limits each visitor to 30 lookups a minute", async () => {
   assert.equal(rateLimited("8.8.8.8", t + 31), false, "other visitors unaffected");
   assert.equal(rateLimited("9.9.9.9", t + 61_000 + 40), false, "allowed again after a minute");
 });
+
+test("www goes to the main domain, keeping the path", async () => {
+  const { wwwRedirect } = await import("../src/index.ts");
+  assert.equal(wwwRedirect(new URL("https://www.crosspov.com/privacy?x=1")), "https://crosspov.com/privacy?x=1");
+  assert.equal(wwwRedirect(new URL("https://crosspov.com/demo")), null);
+  assert.equal(wwwRedirect(new URL("https://crosspov.batainehsaeed1.workers.dev/")), null);
+});

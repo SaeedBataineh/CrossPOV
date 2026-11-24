@@ -13,8 +13,17 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    // The worker sees every request first so it can send www to the main
+    // domain; everything else is handed straight to the website files.
+    "run_worker_first": true
   },
+  // crosspov.com and www are attached here so deploys always keep them.
+  // The old workers.dev address keeps working for older app versions.
+  "routes": [
+    { "pattern": "crosspov.com", "custom_domain": true },
+    { "pattern": "www.crosspov.com", "custom_domain": true }
+  ],
+  "workers_dev": true,
   "observability": { "enabled": true },
   // Never delete variables set in the Cloudflare dashboard on deploy.
   "keep_vars": true

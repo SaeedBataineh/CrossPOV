@@ -185,9 +185,19 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
   }
 }
 
+/** www.crosspov.com/anything -> crosspov.com/anything */
+export function wwwRedirect(url: URL): string | null {
+  if (!url.hostname.startsWith("www.")) return null;
+  const to = new URL(url.toString());
+  to.hostname = url.hostname.slice(4);
+  return to.toString();
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const www = wwwRedirect(url);
+    if (www) return Response.redirect(www, 301);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
     // Everything else is the demo website.
     if (env.ASSETS) return env.ASSETS.fetch(request);

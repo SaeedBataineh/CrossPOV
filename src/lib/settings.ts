@@ -73,7 +73,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   riotId: "",
   region: "eu",
-  serverUrl: "https://crosspov.batainehsaeed1.workers.dev",
+  serverUrl: "https://crosspov.com",
   fps: 60,
   resolution: "1080p",
   quality: "high",

@@ -13,7 +13,7 @@ CrossPOV
 
 ## Product URL
 
-https://crosspov.batainehsaeed1.workers.dev
+https://crosspov.com
 
 ## Description (paste as-is)
 
@@ -46,7 +46,7 @@ call the Riot API directly.
 
 ## How reviewers can test it (no download, no account)
 
-1. Open https://crosspov.batainehsaeed1.workers.dev/demo
+1. Open https://crosspov.com/demo
 2. Go to **Streamer matches**.
 3. Enter any Riot ID (Name#TAG) that has played recently and pick its region,
    then **Look up**.
@@ -55,7 +55,7 @@ call the Riot API directly.
    streaming on Twitch during the match. When a VOD was found it shows how
    many fights between the two players would be clipped.
 
-The landing page (https://crosspov.batainehsaeed1.workers.dev) explains the
+The landing page (https://crosspov.com) explains the
 product and its data use; the privacy policy is at `/privacy`.
 
 Demo video (desktop app): [YouTube link, unlisted]
