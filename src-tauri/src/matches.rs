@@ -1,9 +1,11 @@
 //! Match data from the CrossPOV server.
 //!
-//! The app never talks to Riot or the game. While VALORANT is open (and for
-//! a few minutes after it closes) it asks the CrossPOV server for the user's
-//! latest match every couple of minutes. A match id it hasn't seen means a
-//! match just ended; it's saved locally and the UI is told.
+//! The app never talks to Riot or the game. While VALORANT is open it asks
+//! the CrossPOV server for the user's latest match every 5 minutes, then
+//! twice after the game closes (when the last match usually shows up). A
+//! match id it hasn't seen means a match just ended; it's saved locally and
+//! the UI is told. Few requests per player keeps the shared match-data limit
+//! free for everyone.
 //!
 //! The shape mirrors `MatchSummary` in server/src/match.ts.
 
@@ -196,10 +198,24 @@ impl MatchStore {
     }
 }
 
-/// How often to ask while the game is open, and how long to keep asking after it closes.
-const CHECK_EVERY: Duration = Duration::from_secs(120);
-const AFTER_CLOSE: Duration = Duration::from_secs(10 * 60);
+/// How often to ask while the game is open.
+const IN_GAME_EVERY: Duration = Duration::from_secs(5 * 60);
+/// After the game closes: one check soon, one a few minutes later (match data can lag).
+const AFTER_CLOSE: [Duration; 2] = [Duration::from_secs(30), Duration::from_secs(5 * 60)];
 const TICK: Duration = Duration::from_secs(15);
+
+/// Whether to ask the server now. `failures` in a row stretch the wait (up to 4x),
+/// so a busy server isn't hammered by every app at once.
+fn check_due(game_running: bool, since_check: Option<Duration>, since_close: Option<Duration>, close_checks_done: usize, failures: u32) -> bool {
+    let backoff = 1u32 << failures.min(2);
+    if game_running {
+        return since_check.is_none_or(|d| d >= IN_GAME_EVERY * backoff);
+    }
+    match (since_close, AFTER_CLOSE.get(close_checks_done)) {
+        (Some(c), Some(&wait)) => c >= wait * backoff,
+        _ => false,
+    }
+}
 
 pub type MatchListener = Box<dyn Fn(MatchEvent) + Send + Sync>;
 
@@ -277,20 +293,36 @@ impl MatchWatcher {
     fn run(&self) {
         let game = procs::game_exe();
         let mut procs = Procs::new();
-        let mut last_seen: Option<Instant> = None;
+        let mut was_running = false;
+        let mut closed_at: Option<Instant> = None;
+        let mut close_checks = 0usize;
         let mut last_check: Option<Instant> = None;
+        let mut failures = 0u32;
         loop {
             procs.refresh();
-            if procs.is_running(&game) {
-                last_seen = Some(Instant::now());
+            let running = procs.is_running(&game);
+            if running {
+                closed_at = None;
+            } else if was_running {
+                closed_at = Some(Instant::now());
+                close_checks = 0;
+                failures = 0;
             }
-            let active = last_seen.is_some_and(|t| t.elapsed() < AFTER_CLOSE);
-            let due = last_check.is_none_or(|t| t.elapsed() >= CHECK_EVERY);
+            was_running = running;
             let configured = split_riot_id(&self.settings.lock().unwrap_or_else(|e| e.into_inner()).riot_id).is_some();
-            if active && due && configured {
+            let since_check = last_check.map(|t| t.elapsed());
+            let since_close = closed_at.map(|t| t.elapsed());
+            if configured && check_due(running, since_check, since_close, close_checks, failures) {
                 last_check = Some(Instant::now());
-                if let Err(e) = self.check_now() {
-                    eprintln!("match check: {e}");
+                if !running {
+                    close_checks += 1;
+                }
+                match self.check_now() {
+                    Ok(_) => failures = 0,
+                    Err(e) => {
+                        failures += 1;
+                        eprintln!("match check: {e}");
+                    }
                 }
             }
             thread::sleep(TICK);
@@ -308,6 +340,23 @@ pub fn find_me<'a>(m: &'a MatchSummary, riot_id: &str) -> Option<&'a MatchPlayer
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asks_every_5_minutes_in_game_then_twice_after() {
+        let m = |x: u64| Some(Duration::from_secs(x * 60));
+        let s = |x: u64| Some(Duration::from_secs(x));
+        assert!(check_due(true, None, None, 0, 0), "first check right away");
+        assert!(!check_due(true, m(4), None, 0, 0));
+        assert!(check_due(true, m(5), None, 0, 0));
+        assert!(!check_due(false, m(1), s(10), 0, 0), "not the instant it closes");
+        assert!(check_due(false, m(1), s(30), 0, 0), "30 s after closing");
+        assert!(!check_due(false, m(1), m(3), 1, 0));
+        assert!(check_due(false, m(5), m(5), 1, 0), "once more after 5 min");
+        assert!(!check_due(false, m(60), m(60), 2, 0), "then stops");
+        assert!(!check_due(false, None, None, 0, 0), "game never ran: never asks");
+        assert!(!check_due(true, m(5), None, 0, 1), "a failure doubles the wait");
+        assert!(check_due(true, m(20), None, 0, 9), "at most 4x");
+    }
 
     const SAMPLE: &str = r#"{"match":{"id":"0b6d5e1f-1a2b-4c3d-8e9f-0123456789ab","map":"Ascent","mode":"Competitive","region":"eu",
       "startedAt":"2026-11-24T19:00:00.000Z","lengthMs":2100000,

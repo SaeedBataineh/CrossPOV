@@ -54,30 +54,77 @@ export function validRiotId(name: string, tag: string): boolean {
 
 const MATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * When HenrikDev says "too many requests", every request waits out the
+ * cooldown here instead of piling on (which would only extend the limit).
+ * Per server instance; apps back off on their own too.
+ */
+let henrikPausedUntil = 0;
+const BUSY = "Match data is busy right now. CrossPOV will try again in a few minutes.";
+
+export function resetHenrikPause(): void {
+  henrikPausedUntil = 0;
+}
+
 async function henrik(env: Env, path: string): Promise<unknown> {
   if (!env.HENRIK_API_KEY) throw new HttpError(503, "Server is missing its HenrikDev API key.");
+  if (Date.now() < henrikPausedUntil) throw new HttpError(429, BUSY);
   const base = env.HENRIK_BASE ?? "https://api.henrikdev.xyz";
   const res = await fetch(base + path, { headers: { Authorization: env.HENRIK_API_KEY, Accept: "application/json" } });
   if (res.ok) return res.json();
   if (res.status === 404) throw new HttpError(404, "No matches found for that Riot ID in that region.");
-  if (res.status === 429) throw new HttpError(429, "Match data is busy right now. Try again in a minute.");
+  if (res.status === 429) {
+    const wait = Number(res.headers.get("retry-after")) || 30;
+    henrikPausedUntil = Date.now() + Math.min(Math.max(wait, 5), 120) * 1000;
+    throw new HttpError(429, BUSY);
+  }
   if (res.status === 401 || res.status === 403) throw new HttpError(503, "The server's HenrikDev API key was rejected.");
   throw new HttpError(502, `Match data service error (${res.status}).`);
 }
 
 /** Runs `load` once per cache key per TTL, using Cloudflare's edge cache. */
+/** Loads already running in this server instance, so the same thing is never fetched twice at once. */
+const inFlight = new Map<string, Promise<unknown>>();
+/** How long a last-known answer may stand in when match data is busy. */
+const STALE_TTL = 30 * 60;
+
+/**
+ * Edge-cached data. Concurrent requests for the same key share one load,
+ * and if the load fails because match data is busy, the last answer from
+ * the past half hour is served instead of an error.
+ */
 async function cachedData<T>(key: string, ttl: number, ctx: ExecutionContext | undefined, load: () => Promise<T>): Promise<T> {
   const cache = typeof caches !== "undefined" ? caches.default : undefined;
   const cacheKey = new Request(`https://cache.crosspov.internal/${VERSION}/${key}`);
+  const staleKey = new Request(`https://cache.crosspov.internal/${VERSION}/stale/${key}`);
   const hit = cache ? await cache.match(cacheKey) : undefined;
   if (hit) return (await hit.json()) as T;
-  const data = await load();
-  if (cache) {
-    const put = cache.put(cacheKey, json(data, 200, ttl));
-    if (ctx) ctx.waitUntil(put);
-    else await put;
-  }
-  return data;
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
+  const job = (async () => {
+    try {
+      const data = await load();
+      if (cache) {
+        const puts = Promise.all([
+          cache.put(cacheKey, json(data, 200, ttl)),
+          ttl < STALE_TTL ? cache.put(staleKey, json(data, 200, STALE_TTL)) : Promise.resolve(),
+        ]);
+        if (ctx) ctx.waitUntil(puts);
+        else await puts;
+      }
+      return data;
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 429 && cache) {
+        const stale = await cache.match(staleKey);
+        if (stale) return (await stale.json()) as T;
+      }
+      throw err;
+    } finally {
+      inFlight.delete(key);
+    }
+  })();
+  inFlight.set(key, job);
+  return job;
 }
 
 async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {

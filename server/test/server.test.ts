@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fromHenrikV4, type HMatch } from "../src/match.ts";
-import { handleApi, validRiotId } from "../src/index.ts";
+import { handleApi, resetHenrikPause, validRiotId } from "../src/index.ts";
 
 const MATCH_ID = "0b6d5e1f-1a2b-4c3d-8e9f-0123456789ab";
 
@@ -108,6 +108,7 @@ test("latest-match explains bad input and upstream problems", async () => {
 
   const busy = await call("/api/latest-match?region=eu&name=a&tag=b", () => new Response("{}", { status: 429 }));
   assert.equal(busy.status, 429);
+  resetHenrikPause();
 
   const noKey = await call("/api/latest-match?region=eu&name=a&tag=b", () => new Response("{}"), {});
   assert.equal(noKey.status, 503);
@@ -198,4 +199,39 @@ test("website responses carry security headers", () => {
   assert.match(res.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
   assert.equal(res.headers.get("content-type"), "text/html", "keeps the original headers");
+});
+
+
+test("a 'too many requests' from match data pauses calls instead of piling on", async () => {
+  resetHenrikPause();
+  const busy = await call("/api/latest-match?region=eu&name=A&tag=B", () => new Response("{}", { status: 429, headers: { "retry-after": "20" } }));
+  assert.equal(busy.status, 429);
+  assert.match(String(busy.body.error), /try again/);
+  const after = await call("/api/latest-match?region=eu&name=C&tag=D", () => Response.json({ status: 200, data: [SAMPLE] }));
+  assert.equal(after.status, 429, "still cooling down");
+  assert.equal(after.calls.length, 0, "no request sent to match data during the pause");
+  resetHenrikPause();
+  const ok = await call("/api/latest-match?region=eu&name=C&tag=D", () => Response.json({ status: 200, data: [SAMPLE] }));
+  assert.equal(ok.status, 200);
+});
+
+test("the same match asked for twice at once is fetched once", async () => {
+  resetHenrikPause();
+  let upstream = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    upstream++;
+    await new Promise((r) => setTimeout(r, 20));
+    return Response.json({ status: 200, data: SAMPLE });
+  }) as typeof fetch;
+  try {
+    const env = { HENRIK_API_KEY: "k", HENRIK_BASE: "https://upstream.test" };
+    const path = `https://crosspov.test/api/match/eu/${MATCH_ID}`;
+    const [a, b] = await Promise.all([handleApi(new Request(path), env), handleApi(new Request(path), env)]);
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.equal(upstream, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

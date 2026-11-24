@@ -595,7 +595,7 @@ impl StreamerWorker {
     /// Channels the user linked, newest first.
     pub fn links(&self) -> Vec<Link> {
         let mut l = self.links.all();
-        l.sort_by(|a, b| b.added_ms.cmp(&a.added_ms));
+        l.sort_by_key(|x| std::cmp::Reverse(x.added_ms));
         l
     }
 
