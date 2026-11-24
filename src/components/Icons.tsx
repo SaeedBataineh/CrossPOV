@@ -14,7 +14,13 @@ const base = (size: number) => ({
 });
 
 export const HomeIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></svg>
+  <svg {...base(size)}><rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /></svg>
+);
+export const MatchesIcon = ({ size = 18 }: P) => (
+  <svg {...base(size)}><path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6" /></svg>
+);
+export const AudioIcon = ({ size = 18 }: P) => (
+  <svg {...base(size)}><path d="M4 10v4h4l5 4V6L8 10z" /><path d="M16.5 9a4 4 0 0 1 0 6" /></svg>
 );
 export const ClipsIcon = ({ size = 18 }: P) => (
   <svg {...base(size)}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9l5 3-5 3z" /></svg>

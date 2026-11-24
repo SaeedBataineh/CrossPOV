@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from "react";
-import { Sidebar, type Page } from "./components/Sidebar";
-import { ToastView } from "./components/ui";
-import { loadSettings } from "./lib/backend";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Rail, TopBar, type Page } from "./components/Shell";
+import { Notice, ToastView } from "./components/ui";
+import { loadSettings, saveSettings } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
@@ -9,13 +9,16 @@ import Home from "./pages/Home";
 
 // Only Home ships in the first chunk; the other screens load when opened.
 const Clips = lazy(() => import("./pages/Clips"));
+const Matches = lazy(() => import("./pages/Matches"));
 const Streamers = lazy(() => import("./pages/Streamers"));
+const Audio = lazy(() => import("./pages/Audio"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 
 export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const recorder = useRecorder();
   const matchesState = useMatches();
 
@@ -23,20 +26,42 @@ export default function App() {
     loadSettings().then(setSettings, (err) => setLoadError(String(err)));
   }, []);
 
+  /** Saves a few settings at once, for quick switches outside the Settings page. */
+  const quickSave = useCallback(
+    async (patch: Partial<Settings>) => {
+      try {
+        setSettings(await saveSettings({ ...settings, ...patch }));
+      } catch (err) {
+        recorder.notify(`Could not save: ${String(err)}`, "bad");
+      }
+    },
+    [settings, recorder],
+  );
+
   return (
     <div className="app">
-      <Sidebar page={page} onNavigate={setPage} status={recorder.status} hotkey={settings.hotkey} bufferSeconds={settings.bufferSeconds} />
-      <main className="content">
-        {loadError && (
-          <p className="error-banner" role="alert">Could not load settings, using defaults: {loadError}</p>
-        )}
-        <Suspense fallback={<p className="muted">Loading…</p>}>
-          {page === "home" && <Home settings={settings} recorder={recorder} matches={matchesState.matches} onNavigate={setPage} />}
-          {page === "clips" && <Clips recorder={recorder} />}
-          {page === "streamers" && <Streamers settings={settings} matchesState={matchesState} onNavigate={setPage} />}
-          {page === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
-        </Suspense>
-      </main>
+      <TopBar
+        settings={settings}
+        status={recorder.status}
+        query={query}
+        onQuery={setQuery}
+        onNavigate={setPage}
+        onSaving={() => recorder.notify("Saving clip…", "info")}
+      />
+      <div className="body">
+        <Rail page={page} onNavigate={setPage} />
+        <main className="main">
+          {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
+          <Suspense fallback={<p className="muted s12">Loading…</p>}>
+            {page === "home" && <Home settings={settings} recorder={recorder} matchesState={matchesState} onNavigate={setPage} />}
+            {page === "clips" && <Clips settings={settings} recorder={recorder} query={query} onQuery={setQuery} />}
+            {page === "matches" && <Matches settings={settings} matchesState={matchesState} onNavigate={setPage} />}
+            {page === "streamers" && <Streamers settings={settings} recorder={recorder} matchesState={matchesState} quickSave={quickSave} onNavigate={setPage} />}
+            {page === "audio" && <Audio settings={settings} onSaved={setSettings} />}
+            {page === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
+          </Suspense>
+        </main>
+      </div>
       <ToastView toast={recorder.toast} />
     </div>
   );

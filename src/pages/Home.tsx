@@ -1,180 +1,165 @@
-import { useState } from "react";
-import type { Page } from "../components/Sidebar";
-import { cardFromClip, ClipCard, Notice } from "../components/ui";
-import { findMe, isDesktop, saveClipNow, type MatchSummary, type RecorderStatus } from "../lib/backend";
+import { useMemo } from "react";
+import type { Page } from "../components/Shell";
+import { ClipCard, ClipThumb, clipMoment, clipTitle, clockOrAgo, Notice, shortWhen, Panel, Stat } from "../components/ui";
+import { findMe, isDesktop, openClip, revealClip } from "../lib/backend";
+import { allStreamers, isToday, matchEndMs, result } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
-import { matchTimeAgo, scoreLine } from "../lib/useMatches";
-import type { useRecorder } from "../lib/useRecorder";
+import type { useMatches } from "../lib/useMatches";
+import { formatDuration, formatSize, type useRecorder } from "../lib/useRecorder";
 
-/** 60 -> "01:00", like a recorder's display. */
-const clock = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
-
-/** "1080p60", or "Native 60" at native resolution. */
-const videoLabel = (s: Settings) => (s.resolution === "native" ? `Native ${s.fps}` : `${s.resolution}${s.fps}`);
-
-function audioSummary(s: Settings): string {
-  if (!s.gameAudio && !s.apps.some((a) => a.enabled)) return "Game muted";
-  if (s.audioMode === "desktop") return "Everything";
-  const apps = s.apps.filter((a) => a.enabled).map((a) => a.exe.replace(/\.exe$/i, ""));
-  return [s.gameAudio ? "Game" : null, ...apps].filter(Boolean).join(", ");
-}
-const QUALITY_LABEL = { low: "Low", medium: "Medium", high: "High", max: "Max" } as const;
-
-function StatusLine({ status, bufferSeconds }: { status: RecorderStatus | null; bufferSeconds: number }) {
-  switch (status?.state) {
-    case "recording":
-      return (
-        <span className="status-line">
-          <span className="rec">REC</span>
-          VALORANT · buffer {bufferSeconds}s{status.encoder ? ` · ${status.encoder}` : ""}
-        </span>
-      );
-    case "waiting":
-      return (
-        <span className="status-line">
-          <span className="dot" />
-          {isDesktop ? "Waiting for VALORANT" : "Website demo · recording needs the desktop app"}
-        </span>
-      );
-    case "noFfmpeg":
-    case "error":
-      return (
-        <span className="status-line">
-          <span className="dot bad" />
-          {status.message ?? "The recorder stopped"}
-        </span>
-      );
-    default:
-      return (
-        <span className="status-line">
-          <span className="dot" />
-          Getting ready…
-        </span>
-      );
-  }
+interface FeedItem {
+  at: number;
+  title: string;
+  sub: string;
+  color: string;
 }
 
 export default function Home({
   settings,
   recorder,
-  matches,
+  matchesState,
   onNavigate,
 }: {
   settings: Settings;
   recorder: ReturnType<typeof useRecorder>;
-  matches: MatchSummary[];
+  matchesState: ReturnType<typeof useMatches>;
   onNavigate: (p: Page) => void;
 }) {
   const { status, clips, notify } = recorder;
-  const [saving, setSaving] = useState(false);
-  const last = matches[0];
-  const me = last ? findMe(last, settings.riotId) : undefined;
-  const recording = status?.state === "recording";
-  const recent = clips.slice(0, 3).map(cardFromClip);
+  const { matches, streamers } = matchesState;
 
-  async function save() {
-    setSaving(true);
-    notify("Saving clip…", "info");
-    try {
-      await saveClipNow();
-    } finally {
-      setTimeout(() => setSaving(false), 2500);
+  const featured = clips.find((c) => c.kind === "theirs");
+  const recent = clips.slice(0, 3);
+  const today = clips.filter((c) => isToday(c.createdMs));
+  const metToday = new Set(
+    allStreamers(streamers)
+      .filter(({ matchId }) => {
+        const m = matches.find((x) => x.id === matchId);
+        return m && isToday(matchEndMs(m));
+      })
+      .map(({ player }) => player.channel.login),
+  ).size;
+
+  const feed = useMemo(() => {
+    const items: FeedItem[] = [];
+    for (const c of clips.slice(0, 20)) {
+      items.push(
+        c.kind === "theirs"
+          ? { at: c.createdMs, title: "Streamer clip saved", sub: [clipTitle(c), clipMoment(c)].join(" · "), color: "var(--twitch)" }
+          : { at: c.createdMs, title: `Clip saved · ${settings.hotkey}`, sub: `${formatDuration(c.durationSec)} · ${formatSize(c.sizeBytes)}`, color: "var(--text)" },
+      );
     }
-  }
+    for (const m of matches.slice(0, 10)) {
+      const r = result(m, findMe(m, settings.riotId));
+      items.push({ at: matchEndMs(m), title: `Match ended · ${m.map}`, sub: [m.mode, r && `${r.letter === "W" ? "Win" : r.letter === "L" ? "Loss" : "Draw"} ${r.score}`, `${m.kills.length} kills synced`].filter(Boolean).join(" · "), color: "var(--kick)" });
+      const s = streamers[m.id];
+      if (s?.checkedMs) {
+        const n = s.players.length;
+        items.push({ at: s.checkedMs, title: "Streamers checked", sub: n ? `${n} of ${m.players.length - 1} players were live` : "nobody in the lobby was live", color: "var(--warn)" });
+      }
+    }
+    return items.filter((i) => Number.isFinite(i.at)).sort((a, b) => b.at - a.at).slice(0, 14);
+  }, [clips, matches, streamers, settings.riotId, settings.hotkey]);
+
+  const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
 
   return (
     <>
-      <h1>Home</h1>
-
-      <section className={recording ? "hero-status" : "hero-status idle"} aria-label="Recorder">
-        <div className="stack-6">
-          <h2>{recording ? "Recording" : status?.state === "error" || status?.state === "noFfmpeg" ? "Recorder stopped" : "Ready"}</h2>
-          <StatusLine status={status} bufferSeconds={settings.bufferSeconds} />
-        </div>
-        <button type="button" className="btn primary big" disabled={!recording || saving} onClick={() => void save()}
-          title={recording ? undefined : "Clips can be saved while VALORANT is open"}>
-          Save clip <kbd>{settings.hotkey}</kbd>
-        </button>
-        <div className="meter" aria-hidden="true">
-          <div className={recording ? "meter-bar live" : "meter-bar"}>
-            {Array.from({ length: Math.min(60, Math.ceil(settings.bufferSeconds / 2)) }, (_, i) => (
-              <span key={i} />
-            ))}
-          </div>
-          <div className="meter-legend">
-            <span>−{settings.bufferSeconds}s</span>
-            <span>{recording ? "replay buffer · always the latest" : "replay buffer · fills when the game opens"}</span>
-            <span>now</span>
-          </div>
-        </div>
-      </section>
-
       {status?.hotkeyError && <Notice tone="warn">{status.hotkeyError}</Notice>}
       {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}
+      {(status?.state === "error" || status?.state === "noFfmpeg") && status.message && <Notice tone="bad">{status.message}</Notice>}
+      {!settings.riotId && (
+        <Notice tone="warn">
+          Add your Riot ID so CrossPOV can find streamers in your matches.{" "}
+          <button type="button" className="linkish" onClick={() => onNavigate("settings")}>Open Settings</button>
+        </Notice>
+      )}
 
-      <section className="stat-grid" aria-label="Recorder settings">
-        <div className="stat">
-          <span className="eyebrow">Replay buffer</span>
-          <span className="stat-value">{clock(settings.bufferSeconds)}</span>
+      <Panel title="Today" color="var(--twitch)" className="s12" right={<span className="m tiny dim">{new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</span>}>
+        <div className="pad stats">
+          <Stat label="Your clips" value={today.filter((c) => c.kind === "mine").length} />
+          <Stat label="Streamers met" value={metToday} purple />
+          <Stat label="Their-POV clips" value={today.filter((c) => c.kind === "theirs").length} purple />
         </div>
-        <div className="stat">
-          <span className="eyebrow">Video</span>
-          <span className="stat-value">{videoLabel(settings)}</span>
-          <span className="stat-sub">{QUALITY_LABEL[settings.quality]} quality</span>
-        </div>
-        <div className="stat">
-          <span className="eyebrow">Audio</span>
-          <span className="stat-value">{audioSummary(settings)}</span>
-          <span className="stat-sub">{settings.microphone ? "Mic on" : "Mic off"}</span>
-        </div>
-        <div className="stat">
-          <span className="eyebrow">Storage limit</span>
-          <span className="stat-value">{settings.storageLimitGb ? `${settings.storageLimitGb} GB` : "None"}</span>
-          <span className="stat-sub">{settings.pruneOldest ? "Oldest clips go first" : "Never deletes clips"}</span>
-        </div>
-      </section>
+      </Panel>
 
-      <div className="split">
-        <section className="split-main stack-16" aria-labelledby="recent">
-          <div className="row-between">
-            <h2 id="recent">Recent clips</h2>
-            <button type="button" className="link" onClick={() => onNavigate("clips")}>View all</button>
-          </div>
-          {recent.length ? (
-            <div className="clip-grid">
-              {recent.map((c) => (
-                <ClipCard key={c.key} clip={c} />
-              ))}
+      <div className="s8 col">
+        <Panel
+          title="Newest streamer clip"
+          color="var(--twitch)"
+          right={featured && (
+            <span className="row">
+              {featured.map && <span className="pill">{featured.map}{featured.round ? ` · R${featured.round}` : ""}</span>}
+              {featured.moment && <span className="pill">{featured.moment}</span>}
+              {featured.streamer && <span className="pill purple"><span className="pf-dot" />twitch.tv/{featured.streamer}</span>}
+            </span>
+          )}
+        >
+          {featured ? (
+            <div className="pad" style={{ display: "grid", gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)", gap: 12 }}>
+              <div style={{ borderRadius: 4, overflow: "hidden", border: "1px solid var(--twitch)" }}>
+                <ClipThumb clip={featured} big label={`THEIR POV${featured.streamer ? ` · ${featured.streamer}` : ""}`} />
+              </div>
+              <div className="stack" style={{ justifyContent: "space-between" }}>
+                <table className="kv">
+                  <tbody>
+                    <tr><td>Clip</td><td>{clipTitle(featured)}</td></tr>
+                    <tr><td>Moment</td><td>{clipMoment(featured)}</td></tr>
+                    <tr><td>Length</td><td>{formatDuration(featured.durationSec) || "—"} ({settings.secondsBefore} s before, {settings.secondsAfter} s after)</td></tr>
+                    <tr><td>Size</td><td>{formatSize(featured.sizeBytes)}</td></tr>
+                    <tr><td>Saved</td><td>{clockOrAgo(featured.createdMs)}</td></tr>
+                  </tbody>
+                </table>
+                <div className="row-wrap">
+                  <button type="button" className="b r" onClick={run(() => openClip(featured.path))}>▶ Play</button>
+                  <button type="button" className="b" onClick={run(() => revealClip(featured.path))}>Show in folder</button>
+                  <button type="button" className="b" onClick={() => onNavigate("streamers")}>All streamer clips</button>
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="card pad empty">
-              <strong>No clips yet</strong>
-              <span className="muted">
-                Open VALORANT and press <kbd className="inline-key">{settings.hotkey}</kbd> after a good play. The last {settings.bufferSeconds} seconds are saved.
+            <div className="empty">
+              <strong>No streamer clips yet</strong>
+              <span>
+                After a match, CrossPOV checks once whether anyone in your lobby was streaming, then saves your fights from their VOD.
+                {!isDesktop && " This needs the desktop app."}
               </span>
             </div>
           )}
-        </section>
+        </Panel>
 
-        <section className="split-side card pad stack-16" aria-labelledby="last">
-          <h2 id="last">Last match</h2>
-          {last ? (
-            <>
-              <div className="stack-4">
-                <strong>{last.map} · {scoreLine(last, me?.team)}</strong>
-                <span className="muted small mono">{last.mode}{me ? ` · ${me.agent} · ${me.kills}/${me.deaths}/${me.assists}` : ""} · {matchTimeAgo(last.startedAt)}</span>
-              </div>
-              <span className="muted small">Streamer check for this lobby arrives in the next update.</span>
-            </>
+        <Panel title="Recent clips" right={<span className="row"><span className="pill">All {clips.length}</span><button type="button" className="pill" onClick={() => onNavigate("clips")}>Open clips ›</button></span>}>
+          {recent.length ? (
+            <div className="pad clip-grid">
+              {recent.map((c) => (
+                <ClipCard key={c.path} clip={c} onSelect={run(() => openClip(c.path))} />
+              ))}
+            </div>
           ) : (
-            <span className="muted">
-              {settings.riotId ? "Your matches show up here after you play." : "Add your Riot ID in Settings to see your matches here."}
-            </span>
+            <div className="empty">
+              <strong>No clips yet</strong>
+              <span>Open VALORANT and press <kbd className="m">{settings.hotkey}</kbd> after a good play. The last {settings.bufferSeconds} seconds are saved.</span>
+            </div>
           )}
-          <button type="button" className="link" style={{ alignSelf: "flex-start" }} onClick={() => onNavigate(settings.riotId ? "streamers" : "settings")}>
-            {settings.riotId ? "Match details" : "Open Settings"}
-          </button>
-        </section>
+        </Panel>
+      </div>
+
+      <div className="s4 col">
+        <Panel title="Activity" color="var(--warn)" className="fill" right={<span className="m tiny dim">live</span>}>
+          {feed.length ? (
+            <ol className="feed">
+              {feed.map((f, i) => (
+                <li key={i}>
+                  <time title={new Date(f.at).toLocaleString()}>{shortWhen(f.at)}</time>
+                  <span className="d" style={{ background: f.color }} />
+                  <span><b>{f.title}</b><span>{f.sub}</span></span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="empty"><span>Clips, matches and streamer checks show up here.</span></div>
+          )}
+        </Panel>
       </div>
     </>
   );
