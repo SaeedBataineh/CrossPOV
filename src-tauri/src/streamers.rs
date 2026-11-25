@@ -705,9 +705,12 @@ const FALLBACK_SHIFT_S: f64 = 75.0;
 const RECHECK: Duration = Duration::from_secs(10 * 60);
 /// ...and this often while a streamer still has clips to come.
 const RECHECK_PENDING: Duration = Duration::from_secs(3 * 60);
-/// ...and this often while a streamer's VOD is being lined up (the scanner takes under a minute).
-const RECHECK_CHECKING: Duration = Duration::from_secs(20);
+/// ...and this often while a streamer's VOD is being lined up (the scanner
+/// takes well under a minute, so the answer is picked up soon after).
+const RECHECK_CHECKING: Duration = Duration::from_secs(10);
 const TICK: Duration = Duration::from_secs(20);
+/// The worker's pace while something is being lined up.
+const TICK_LINING_UP: Duration = Duration::from_secs(10);
 /// Assumed time to save one clip until the first one has been timed.
 const FIRST_CLIP_GUESS_S: f64 = 15.0;
 const MAX_FAILURES: u32 = 3;
@@ -768,15 +771,17 @@ impl StreamerWorker {
             let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
             // Without "grab right after the match", wait until the game is closed.
             let may_download = s.grab_after_match || !procs::game_running();
+            let mut lining_up = false;
             if s.streamer_auto {
                 let settled = self.settled.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 for m in self.matches.list().into_iter().filter(|m| !settled.contains(&m.id)) {
                     if let Err(e) = self.process(&m, false, may_download) {
                         eprintln!("streamer clips for {}: {e}", m.id);
                     }
+                    lining_up |= self.store.get(&m.id).players.iter().any(|p| p.checking);
                 }
             }
-            thread::sleep(TICK);
+            thread::sleep(if lining_up { TICK_LINING_UP } else { TICK });
         }
     }
 

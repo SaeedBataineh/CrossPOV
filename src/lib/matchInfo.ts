@@ -23,7 +23,7 @@ export function timeLeft(sec: number): string {
 }
 
 export function streamerLabel(s: StreamerPlayer): { text: string; tone: "good" | "warn" | "purple" | "bad" | "muted" } {
-  // The VPS lines a VOD up in under a minute; the app asks every 20 s.
+  // The VPS lines a VOD up in under a minute; the app asks every 10 s.
   if (s.checking) return { text: `${s.manual ? "checking it was this match" : "lining up their VOD"} · about a minute`, tone: "purple" };
   const eta = s.status === "working" && s.etaSec ? ` · ${timeLeft(s.etaSec)}` : "";
   if (s.status === "failed" && s.message?.includes("different game")) return { text: "was in a different game", tone: "bad" };

@@ -284,7 +284,8 @@ async function channel(region: string, id: string, url: URL, env: Env, ctx?: Exe
 
 // Best-effort limit per visitor IP (per server instance): keeps a public
 // demo from using up the HenrikDev and Twitch quotas. Health is exempt.
-const LIMIT_PER_MINUTE = 30;
+// Generous: an app lining up several streamers asks every 10 s; answers are cached.
+const LIMIT_PER_MINUTE = 60;
 const hits = new Map<string, number[]>();
 
 export function rateLimited(ip: string, now = Date.now()): boolean {

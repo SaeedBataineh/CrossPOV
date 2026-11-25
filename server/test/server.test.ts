@@ -132,13 +132,13 @@ test("unknown routes and methods", async () => {
   assert.equal(res.status, 405);
 });
 
-test("limits each visitor to 30 lookups a minute", async () => {
+test("limits each visitor to 60 lookups a minute", async () => {
   const { rateLimited } = await import("../src/index.ts");
   const t = 1_000_000;
-  for (let i = 0; i < 30; i++) assert.equal(rateLimited("9.9.9.9", t + i), false);
-  assert.equal(rateLimited("9.9.9.9", t + 31), true, "31st in a minute is refused");
-  assert.equal(rateLimited("8.8.8.8", t + 31), false, "other visitors unaffected");
-  assert.equal(rateLimited("9.9.9.9", t + 61_000 + 40), false, "allowed again after a minute");
+  for (let i = 0; i < 60; i++) assert.equal(rateLimited("9.9.9.9", t + i), false);
+  assert.equal(rateLimited("9.9.9.9", t + 61), true, "61st in a minute is refused");
+  assert.equal(rateLimited("8.8.8.8", t + 61), false, "other visitors unaffected");
+  assert.equal(rateLimited("9.9.9.9", t + 61_000 + 70), false, "allowed again after a minute");
 });
 
 test("www goes to the main domain, keeping the path", async () => {

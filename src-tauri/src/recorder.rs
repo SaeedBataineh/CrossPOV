@@ -21,6 +21,9 @@ use crate::{
 };
 
 const POLL: Duration = Duration::from_secs(2);
+/// While VALORANT is closed, look for it less often: it takes longer than
+/// this to load, so recording still starts before you're in a match.
+const POLL_IDLE: Duration = Duration::from_secs(5);
 /// A recorder that dies sooner than this is treated as a startup failure.
 const EARLY_EXIT: Duration = Duration::from_secs(8);
 
@@ -248,7 +251,7 @@ impl Recorder {
         loop {
             let want = always || procs::game_running();
             self.tick(want, &path, detected, source);
-            thread::sleep(POLL);
+            thread::sleep(if want { POLL } else { POLL_IDLE });
         }
     }
 
