@@ -232,6 +232,8 @@ export interface StreamerPlayer {
   fights: number;
   message: string | null;
   manual: boolean;
+  /** A linked channel whose VOD is still being compared with this match. */
+  checking?: boolean;
 }
 
 /** A stream the scoreboard scanner saw in this match; the user says which player it was. */

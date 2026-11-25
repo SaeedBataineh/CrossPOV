@@ -12,7 +12,7 @@
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
-import { scannerHealth, scannerStreams, type ScannerEnv } from "./scanner.ts";
+import { scannerHealth, scannerStreams, scannerVerify, type ScannerEnv } from "./scanner.ts";
 import { clientVersion, LATEST_JSON, outdated, parseLatest, type Latest } from "./appVersion.ts";
 import { checkChannel, findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
 
@@ -212,7 +212,13 @@ async function channel(region: string, id: string, url: URL, env: Env, ctx?: Exe
   if (!/^[\w-]{1,100}$/.test(puuid)) throw new HttpError(400, "Bad player id.");
   const match = await loadMatch(region, id, env, ctx);
   try {
-    return json({ matchId: match.id, checkedAt: new Date().toISOString(), streamers: await checkChannel(env, match, puuid, login) });
+    const found = await checkChannel(env, match, puuid, login);
+    // They were live; the scanner checks their VOD really shows this match
+    // (a channel linked to the wrong player, or someone else's stream, would
+    // otherwise give clips of a different game). Takes a minute: "pending".
+    const team = match.players.find((p) => p.puuid === puuid)?.team;
+    const verify = found.length && team ? await scannerVerify(env, match, login, team) : { verdict: "unknown" as const };
+    return json({ matchId: match.id, checkedAt: new Date().toISOString(), streamers: found, verify });
   } catch (err) {
     if (err instanceof TwitchError) throw new HttpError(err.message.startsWith("There's no") ? 404 : 503, err.message);
     throw err;

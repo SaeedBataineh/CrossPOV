@@ -7,7 +7,8 @@ import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from api import Matcher, check_signature, make_handler, signature, _duration_s
+from api import Matcher, check_signature, judge, make_handler, signature, _duration_s
+from verify import Verdict
 from store import Store
 from test_matcher import LENGTH, ROUNDS, START, TEAMS, reading
 
@@ -73,6 +74,43 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(health["streams"], 2)
         finally:
             server.shutdown()
+
+    def test_judging_a_linked_channel(self):
+        def runner(results):
+            return lambda side: results[side]
+        ok = Verdict(True, 30, 4, 4)
+        miss = Verdict(False, 0, 4, 0, "scores don't match")
+        hidden = Verdict(False, None, 1, 0)
+        some = Verdict(False, 15, 4, 3, "only some scores matched")
+        self.assertEqual(judge(runner({"Blue": ok, "Red": miss}), TEAMS, "Blue")["verdict"], "match")
+        self.assertEqual(judge(runner({"Blue": ok, "Red": miss}), TEAMS, "Blue")["delaySec"], 30)
+        self.assertEqual(judge(runner({"Blue": miss, "Red": ok}), TEAMS, "Blue")["verdict"], "otherTeam", "picked a player on the wrong side")
+        self.assertEqual(judge(runner({"Blue": miss, "Red": miss}), TEAMS, "Blue")["verdict"], "different", "another game")
+        self.assertEqual(judge(runner({"Blue": hidden, "Red": miss}), TEAMS, "Blue")["verdict"], "unknown", "HUD hidden: can't tell")
+        self.assertEqual(judge(runner({"Blue": some, "Red": miss}), TEAMS, "Blue")["verdict"], "unknown", "mostly agrees: don't call it different")
+
+    def test_verify_request_runs_in_the_background(self):
+        calls = []
+
+        def examine(login, start, rounds, teams, team):
+            calls.append((login, team))
+            return {"verdict": "different", "checked": 4, "agreed": 0}
+
+        m = Matcher(self.store, lambda *a: None, examine)
+        body = {**MATCH, "login": "WTFslump", "team": "Blue"}
+        self.assertEqual(m.verify_request(body), {"status": "pending"})
+        for _ in range(100):
+            res = m.verify_request(body)
+            if res["status"] == "done":
+                break
+            time.sleep(0.02)
+        self.assertEqual(res["verdict"], "different")
+        self.assertEqual(calls, [("wtfslump", "Blue")], "one check per match, channel and side")
+        with self.assertRaises(ValueError):
+            m.verify_request({**MATCH, "login": "x", "team": "Blue"})
+        with self.assertRaises(ValueError):
+            m.verify_request({**MATCH, "login": "someone", "team": "Green"})
+        self.assertEqual(Matcher(self.store, lambda *a: None).verify_request(body)["verdict"], "unknown", "no VOD reader: never a wrong no")
 
     def test_twitch_durations(self):
         self.assertEqual(_duration_s("1h2m3s"), 3723)

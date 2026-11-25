@@ -113,8 +113,9 @@ def verify(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str
             fits.append(Verdict(True, delay, checked, agreed))
         elif fits:
             break  # past the delays that fit
-        elif agreed > best.agreed:
-            best = Verdict(False, delay, checked, agreed, "only some scores matched")
+        elif (agreed, checked) > (best.agreed, best.checked):
+            # Kept even when nothing agreed: "4 read, 0 matched" means another game, not "couldn't read".
+            best = Verdict(False, delay, checked, agreed, "only some scores matched" if agreed else "scores don't match")
     if fits:
         # A score holds for a whole round, so a range of delays fits: the true one is near its middle.
         mid = fits[len(fits) // 2]

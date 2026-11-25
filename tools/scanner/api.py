@@ -5,6 +5,11 @@ POST /match   body: {"id", "startedAt" (ms), "lengthMs", "teams": [a, b],
                      "rounds": [{"startMs", "winner"}]}
               -> {"status": "pending"} while it checks, then
                  {"status": "done", "streams": [{login, userId, team, delaySec, vod...}]}
+POST /verify  body: the match as for /match plus {"login", "team"}: was this
+              channel's stream in this match? (A channel the user linked by hand.)
+              -> {"status": "pending"} while it reads their VOD, then
+                 {"status": "done", "verdict": "match" | "otherTeam" | "different" | "unknown",
+                  "delaySec"?, "checked", "agreed"}
 GET  /health  -> reading counts (also signed)
 
 Requests must be signed: header X-CrossPOV-Time (unix seconds) and
@@ -68,9 +73,10 @@ def parse_match(body: dict) -> tuple[str, int, int, tuple[str, str], list[Round]
 class Matcher:
     """Finds and confirms streams for a match, one background job per match id."""
 
-    def __init__(self, store: Store, verify_stream):
+    def __init__(self, store: Store, verify_stream, examine=None):
         self.store = store
         self.verify_stream = verify_stream  # (login, user_id, start, rounds, teams, team) -> dict | None
+        self.examine = examine  # (login, start, rounds, teams, team) -> {"verdict", ...}
         self.results: dict[str, tuple[float, dict]] = {}
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=2)
@@ -85,6 +91,32 @@ class Matcher:
             self.results[mid] = (now, {"status": "pending"})
         self.pool.submit(self._run, mid, start, length, teams, rounds)
         return {"status": "pending"}
+
+    def verify_request(self, body: dict) -> dict:
+        """Is `login`'s stream this match, on `team`? Answered in the background like /match."""
+        mid, start, length, teams, rounds = parse_match(body)
+        login = str(body.get("login", "")).lower()
+        team = str(body.get("team", ""))
+        if not (3 <= len(login) <= 25 and login.replace("_", "").isalnum()) or team not in teams:
+            raise ValueError("bad login or team")
+        if self.examine is None:
+            return {"status": "done", "verdict": "unknown", "reason": "no VOD reader"}
+        key = f"verify:{mid}:{login}:{team}"
+        with self.lock:
+            now = time.time()
+            if key in self.results:
+                return self.results[key][1]
+            self.results[key] = (now, {"status": "pending"})
+        self.pool.submit(self._run_verify, key, login, start, rounds, teams, team)
+        return {"status": "pending"}
+
+    def _run_verify(self, key, login, start, rounds, teams, team):
+        try:
+            result = {"status": "done", **self.examine(login, start, rounds, teams, team)}
+        except Exception as e:  # unknown, never a wrong "no"
+            result = {"status": "done", "verdict": "unknown", "reason": str(e)[:200]}
+        with self.lock:
+            self.results[key] = (time.time(), result)
 
     def _run(self, mid, start, length, teams, rounds):
         try:
@@ -118,34 +150,78 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
             session.headers.update({"Client-Id": client_id, "Authorization": f"Bearer {token(client_id, secret)}"})
             state["token_at"] = time.time()
 
-    def check(login, user_id, start, rounds, teams, team):
-        auth()
+    def vod_for(user_id, start):
+        """(VOD info, seconds into it where the match starts), or None."""
         r = session.get("https://api.twitch.tv/helix/videos", params={"user_id": user_id, "type": "archive", "first": 10}, timeout=20)
         if not r.ok:
             return None
         for v in r.json().get("data", []):
-            vod_start = _iso_ms(v["created_at"])
-            offset = (start - vod_start) / 1000
-            if offset < 0 or offset > _duration_s(v["duration"]):
-                continue
-            playlist = playlist_url(v["url"], ytdlp)
-            if not playlist:
-                return None
-            verdict = verify(playlist, offset, rounds, teams, team, ffmpeg)
-            if not verdict.ok:
-                return None
-            return {
-                "login": login,
-                "userId": user_id,
-                "displayName": v.get("user_name") or login,
-                "team": team,
-                "delaySec": verdict.delay_s,
-                "vod": {"id": v["id"], "url": v["url"], "offsetSec": round(offset)},
-                "checked": verdict.checked,
-            }
+            offset = (start - _iso_ms(v["created_at"])) / 1000
+            if 0 <= offset <= _duration_s(v["duration"]):
+                return v, offset
         return None
 
-    return check
+    def check(login, user_id, start, rounds, teams, team):
+        auth()
+        found = vod_for(user_id, start)
+        if not found:
+            return None
+        v, offset = found
+        playlist = playlist_url(v["url"], ytdlp)
+        if not playlist:
+            return None
+        verdict = verify(playlist, offset, rounds, teams, team, ffmpeg)
+        if not verdict.ok:
+            return None
+        return {
+            "login": login,
+            "userId": user_id,
+            "displayName": v.get("user_name") or login,
+            "team": team,
+            "delaySec": verdict.delay_s,
+            "vod": {"id": v["id"], "url": v["url"], "offsetSec": round(offset)},
+            "checked": verdict.checked,
+        }
+
+    def examine(login, start, rounds, teams, team):
+        """For a channel linked by hand: does their VOD show this match's score at its moments?"""
+        auth()
+        r = session.get("https://api.twitch.tv/helix/users", params={"login": login}, timeout=20)
+        users = r.json().get("data", []) if r.ok else []
+        if not users:
+            return {"verdict": "unknown", "reason": "channel not found"}
+        found = vod_for(users[0]["id"], start)
+        if not found:
+            return {"verdict": "unknown", "reason": "no VOD covering the match"}
+        v, offset = found
+        playlist = playlist_url(v["url"], ytdlp)
+        if not playlist:
+            return {"verdict": "unknown", "reason": "VOD not readable"}
+        return judge(lambda side: verify(playlist, offset, rounds, teams, side, ffmpeg), teams, team)
+
+    return check, examine
+
+
+def judge(run, teams, team) -> dict:
+    """Verdict on a linked channel from VOD checks (`run(side)` -> verify.Verdict).
+
+    "match": their scoreboard showed this match from `team`'s side.
+    "otherTeam": it did, but from the other side (the wrong player was picked).
+    "different": the scoreboard was readable and mostly showed other scores.
+    "unknown": too little of it could be read to tell (hidden HUD, overlays)."""
+    other = teams[1] if team == teams[0] else teams[0]
+    mine = run(team)
+    if mine.ok:
+        return {"verdict": "match", "delaySec": mine.delay_s, "checked": mine.checked, "agreed": mine.agreed}
+    if mine.checked < 3:
+        return {"verdict": "unknown", "checked": mine.checked, "agreed": mine.agreed, "reason": "scoreboard mostly hidden"}
+    theirs = run(other)
+    if theirs.ok:
+        return {"verdict": "otherTeam", "delaySec": theirs.delay_s, "checked": theirs.checked, "agreed": theirs.agreed}
+    if mine.agreed * 2 < mine.checked:
+        return {"verdict": "different", "checked": mine.checked, "agreed": mine.agreed}
+    return {"verdict": "unknown", "checked": mine.checked, "agreed": mine.agreed, "reason": "only some scores matched"}
+
 
 
 def _iso_ms(s: str) -> int:
@@ -198,10 +274,11 @@ def make_handler(key: bytes, matcher: Matcher, store: Store):
             body = self.rfile.read(length)
             if not self._authed(body):
                 return
-            if self.path != "/match":
+            if self.path not in ("/match", "/verify"):
                 return self._send(404, {"error": "not found"})
             try:
-                self._send(200, matcher.request(json.loads(body)))
+                data = json.loads(body)
+                self._send(200, matcher.request(data) if self.path == "/match" else matcher.verify_request(data))
             except (ValueError, KeyError, TypeError) as e:
                 self._send(400, {"error": f"bad request: {e}"[:200]})
 
@@ -217,8 +294,8 @@ def main() -> int:
         sys.exit("SCANNER_KEY must be at least 32 characters")
     store = Store(os.environ.get("CROSSPOV_DB", os.path.join(HERE, "readings.db")))
     ytdlp = os.environ.get("YTDLP", os.path.join(os.path.dirname(sys.executable), "yt-dlp"))
-    checker = twitch_vod_checker(os.environ["TWITCH_CLIENT_ID"], os.environ["TWITCH_CLIENT_SECRET"], ytdlp)
-    server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("SCANNER_PORT", "8787"))), make_handler(key, Matcher(store, checker), store))
+    checker, examine = twitch_vod_checker(os.environ["TWITCH_CLIENT_ID"], os.environ["TWITCH_CLIENT_SECRET"], ytdlp)
+    server = ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("SCANNER_PORT", "8787"))), make_handler(key, Matcher(store, checker, examine), store))
     print(f"listening on {server.server_address}", flush=True)
     server.serve_forever()
     return 0

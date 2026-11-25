@@ -86,6 +86,35 @@ struct StreamersResponse {
     /// "pending" while the scanner is still checking.
     #[serde(default)]
     scanner: Option<String>,
+    /// For one channel the user linked: did its VOD show this match? (/channel only)
+    #[serde(default)]
+    verify: Option<VerifyInfo>,
+}
+
+/// The scoreboard scanner's verdict on a channel linked by hand.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyInfo {
+    /// "match", "otherTeam", "different", "pending", "unknown" or "off".
+    pub verdict: String,
+    #[serde(default)]
+    pub delay_sec: Option<f64>,
+}
+
+impl VerifyInfo {
+    /// Why this link can't be right, or None.
+    pub fn rejection(&self, login: &str) -> Option<String> {
+        match self.verdict.as_str() {
+            "different" => Some(format!(
+                "{login} was live, but their stream showed a different game at that time (their scoreboard didn't match this match), so no clips were made. Check the channel name."
+            )),
+            "otherTeam" => Some(format!("{login} was in this match, but on the other team. Pick the player they were on the other team.")),
+            _ => None,
+        }
+    }
+    pub fn pending(&self) -> bool {
+        self.verdict == "pending"
+    }
 }
 
 /// A stream the scoreboard scanner saw in this match. Which player it is
@@ -405,6 +434,10 @@ pub struct PlayerState {
     /// Their broadcast delay in seconds (from the scoreboard scanner), added to VOD times.
     #[serde(default)]
     pub delay_sec: f64,
+    /// A linked channel whose VOD is still being checked against this match:
+    /// nothing is downloaded until the check says it's the right game.
+    #[serde(default)]
+    pub checking: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -530,8 +563,9 @@ pub fn clean_login(input: &str) -> Option<String> {
     (3..=25).contains(&l.len()).then_some(l).filter(|l| l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
 }
 
-/// Asks the server whether `login` was live during this match as player `puuid`.
-pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -> Result<Option<StreamerHit>, String> {
+/// Asks the server whether `login` was live during this match as player `puuid`,
+/// and whether their VOD's scoreboard shows this match.
+pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -> Result<(Option<StreamerHit>, VerifyInfo), String> {
     let url = format!("{}/api/match/{}/{}/channel", server.trim_end_matches('/'), m.region, m.id);
     let mut res = agent()
         .get(&url)
@@ -544,7 +578,27 @@ pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -
         return Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")));
     }
     let hits: StreamersResponse = res.body_mut().read_json().map_err(|e| e.to_string())?;
-    Ok(hits.streamers.into_iter().next())
+    let verify = hits.verify.unwrap_or_else(|| VerifyInfo { verdict: "unknown".into(), delay_sec: None });
+    Ok((hits.streamers.into_iter().next(), verify))
+}
+
+/// Applies a verdict to a linked player: start downloading, keep waiting, or stop.
+fn apply_verify(p: &mut PlayerState, v: &VerifyInfo) {
+    if let Some(why) = v.rejection(&p.channel.login) {
+        p.checking = false;
+        p.status = StreamerStatus::Failed;
+        p.message = Some(why);
+        return;
+    }
+    p.checking = v.pending();
+    if p.checking {
+        p.message = Some("Checking their VOD shows this match…".into());
+    } else if p.message.as_deref() == Some("Checking their VOD shows this match…") {
+        p.message = None;
+    }
+    if let Some(d) = v.delay_sec.filter(|_| v.verdict == "match") {
+        p.delay_sec = d.clamp(0.0, 300.0);
+    }
 }
 
 /// "Enemy · Raze": how a player is shown, without their Riot name.
@@ -578,6 +632,7 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 message: None,
                 manual: false,
                 delay_sec: 0.0,
+                checking: false,
             });
         }
     }
@@ -671,7 +726,11 @@ impl StreamerWorker {
         let m = self.matches.list().into_iter().find(|m| m.id == match_id).ok_or("Match not found")?;
         let player = m.players.iter().find(|p| p.puuid == puuid).ok_or("Player not in this match")?;
         let login = clean_login(login).ok_or("That isn't a Twitch channel name.")?;
-        let hit = fetch_channel(&s.server_url, &m, puuid, &login)?.ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
+        let (hit, verify) = fetch_channel(&s.server_url, &m, puuid, &login)?;
+        let hit = hit.ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
+        if let Some(why) = verify.rejection(&login) {
+            return Err(why);
+        }
         let me_player = find_me(&m, &s.riot_id);
         // Keep a delay measured earlier unless the scanner measured it now.
         let delay = delay_sec.or_else(|| self.links.all().into_iter().find(|l| l.login == login).map(|l| l.delay_sec)).unwrap_or(0.0).clamp(0.0, 300.0);
@@ -685,6 +744,7 @@ impl StreamerWorker {
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == player.puuid) {
             p.manual = true;
             p.delay_sec = delay;
+            apply_verify(p, &verify);
         }
         state.suggested.retain(|x| x.login.to_lowercase() != login);
         state.finished = false;
@@ -714,15 +774,17 @@ impl StreamerWorker {
             }
             let Some(link) = links.iter().find(|l| l.puuid == p.puuid) else { continue };
             match fetch_channel(&s.server_url, m, &p.puuid, &link.login) {
-                Ok(Some(hit)) => {
+                Ok((Some(_), v)) if v.rejection(&link.login).is_some() => {} // live, but in another game
+                Ok((Some(hit), v)) => {
                     merge_hits(state, vec![hit], m, me, s);
                     if let Some(x) = state.players.iter_mut().find(|x| x.puuid == p.puuid) {
                         x.manual = true;
                         x.delay_sec = link.delay_sec;
+                        apply_verify(x, &v);
                     }
                     self.links.mark_seen(&p.puuid);
                 }
-                Ok(None) => {} // not streaming this time
+                Ok((None, _)) => {} // not streaming this time
                 Err(e) => eprintln!("linked channel {}: {e}", link.login),
             }
         }
@@ -778,6 +840,15 @@ impl StreamerWorker {
             (self.listener)(&state, None);
         }
 
+        // Linked channels whose VOD is still being compared with this match.
+        if due {
+            for p in state.players.iter_mut().filter(|p| p.checking) {
+                if let Ok((_, v)) = fetch_channel(&s.server_url, m, &p.puuid, &p.channel.login) {
+                    apply_verify(p, &v);
+                }
+            }
+        }
+
         if let Some(me) = me.as_deref() {
             if may_download {
                 self.download_fights(m, me, &s, &mut state);
@@ -807,7 +878,7 @@ impl StreamerWorker {
         let out_dir = root.join(STREAMER_CLIPS);
         for i in 0..state.players.len() {
             let p = state.players[i].clone();
-            if p.status != StreamerStatus::Working {
+            if p.status != StreamerStatus::Working || p.checking {
                 continue;
             }
             let Some(vod) = p.vod.clone() else { continue };
@@ -1054,6 +1125,48 @@ mod tests {
         // Older servers send neither field.
         let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
         assert!(old.suggested.is_empty() && old.scanner.is_none());
+    }
+
+    #[test]
+    fn a_linked_channel_from_another_game_gets_no_clips() {
+        let body = r#"{"streamers":[],"verify":{"verdict":"different"}}"#;
+        let r: StreamersResponse = serde_json::from_str(body).unwrap();
+        let v = r.verify.unwrap();
+        assert!(v.rejection("wtfslump").unwrap().contains("different game"));
+        let mut p = PlayerState {
+            puuid: "p".into(),
+            name: "x".into(),
+            channel: Channel { id: "1".into(), login: "wtfslump".into(), display_name: "wtfslump".into() },
+            vod: None,
+            status: StreamerStatus::Working,
+            clips: 0,
+            fights: 2,
+            done: Vec::new(),
+            failures: 0,
+            message: None,
+            manual: true,
+            delay_sec: 0.0,
+            checking: false,
+        };
+        // Still reading their VOD: wait, download nothing.
+        apply_verify(&mut p, &VerifyInfo { verdict: "pending".into(), delay_sec: None });
+        assert!(p.checking && p.status == StreamerStatus::Working);
+        // Confirmed: go, with the delay the scanner measured.
+        apply_verify(&mut p, &VerifyInfo { verdict: "match".into(), delay_sec: Some(30.0) });
+        assert!(!p.checking && p.message.is_none());
+        assert_eq!(p.delay_sec, 30.0);
+        // Another game, or the wrong side: stopped with the reason.
+        apply_verify(&mut p, &v);
+        assert_eq!(p.status, StreamerStatus::Failed);
+        assert!(p.message.as_deref().unwrap().contains("different game"));
+        let other = VerifyInfo { verdict: "otherTeam".into(), delay_sec: None };
+        assert!(other.rejection("x").unwrap().contains("other team"));
+        // Can't tell (HUD hidden, scanner down, older server): links work as before.
+        for verdict in ["unknown", "off"] {
+            assert!(VerifyInfo { verdict: verdict.into(), delay_sec: None }.rejection("x").is_none());
+        }
+        let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
+        assert!(old.verify.is_none());
     }
 
     #[test]

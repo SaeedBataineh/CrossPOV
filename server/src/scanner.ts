@@ -83,3 +83,25 @@ export async function scannerHealth(env: ScannerEnv): Promise<unknown> {
     return { ok: false, error: String(err).slice(0, 120) };
   }
 }
+
+export type VerifyVerdict = "pending" | "match" | "otherTeam" | "different" | "unknown" | "off";
+
+export interface VerifyResult {
+  verdict: VerifyVerdict;
+  delaySec?: number | null;
+}
+
+/** For a channel linked by hand: does their VOD show this match's score, from `team`'s side? */
+export async function scannerVerify(env: ScannerEnv, m: MatchSummary, login: string, team: string): Promise<VerifyResult> {
+  if (!env.SCANNER_URL || !env.SCANNER_KEY) return { verdict: "off" };
+  const body = scannerMatch(m);
+  if (!body) return { verdict: "unknown" }; // deathmatch etc.: no round score to read
+  try {
+    const r = (await call(env, "POST", "/verify", JSON.stringify({ ...body, login, team }))) as { status?: string; verdict?: string; delaySec?: number | null };
+    if (r.status !== "done") return { verdict: "pending" };
+    const verdict = (["match", "otherTeam", "different", "unknown"] as const).find((v) => v === r.verdict) ?? "unknown";
+    return { verdict, delaySec: typeof r.delaySec === "number" ? r.delaySec : null };
+  } catch {
+    return { verdict: "unknown" }; // scanner down: don't block the link
+  }
+}

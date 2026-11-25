@@ -287,7 +287,8 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
     <form className="soft-box stack" onSubmit={(e) => void submit(e)}>
       <b>Add a streamer we missed</b>
       <span className="muted small">
-        Clips follow the player you pick, so choose the right one. The link is kept on this PC only and checked again when you meet them.
+        Clips follow the player you pick, so choose the right one. CrossPOV first checks the scoreboard in their VOD shows this game, so
+        a wrong channel or player gets no clips. The link is kept on this PC only.
       </span>
       <div className="row-wrap" style={{ gap: 8 }}>
         <label className="field">

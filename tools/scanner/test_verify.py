@@ -41,7 +41,10 @@ class VerifyTest(unittest.TestCase):
     def test_rejects_a_stream_from_another_game(self):
         def other_game(_p, t, _f):
             return (int(t) % 7, int(t) % 5)
-        self.assertFalse(verify("pl", OFFSET, ROUNDS, TEAMS, "Red", "ff", grab=other_game, read=read).ok)
+        v = verify("pl", OFFSET, ROUNDS, TEAMS, "Red", "ff", grab=other_game, read=read)
+        self.assertFalse(v.ok)
+        self.assertGreaterEqual(v.checked, 3, "readable but wrong scores still count as checked, so it's 'different', not 'unknown'")
+        self.assertLess(v.agreed * 2, v.checked)
 
     def test_wrong_team_is_rejected(self):
         self.assertFalse(verify("pl", OFFSET, ROUNDS, TEAMS, "Blue", "ff", grab=fake_vod("Red", 0), read=read).ok)

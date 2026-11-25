@@ -277,7 +277,7 @@ test("recent matches lists ids from HenrikDev's stored matches", async () => {
   assert.match(r.calls[0].url, /\/valorant\/v1\/stored-matches\/eu\/A\/B\?size=10$/);
 });
 
-import { scannerMatch, scannerStreams, sign } from "../src/scanner.ts";
+import { scannerMatch, scannerStreams, scannerVerify, sign } from "../src/scanner.ts";
 
 test("scanner requests are signed exactly like the VPS checks them", async () => {
   // Value computed by tools/scanner/api.py signature() for the same inputs.
@@ -309,6 +309,40 @@ test("scanner gets the score timeline only, and is skipped when not set up", asy
   globalThis.fetch = (async () => { throw new Error("down"); }) as typeof fetch;
   try {
     assert.equal((await scannerStreams({ SCANNER_URL: "http://vps.test:8787", SCANNER_KEY: "k".repeat(40) }, full)).status, "error", "a down scanner never breaks streamer checks");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a hand-linked channel is checked against its VOD's scoreboard", async () => {
+  const m = fromHenrikV4(SAMPLE);
+  const full = { ...m, rounds: [0, 1, 2, 3, 4].map((i) => ({ index: i, winner: "Blue", startMs: i * 100_000 })) };
+  const env = { SCANNER_URL: "http://vps.test:8787", SCANNER_KEY: "k".repeat(40) };
+  assert.deepEqual(await scannerVerify({}, full, "someone", "Blue"), { verdict: "off" });
+  assert.deepEqual(await scannerVerify(env, m, "someone", "Blue"), { verdict: "unknown" }, "no round score to read");
+  const realFetch = globalThis.fetch;
+  let sentBody = "";
+  let path = "";
+  const answer = (body: unknown) => {
+    globalThis.fetch = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      path = new URL(String(u)).pathname;
+      sentBody = String(init?.body);
+      return Response.json(body);
+    }) as typeof fetch;
+  };
+  try {
+    answer({ status: "pending" });
+    assert.deepEqual(await scannerVerify(env, full, "wtfslump", "Blue"), { verdict: "pending" });
+    assert.equal(path, "/verify");
+    assert.deepEqual([JSON.parse(sentBody).login, JSON.parse(sentBody).team], ["wtfslump", "Blue"]);
+    answer({ status: "done", verdict: "different", checked: 4, agreed: 0 });
+    assert.deepEqual(await scannerVerify(env, full, "wtfslump", "Blue"), { verdict: "different", delaySec: null });
+    answer({ status: "done", verdict: "match", delaySec: 30 });
+    assert.deepEqual(await scannerVerify(env, full, "x_streamer", "Blue"), { verdict: "match", delaySec: 30 });
+    answer({ status: "done", verdict: "something new" });
+    assert.equal((await scannerVerify(env, full, "x_streamer", "Blue")).verdict, "unknown");
+    globalThis.fetch = (async () => { throw new Error("down"); }) as typeof fetch;
+    assert.equal((await scannerVerify(env, full, "x_streamer", "Blue")).verdict, "unknown", "a down scanner never blocks a link");
   } finally {
     globalThis.fetch = realFetch;
   }
