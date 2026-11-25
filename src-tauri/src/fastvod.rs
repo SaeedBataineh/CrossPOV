@@ -201,12 +201,18 @@ mod tests {
     }
 
     /// Tiny grey picture of the frame at `t` seconds, for comparing two videos.
+    /// Written with the image2 muxer (the app's small FFmpeg has no rawvideo muxer).
     fn frame(ff: &Path, input: &str, t: f64) -> Vec<u8> {
-        let out = Command::new(ff)
-            .args(["-v", "error", "-ss", &format!("{t:.2}"), "-i", input, "-frames:v", "1", "-s", "64x36", "-pix_fmt", "gray", "-f", "rawvideo", "-"])
-            .output()
+        let raw = std::env::temp_dir().join(format!("crosspov-frame-{}-{}.gray", std::process::id(), (t * 100.0) as u64));
+        let status = Command::new(ff)
+            .args(["-v", "error", "-y", "-ss", &format!("{t:.2}"), "-i", input, "-frames:v", "1", "-s", "64x36", "-pix_fmt", "gray", "-c:v", "rawvideo", "-f", "image2", "-update", "1"])
+            .arg(&raw)
+            .status()
             .unwrap();
-        out.stdout
+        assert!(status.success(), "FFmpeg couldn't grab a frame at {t} s");
+        let bytes = fs::read(&raw).unwrap_or_default();
+        let _ = fs::remove_file(&raw);
+        bytes
     }
 
     /// Real download with yt-dlp + FFmpeg from the HLS stream in CROSSPOV_TEST_HLS:
