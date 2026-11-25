@@ -839,14 +839,17 @@ impl StreamerWorker {
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut state = self.store.get(&m.id);
-        if state.finished && !force {
+        // A VOD still being lined up keeps the match going however old it is
+        // (e.g. an old match checked again by hand), or it would never finish.
+        let lining_up = state.players.iter().any(|p| p.checking);
+        if state.finished && !force && !lining_up {
             return Ok(());
         }
         let started = time::OffsetDateTime::parse(&m.started_at, &time::format_description::well_known::Rfc3339)
             .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as u64)
             .unwrap_or(0);
         let window_ms = u64::from(s.vod_wait_hours) * 3_600_000;
-        if !force && now_ms().saturating_sub(started) > window_ms + m.length_ms {
+        if !force && !lining_up && now_ms().saturating_sub(started) > window_ms + m.length_ms {
             state.finished = true;
             self.store.put(&state);
             return Ok(());
@@ -856,7 +859,6 @@ impl StreamerWorker {
         // Ask the server (at most every RECHECK, unless forced).
         // While clips are still to come (VOD still growing), ask more often.
         let pending = state.players.iter().any(|p| p.status == StreamerStatus::Working);
-        let lining_up = state.players.iter().any(|p| p.checking);
         let every = if lining_up { RECHECK_CHECKING } else if pending { RECHECK_PENDING } else { RECHECK };
         let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= every.as_millis() as u64);
         if due {
