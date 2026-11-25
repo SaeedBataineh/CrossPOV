@@ -115,7 +115,7 @@ export function demoClips(): ClipInfo[] {
     clip("streamer_one_R17_you-killed", "theirs", 29, 108, 300, { streamer: "streamer_one", round: 17, moment: "You killed them" }),
     clip("streamer_two_R14_killed-you", "theirs", 30, 120, 412, { streamer: "streamer_two", round: 14, moment: "They killed you" }),
     clip("streamer_two_R9_you-killed", "theirs", 31, 120, 405, { streamer: "streamer_two", round: 9, moment: "You killed them" }),
-    clip("streamer_two_R3_you-killed", "theirs", 31, 120, 398, { streamer: "streamer_two", round: 3, moment: "You killed them" }),
+    clip("streamer_two_R3_killed-you", "theirs", 31, 120, 398, { streamer: "streamer_two", round: 3, moment: "They killed you" }),
     clip("Clip_Round-14-clutch", "mine", 41, 60, 188),
     clip("Clip_Round-5", "mine", 60, 60, 186),
     clip("Clip_Round-3-ace", "mine", 150, 60, 191, { map: "Lotus" }),

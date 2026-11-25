@@ -1,22 +1,24 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { Page } from "../components/Shell";
-import { Notice, Panel, Seg, Stat } from "../components/ui";
+import { GalleryCard, Notice, PendingCard } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
   isDesktop,
   lookupLatestMatch,
   lookupStreamers,
+  openClip,
+  type ClipInfo,
   type MatchPlayer,
   type MatchStreamers,
   type SuggestedStreamer,
   type MatchSummary,
   type WebStreamer,
 } from "../lib/backend";
-import { ini, result, resultColor, streamerLabel } from "../lib/matchInfo";
+import { result, resultColor, streamerLabel } from "../lib/matchInfo";
 import { REGIONS, type Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
-import { formatDuration, timeAgo } from "../lib/useRecorder";
+import { timeAgo, type useRecorder } from "../lib/useRecorder";
 
 /** What we know about one player being a streamer, from the app or the website demo. */
 interface Live {
@@ -40,169 +42,176 @@ function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefin
   return null;
 }
 
-const mmss = (ms: number) => formatDuration(Math.max(0, Math.round(ms / 1000)));
 
-function MatchDetail({
-  match,
-  riotId,
-  streamers,
-  web,
-  actions,
-}: {
+/** Rounds strip and both teams: the details, shown on request. */
+function Scoreboard({ match, me, live, fightRounds, web, checked }: {
   match: MatchSummary;
-  riotId: string;
-  streamers?: MatchStreamers;
+  me?: MatchPlayer;
+  live: Map<string, Live | null>;
+  fightRounds: Set<number>;
   web?: WebStreamer[] | "checking";
-  actions?: ReactNode;
+  checked: boolean;
 }) {
-  const me = findMe(match, riotId);
-  const r = result(match, me);
-  const checked = Boolean(streamers?.checkedMs) || Array.isArray(web);
-  const live = new Map(match.players.map((p) => [p.puuid, liveInfo(p, match, me, streamers, web)]));
-  const streamerIds = new Set([...live.entries()].filter(([, v]) => v).map(([k]) => k));
-
   const myKills = me ? match.kills.filter((k) => k.killer === me.puuid) : [];
-  const firstBloods = new Set<number>();
-  if (me) {
-    const first = new Map<number, (typeof match.kills)[number]>();
-    for (const k of match.kills) if (!first.has(k.round) || k.inRoundMs < first.get(k.round)!.inRoundMs) first.set(k.round, k);
-    for (const [round, k] of first) if (k.killer === me.puuid) firstBloods.add(round);
-  }
-  const fights = me
-    ? match.kills
-        .filter((k) => (k.killer === me.puuid && streamerIds.has(k.victim)) || (k.victim === me.puuid && streamerIds.has(k.killer)))
-        .sort((a, b) => a.atMs - b.atMs)
-    : [];
-  const fightRounds = new Set(fights.map((k) => k.round));
-
   const teams = [...new Set(match.players.map((p) => p.team))].sort((a, b) => (a === me?.team ? -1 : b === me?.team ? 1 : 0));
-  const teamInfo = (id: string) => match.teams.find((t) => t.id === id);
-
   return (
-    <>
-      <Panel
-        title={`${match.map} · ${match.mode}${r ? ` · ${r.letter === "W" ? "Win" : r.letter === "L" ? "Loss" : "Draw"} ${r.score}` : ""}`}
-        color={resultColor(r?.letter)}
-        right={
-          <span className="row-wrap" style={{ justifyContent: "flex-end" }}>
-            <span className="pill">{matchTimeAgo(match.startedAt)}</span>
-            {match.lengthMs > 0 && <span className="pill">{mmss(match.lengthMs)}</span>}
-            <span className="pill">{match.kills.length} kills synced</span>
-            {streamers?.checkedMs ? <span className="pill good">✓ checked · {timeAgo(streamers.checkedMs)}</span> : web === "checking" ? <span className="pill warn">checking Twitch…</span> : !checked && <span className="pill">not checked yet</span>}
-          </span>
-        }
-      >
-        <div className="pad stack">
-          <div className="stats" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-            <Stat label="K / D / A" value={me ? `${me.kills}/${me.deaths}/${me.assists}` : "—"} />
-            <Stat label="K / D" value={me ? (me.kills / Math.max(1, me.deaths)).toFixed(2) : "—"} />
-            <Stat label="Agent" value={me?.agent ?? "—"} />
-            <Stat label="First bloods" value={me ? firstBloods.size : "—"} />
-            <Stat label="Streamers" value={streamerIds.size} purple />
-            <Stat label="Streamer fights" value={fights.length} purple />
+    <div className="stack" style={{ gap: 16 }}>
+      {match.rounds.length > 0 && (
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="rounds">
+            {match.rounds.map((round) => {
+              const kills = myKills.filter((k) => k.round === round.index).length;
+              const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "lost", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
+              return <div key={round.index} className={cls} title={`Round ${round.index + 1}${kills ? `: ${kills} kill${kills === 1 ? "" : "s"}` : ""}`}><span>{round.index + 1}</span></div>;
+            })}
           </div>
-          {match.rounds.length > 0 && (
-            <>
-              <div className="rounds">
-                {match.rounds.map((round) => {
-                  const kills = myKills.filter((k) => k.round === round.index).length;
-                  const died = me && match.kills.some((k) => k.round === round.index && k.victim === me.puuid);
-                  const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
-                  return (
-                    <div key={round.index} className={cls} title={`Round ${round.index + 1}`}>
-                      <span className="n">{round.index + 1}</span>
-                      <span className="k">{"●".repeat(Math.min(kills, 5))}</span>
-                      <span className="x">{died ? "✕" : ""}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="legend">
-                <span><span style={{ color: "var(--win)" }}>■</span> won</span>
-                <span><span style={{ color: "var(--loss)" }}>■</span> lost</span>
-                <span>● your kills</span>
-                <span style={{ color: "#ff7b7b" }}>✕ you died</span>
-                <span className="purple">▢ fought a streamer</span>
-              </div>
-            </>
-          )}
-          {!me && <span className="muted small">Your Riot ID isn't in this match, so wins, kills and fights can't be shown from your side.</span>}
+          <span className="muted small">Green won, red lost, outlined rounds had a fight with a streamer.</span>
         </div>
-      </Panel>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 12 }}>
+      )}
+      <div className="teams">
         {teams.map((team) => {
-          const t = teamInfo(team);
+          const t = match.teams.find((x) => x.id === team);
           const mine = team === me?.team;
           const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills);
           return (
-            <section key={team} className="panel" aria-label={mine ? "Your team" : `Team ${team}`}>
-              <div className="tbl-wrap">
-                <table className="tbl">
-                  <thead>
-                    <tr className="team-head"><th colSpan={3} style={{ color: mine ? "var(--good)" : "var(--rec-text)", background: mine ? "#0f1a13" : "#1a0f0f" }}>{mine ? "Your team" : me ? "Enemy" : team}{t ? ` · ${t.roundsWon}` : ""}</th></tr>
-                    <tr><th>Player</th><th>K/D/A</th><th>Streamer</th></tr>
-                  </thead>
-                  <tbody>
-                    {players.map((p) => {
-                      const l = live.get(p.puuid);
-                      return (
-                        <tr key={p.puuid}>
-                          <td className="ellipsis" style={{ maxWidth: 200 }}>
-                            <span className="ag" title={p.agent}>{ini(p.agent)}</span>
-                            <b>{p.name}</b> <span className="m tiny dim">#{p.tag}</span>
-                          </td>
-                          <td className="m">{p.kills}/{p.deaths}/{p.assists}</td>
-                          <td>
-                            {p.puuid === me?.puuid ? <span className="dim small">you</span>
-                              : l ? (
-                                <span className="stack" style={{ gap: 2, alignItems: "flex-start" }}>
-                                  <a className="chip" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><span className="pf-dot" />{l.name}</a>
-                                  <span className={`small ${l.tone}`}>{l.text}</span>
-                                </span>
-                              ) : <span className="dim small">{web === "checking" ? "checking…" : checked ? "—" : isDesktop ? "checks soon" : "—"}</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      <Panel title="Fights with streamers" color="var(--twitch)" right={actions}>
-        {fights.length ? (
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr><th>Round</th><th>Streamer</th><th>Moment</th><th>At</th><th>Clips</th></tr></thead>
+            <table key={team} className="tbl">
+              <thead><tr><th colSpan={3}>{mine ? "Your team" : me ? "Enemy team" : `Team ${team}`}{t ? ` · ${t.roundsWon}` : ""}</th></tr></thead>
               <tbody>
-                {fights.map((k, i) => {
-                  const them = k.killer === me?.puuid ? k.victim : k.killer;
-                  const l = live.get(them)!;
+                {players.map((p) => {
+                  const l = live.get(p.puuid);
                   return (
-                    <tr key={i}>
-                      <td className="m">R{k.round + 1}</td>
-                      <td><span className="chip"><span className="pf-dot" />{l.name}</span></td>
-                      <td>{k.killer === me?.puuid ? "you killed them" : "they killed you"}</td>
-                      <td className="m">{mmss(k.inRoundMs)}</td>
-                      <td className={`small ${l.tone}`}>{l.text}</td>
+                    <tr key={p.puuid}>
+                      <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span> <span className="muted">· {p.agent}</span></td>
+                      <td className="num">{p.kills}/{p.deaths}/{p.assists}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {p.puuid === me?.puuid ? <span className="dim">you</span>
+                          : l ? <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>
+                          : <span className="dim">{web === "checking" ? "checking…" : checked ? "" : ""}</span>}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        ) : (
-          <div className="empty">
-            <span>{!checked ? "Streamers haven't been checked for this match yet." : streamerIds.size ? "You didn't fight any of the streamers in this match." : "Nobody in this lobby was streaming."}</span>
-          </div>
-        )}
-        {streamers?.error && <p className="note bad">{streamers.error}</p>}
-      </Panel>
-    </>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** One fight (or trade) with a streamer: its clip when saved, otherwise where it's at. */
+interface Fight {
+  round: number;
+  login: string;
+  name: string;
+  killed: boolean;
+  died: boolean;
+  status: Live;
+}
+
+function MatchView({
+  match,
+  riotId,
+  clips,
+  streamers,
+  web,
+  onPlay,
+  actions,
+  children,
+}: {
+  match: MatchSummary;
+  riotId: string;
+  clips: ClipInfo[];
+  streamers?: MatchStreamers;
+  web?: WebStreamer[] | "checking";
+  onPlay: (c: ClipInfo) => void;
+  actions?: ReactNode;
+  children?: ReactNode;
+}) {
+  const [showBoard, setShowBoard] = useState(false);
+  const me = findMe(match, riotId);
+  const r = result(match, me);
+  const checked = Boolean(streamers?.checkedMs) || Array.isArray(web);
+  const live = new Map(match.players.map((p) => [p.puuid, liveInfo(p, match, me, streamers, web)]));
+  const liveList = match.players.filter((p) => live.get(p.puuid) && p.puuid !== me?.puuid);
+
+  const fights: Fight[] = [];
+  if (me) {
+    for (const k of [...match.kills].sort((a, b) => a.atMs - b.atMs)) {
+      const them = k.killer === me.puuid ? k.victim : k.victim === me.puuid ? k.killer : null;
+      const l = them ? live.get(them) : null;
+      if (!them || !l) continue;
+      const f = fights.find((x) => x.round === k.round && x.login === l.login);
+      if (f) {
+        f.killed ||= k.killer === me.puuid;
+        f.died ||= k.victim === me.puuid;
+      } else {
+        fights.push({ round: k.round, login: l.login, name: l.name, killed: k.killer === me.puuid, died: k.victim === me.puuid, status: l });
+      }
+    }
+  }
+  const fightRounds = new Set(fights.map((f) => f.round));
+  const clipFor = (f: Fight) =>
+    clips.find((c) => c.kind === "theirs" && c.streamer?.toLowerCase() === f.login.toLowerCase() && c.round === f.round + 1 && (!c.map || c.map === match.map));
+  const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
+
+  const outcome = r ? `${r.letter === "W" ? "Win" : r.letter === "L" ? "Loss" : "Draw"} ${r.score}` : match.teams.map((t) => t.roundsWon).join("–");
+  const streamerLine = web === "checking" ? "Checking who was live on Twitch…"
+    : !checked ? "Streamers are checked a minute or two after the match."
+    : liveList.length ? `${liveList.length} streamer${liveList.length === 1 ? " was" : "s were"} in this match.`
+    : "Nobody in this lobby was streaming.";
+
+  return (
+    <div className="stack" style={{ gap: 20 }}>
+      <div className="match-head">
+        <div className="stack" style={{ gap: 6 }}>
+          <h1>{match.map} · <span style={{ color: resultColor(r?.letter) }}>{outcome}</span></h1>
+          <span className="muted">
+            {[me && `You played ${me.agent}, ${me.kills}/${me.deaths}/${me.assists}`, match.mode, matchTimeAgo(match.startedAt)].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        <span className="row" style={{ gap: 8 }}>
+          {actions}
+          <button type="button" className="btn quiet" aria-expanded={showBoard} onClick={() => setShowBoard(!showBoard)}>{showBoard ? "Hide scoreboard" : "Scoreboard"}</button>
+        </span>
+      </div>
+
+      <div className="streamer-line">
+        <span>{streamerLine}</span>
+        {liveList.map((p) => {
+          const l = live.get(p.puuid)!;
+          return (
+            <a key={p.puuid} className="streamer-chip" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">
+              <b>{l.name}</b> <span className={l.tone}>{l.text}</span>
+            </a>
+          );
+        })}
+      </div>
+
+      {fights.length > 0 && (
+        <div className="gallery">
+          {fights.map((f) => {
+            const c = clipFor(f);
+            const title = `Round ${f.round + 1} · ${what(f)}`;
+            return c ? (
+              <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
+            ) : (
+              <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
+                <span className={`pending-text ${f.status.tone}`}>{f.status.text}</span>
+              </PendingCard>
+            );
+          })}
+        </div>
+      )}
+      {checked && liveList.length > 0 && !fights.length && me && <p className="muted">You didn't fight any of them this match.</p>}
+      {!me && <p className="muted">Your Riot ID isn't in this match, so your fights can't be shown.</p>}
+
+      {children}
+
+      {showBoard && <Scoreboard match={match} me={me} live={live} fightRounds={fightRounds} web={web} checked={checked} />}
+      {streamers?.error && <p className="small bad">{streamers.error}</p>}
+    </div>
   );
 }
 
@@ -228,44 +237,31 @@ function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId
   }
 
   return (
-    <div className="sr" style={{ flexWrap: "wrap" }}>
-      <span>
-        <b>
-          <a href={`https://www.twitch.tv/${s.login}`} target="_blank" rel="noreferrer">{s.displayName || s.login}</a> was in this match, on {side}
-        </b>
-        <small>Seen on their stream's scoreboard and checked in their VOD{s.delaySec ? ` (stream delay about ${s.delaySec} s)` : ""}. Which player were they?</small>
-        {error && <small className="bad">{error}</small>}
+    <div className="soft-row">
+      <span className="grow">
+        <b><a href={`https://www.twitch.tv/${s.login}`} target="_blank" rel="noreferrer">{s.displayName || s.login}</a></b>{" "}
+        <span className="muted">was on {side} (found by their scoreboard). Which player were they?</span>
+        {error && <span className="small bad" style={{ display: "block" }}>{error}</span>}
       </span>
-      <span className="row">
-        <select className="input" aria-label={`Which player was ${s.login}`} value={puuid} onChange={(e) => setPuuid(e.target.value)}>
-          <option value="">Which player?</option>
+      <label className="field">
+        <span className="sr-only">Which player was {s.login}</span>
+        <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
+          <option value="">Choose player</option>
           {team.map((p) => (
             <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {p.agent}</option>
           ))}
         </select>
-        <button type="button" className="b sm r" disabled={!puuid || busy} onClick={() => void link()}>{busy ? "Checking…" : "Link"}</button>
-      </span>
+      </label>
+      <button type="button" className="btn primary" disabled={!puuid || busy} onClick={() => void link()}>{busy ? "Checking…" : "Link"}</button>
     </div>
   );
 }
 
-function Suggestions({ match, riotId, streamers, onAdded }: { match: MatchSummary; riotId: string; streamers?: MatchStreamers; onAdded: (m: MatchStreamers) => void }) {
-  const list = streamers?.suggested ?? [];
-  if (!list.length) return null;
-  return (
-    <Panel title="Found by scoreboard" color="var(--twitch)" right={<span className="m tiny dim">{list.length} stream{list.length === 1 ? "" : "s"}</span>}>
-      {list.map((s) => (
-        <Suggestion key={s.login} match={match} riotId={riotId} s={s} onAdded={onAdded} />
-      ))}
-      <p className="note">These streamers didn't match by name (smurf or a different name). Pick the player once; CrossPOV remembers it on this PC.</p>
-    </Panel>
-  );
-}
-
-/** "Played against a streamer it missed?": link a player to a Twitch channel. */
+/** "Missed a streamer?": link a player to a Twitch channel. Hidden behind a button. */
 function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: string; onAdded: (s: MatchStreamers) => void }) {
   const me = findMe(match, riotId);
   const others = match.players.filter((p) => p.puuid !== me?.puuid);
+  const [open, setOpen] = useState(false);
   const [puuid, setPuuid] = useState("");
   const [channel, setChannel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -278,6 +274,7 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
     try {
       onAdded(await addStreamerChannel(match.id, puuid, channel.trim()));
       setChannel("");
+      setOpen(false);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -285,28 +282,32 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
     }
   }
 
+  if (!open) return <button type="button" className="linkish muted" style={{ alignSelf: "flex-start" }} onClick={() => setOpen(true)}>Add a streamer we missed</button>;
   return (
-    <Panel title="Missed a streamer?" color="var(--warn)">
-      <form className="pad stack" onSubmit={(e) => void submit(e)}>
-        <span className="muted small">
-          Pick the player and paste their channel. CrossPOV checks they were live during this match, then clips your fights with
-          <b> that player</b> from their VOD, so make sure you pick the right one (linking the channel again to someone else replaces it).
-          It also remembers the link <b>on this PC only</b> and checks that channel when you meet the same player again, even on a renamed account.
-          The server checks one match at a time and keeps nothing; links are never shared with other players.
-        </span>
-        <div className="row-wrap">
-          <select className="input" aria-label="Player" value={puuid} onChange={(e) => setPuuid(e.target.value)}>
+    <form className="soft-box stack" onSubmit={(e) => void submit(e)}>
+      <b>Add a streamer we missed</b>
+      <span className="muted small">
+        Clips follow the player you pick, so choose the right one. The link is kept on this PC only and checked again when you meet them.
+      </span>
+      <div className="row-wrap" style={{ gap: 8 }}>
+        <label className="field">
+          <span className="sr-only">Player</span>
+          <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
             <option value="">Which player?</option>
             {others.map((p) => (
               <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · {p.agent}</option>
             ))}
           </select>
-          <input className="input grow" aria-label="Twitch channel" placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />
-          <button type="submit" className="b r" disabled={busy || !puuid || channel.trim().length < 3}>{busy ? "Checking…" : "Check VOD"}</button>
-        </div>
-        {error && <span className="small bad">{error}</span>}
-      </form>
-    </Panel>
+        </label>
+        <label className="field grow">
+          <span className="sr-only">Twitch channel</span>
+          <input placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />
+        </label>
+        <button type="submit" className="btn primary" disabled={busy || !puuid || channel.trim().length < 3}>{busy ? "Checking…" : "Check VOD"}</button>
+        <button type="button" className="btn quiet" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+      {error && <span className="small bad">{error}</span>}
+    </form>
   );
 }
 
@@ -339,51 +340,47 @@ function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, we
   }
 
   return (
-    <Panel title="Try it with a real match" color="var(--kick)">
-      <form className="pad stack" onSubmit={(e) => void submit(e)}>
-        <span className="muted small">
-          The matches below are sample data. Enter any Riot ID to load its latest real match and check which players were live on
-          Twitch, the same steps the app runs after each game.
-        </span>
-        <div className="row">
-          <input className="input grow" aria-label="Riot ID" placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
-          <select className="input" aria-label="Region" value={region} onChange={(e) => setRegion(e.target.value)}>
-            {REGIONS.map((r) => (
-              <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
-            ))}
-          </select>
-          <button type="submit" className="b r" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
-        </div>
-        {error && <span className="small bad" role="alert">{error}</span>}
-      </form>
-    </Panel>
+    <form className="soft-row" onSubmit={(e) => void submit(e)}>
+      <span className="grow"><b>Try it with a real match.</b> <span className="muted">Enter any Riot ID to load its latest match and see who was live.</span></span>
+      <label className="field">
+        <span className="sr-only">Riot ID</span>
+        <input placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
+      </label>
+      <label className="field">
+        <span className="sr-only">Region</span>
+        <select value={region} onChange={(e) => setRegion(e.target.value)}>
+          {REGIONS.map((r) => (
+            <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
+          ))}
+        </select>
+      </label>
+      <button type="submit" className="btn primary" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
+      {error && <span className="small bad" role="alert" style={{ flexBasis: "100%" }}>{error}</span>}
+    </form>
   );
 }
-
-type Filter = "all" | "streamers" | "competitive";
 
 export default function Matches({
   settings,
   matchesState,
+  recorder,
   onNavigate,
 }: {
   settings: Settings;
   matchesState: ReturnType<typeof useMatches>;
+  recorder: ReturnType<typeof useRecorder>;
   onNavigate: (p: Page) => void;
 }) {
   const { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers } = matchesState;
   const [selected, setSelected] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
   const [rechecking, setRechecking] = useState(false);
   const [recheckError, setRecheckError] = useState("");
   /** Website demo: a real match the visitor looked up. */
   const [looked, setLooked] = useState<{ match: MatchSummary; riotId: string; web?: WebStreamer[] | "checking" } | null>(null);
 
   const all = looked ? [looked.match, ...matches.filter((m) => m.id !== looked.match.id)] : matches;
-  const shown = all.filter((m) =>
-    filter === "streamers" ? (streamers[m.id]?.players.length ?? 0) > 0 : filter === "competitive" ? /competitive/i.test(m.mode) : true,
-  );
-  const match = shown.find((m) => m.id === selected) ?? shown[0];
+  const match = all.find((m) => m.id === selected) ?? all[0];
+  const play = (c: ClipInfo) => void openClip(c.path).catch((err) => recorder.notify(String(err), "bad"));
 
   async function recheck() {
     if (!match) return;
@@ -399,8 +396,8 @@ export default function Matches({
   }
 
   return (
-    <>
-      {status && !status.configured && (
+    <section className="s12 page" aria-label="Matches">
+      {status && !status.configured && isDesktop && (
         <Notice tone="warn">
           Add your Riot ID in Settings so CrossPOV can find your matches.{" "}
           <button type="button" className="linkish" onClick={() => onNavigate("settings")}>Open Settings</button>
@@ -408,81 +405,57 @@ export default function Matches({
       )}
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
-
-      <div className="s4 col">
       {!isDesktop && (
         <DemoLookup
           onFound={(m, riotId, web) => {
             setLooked({ match: m, riotId, web });
             setSelected(m.id);
-            setFilter("all");
           }}
         />
       )}
-      <Panel
-        title="Match history"
-        color="var(--kick)"
-        right={<button type="button" className="b sm" onClick={() => void checkNow()} disabled={checking || !status?.configured}>{checking ? "Checking…" : "Check now"}</button>}
-      >
-        <div className="row" style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
-          <Seg label="Show" value={filter} onChange={setFilter} options={[{ value: "all", label: "All" }, { value: "streamers", label: "With streamers" }, { value: "competitive", label: "Competitive" }]} />
-        </div>
-        {shown.length ? (
-          <ul className="match-list">
-            {shown.map((m) => {
-              const isLooked = m.id === looked?.match.id;
-              const me = findMe(m, isLooked ? looked.riotId : settings.riotId);
-              const r = result(m, me);
-              const s = streamers[m.id];
-              const n = s?.players.length ?? 0;
-              return (
-                <li key={m.id}>
-                  <button type="button" aria-pressed={m.id === match?.id} onClick={() => setSelected(m.id)}>
-                    <span className="res" style={{ background: resultColor(r?.letter) }} />
-                    <span className="stack" style={{ gap: 1, minWidth: 0 }}>
-                      <b style={{ fontSize: 12.5 }}>{m.map} <span className="dim" style={{ fontWeight: 500, fontSize: 11 }}>· {m.mode}</span></b>
-                      <span className="m tiny muted">{me ? `${me.kills}/${me.deaths}/${me.assists} · ` : ""}{matchTimeAgo(m.startedAt)}</span>
-                    </span>
-                    <span className="stack" style={{ gap: 2, alignItems: "flex-end" }}>
-                      <b className="m" style={{ fontSize: 12, color: resultColor(r?.letter) }}>{r ? `${r.letter} ${r.score}` : m.teams.map((t) => t.roundsWon).join("–")}</b>
-                      <span className={`tiny ${n ? "purple" : "dim"}`}>{n ? `${n} streamer${n === 1 ? "" : "s"}` : s?.checkedMs ? "no streamers" : ""}</span>
-                      <span className="m dim" style={{ fontSize: 9 }}>{s?.checkedMs ? "✓ checked" : "not checked yet"}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <div className="empty">
-            <strong>No matches{filter !== "all" ? " here" : " yet"}</strong>
-            <span>{settings.riotId ? "Play a match. It shows up a minute or two after it ends." : "Add your Riot ID in Settings first."}</span>
-          </div>
+
+      <div className="match-strip" role="list" aria-label="Your matches">
+        {all.map((m) => {
+          const isLooked = m.id === looked?.match.id;
+          const me = findMe(m, isLooked ? looked.riotId : settings.riotId);
+          const r = result(m, me);
+          const n = streamers[m.id]?.players.length ?? 0;
+          return (
+            <button key={m.id} type="button" role="listitem" aria-current={m.id === match?.id ? "true" : undefined} onClick={() => setSelected(m.id)}>
+              <b>{m.map} <span style={{ color: resultColor(r?.letter) }}>{r ? r.score : m.teams.map((t) => t.roundsWon).join("–")}</span></b>
+              <span>{matchTimeAgo(m.startedAt)}{n ? ` · ${n} streamer${n === 1 ? "" : "s"}` : ""}</span>
+            </button>
+          );
+        })}
+        {isDesktop && (
+          <button type="button" className="strip-action" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
+            {checking ? "Checking…" : "Check now"}
+          </button>
         )}
-        <p className="note">
-          {status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}. ` : ""}Each match is checked for streamers once, and a second time if nobody was live.
-        </p>
-      </Panel>
       </div>
 
-      <div className="s8 col">
-        {match && match.id === looked?.match.id ? (
-          <MatchDetail match={match} riotId={looked.riotId} web={looked.web} />
-        ) : match ? (
-          <>
-            <MatchDetail
-              match={match}
-              riotId={settings.riotId}
-              streamers={streamers[match.id]}
-              actions={<button type="button" className="b sm" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? "Checking…" : "Check again"}</button>}
-            />
-            <Suggestions match={match} riotId={settings.riotId} streamers={streamers[match.id]} onAdded={putStreamers} />
-            {isDesktop && <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />}
-          </>
-        ) : (
-          <Panel title="Match"><div className="empty"><span>Pick a match to see both teams, your rounds and any streamers.</span></div></Panel>
-        )}
-      </div>
-    </>
+      {match && match.id === looked?.match.id ? (
+        <MatchView match={match} riotId={looked.riotId} clips={[]} web={looked.web} onPlay={play} />
+      ) : match ? (
+        <MatchView
+          match={match}
+          riotId={settings.riotId}
+          clips={recorder.clips}
+          streamers={streamers[match.id]}
+          onPlay={play}
+          actions={isDesktop && <button type="button" className="btn quiet" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? "Checking…" : "Check again"}</button>}
+        >
+          {(streamers[match.id]?.suggested ?? []).map((s) => (
+            <Suggestion key={s.login} match={match} riotId={settings.riotId} s={s} onAdded={putStreamers} />
+          ))}
+          {isDesktop && <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />}
+        </MatchView>
+      ) : (
+        <div className="empty-state">
+          <b>No matches yet</b>
+          <span>{settings.riotId ? "Play a match. It shows up a minute or two after it ends." : "Add your Riot ID in Settings first."}</span>
+        </div>
+      )}
+    </section>
   );
 }

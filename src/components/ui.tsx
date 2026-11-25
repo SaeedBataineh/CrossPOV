@@ -27,9 +27,9 @@ export function Panel({
   );
 }
 
-export function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }) {
+export function Notice({ tone, children }: { tone: "warn" | "bad" | "info"; children: ReactNode }) {
   return (
-    <p className={`notice s12 ${tone === "bad" ? "bad" : ""}`} role="alert">
+    <p className={`notice s12 ${tone === "warn" ? "" : tone}`} role={tone === "info" ? "status" : "alert"}>
       {children}
     </p>
   );
@@ -162,5 +162,69 @@ export function ClipCard({ clip, selected, onSelect, onOpen }: { clip: ClipInfo;
         <span className="where"><span className="ellipsis">{[clip.map, clockOrAgo(clip.createdMs)].filter(Boolean).join(" · ")}</span><span>{formatSize(clip.sizeBytes)}</span></span>
       </span>
     </button>
+  );
+}
+
+// ---------- Gallery ----------
+
+/** Big, plain title for a clip card: what happened, not the file name. */
+export function cardTitle(c: ClipInfo): string {
+  if (!isTheirs(c)) return "Your clip";
+  const m = c.moment ?? "Streamer clip";
+  return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+/** "Ascent · R14 · 35 min ago" */
+export function cardMeta(c: ClipInfo): string {
+  return [c.map, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
+}
+
+const FolderIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
+);
+const TrashIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+);
+
+/** A clip in the gallery: click to play; folder and delete appear on hover. */
+export function GalleryCard({ clip, title, meta, onPlay, onReveal, onDelete }: {
+  clip: ClipInfo;
+  title?: string;
+  meta?: string;
+  onPlay: () => void;
+  onReveal?: () => void;
+  onDelete?: () => void;
+}) {
+  const src = thumbSrc(clip.thumb);
+  const t = title ?? cardTitle(clip);
+  return (
+    <div className="gcard">
+      <button type="button" className={isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Play ${t}`}>
+        {src ? <img src={src} alt="" loading="lazy" decoding="async" /> : (
+          <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#ffffff1a" /><path d="M10 8l6 4-6 4z" fill="#ffffffcc" /></svg>
+        )}
+        {isTheirs(clip) && clip.streamer && <span className="badge">{clip.streamer}</span>}
+        {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
+      </button>
+      {(onReveal || onDelete) && (
+        <span className="gactions">
+          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderIcon /></button>}
+          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><TrashIcon /></button>}
+        </span>
+      )}
+      <b className="gtitle">{t}</b>
+      <span className="gmeta">{meta ?? cardMeta(clip)}</span>
+    </div>
+  );
+}
+
+/** A card-sized placeholder in a clip grid (downloading, not available...). */
+export function PendingCard({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
+  return (
+    <div className="gcard">
+      <div className="gthumb pending">{children}</div>
+      <b className="gtitle">{title}</b>
+      {meta && <span className="gmeta">{meta}</span>}
+    </div>
   );
 }

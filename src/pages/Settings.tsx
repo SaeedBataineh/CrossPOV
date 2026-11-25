@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 import { Panel, Row, Seg, Toggle } from "../components/ui";
 import { isDesktop, pickFolder } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
@@ -22,7 +22,30 @@ function shortcutFromEvent(e: KeyboardEvent): string | null {
 const opts = <T extends string | number>(values: T[], label: (v: T) => string = String) => values.map((value) => ({ value, label: label(value) }));
 const PADS = opts([15, 30, 60, 90, 120]);
 
-export default function Settings({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
+const Audio = lazy(() => import("./Audio"));
+
+/** Settings, with Audio as its own tab (one at a time, so each keeps its own unsaved changes). */
+export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
+  const [tab, setTab] = useState<"general" | "audio">("general");
+  return (
+    <>
+      <div className="s12 toolbar">
+        <h1 className="page-title">Settings</h1>
+        <div className="chips" role="tablist" aria-label="Settings sections">
+          <button type="button" role="tab" aria-selected={tab === "general"} onClick={() => setTab("general")}>General</button>
+          <button type="button" role="tab" aria-selected={tab === "audio"} onClick={() => setTab("audio")}>Audio</button>
+        </div>
+      </div>
+      {tab === "general" ? <GeneralSettings settings={settings} onSaved={onSaved} /> : (
+        <Suspense fallback={<p className="muted s12">Loading…</p>}>
+          <Audio settings={settings} onSaved={onSaved} />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
   const d = useDraft(settings, onSaved);
   const { draft, set } = d;
   const [listening, setListening] = useState(false);
@@ -53,7 +76,6 @@ export default function Settings({ settings, onSaved }: { settings: S; onSaved: 
     <>
       <section className="panel s12" aria-label="Save settings">
         <div className="row-wrap" style={{ padding: "8px 12px", gap: 10 }}>
-          <span className="pt"><i style={{ background: "var(--rec)" }} />Settings</span>
           <span className="m tiny muted">≈ {Math.round(targetMbps(draft))} Mbps · about {Math.round(estimateClipMb(draft))} MB per {draft.bufferSeconds} s clip</span>
           <span className="spacer" />
           <span className="m tiny muted" role="status">{d.status || (d.dirty ? "unsaved changes" : "all saved")}</span>
