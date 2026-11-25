@@ -272,6 +272,15 @@ fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result
     app.opener().open_path(clip.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Lets the app's own player read this one clip (and nothing else on disk).
+/// Returns its path; MKV can't play in the window, so the caller opens it outside.
+#[tauri::command]
+fn play_clip_in_app(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
+    app.asset_protocol_scope().allow_file(&clip).map_err(|e| e.to_string())?;
+    Ok(clip.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn reveal_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
@@ -528,6 +537,7 @@ pub fn run() {
             list_clips,
             delete_clip,
             open_clip,
+            play_clip_in_app,
             reveal_clip,
             list_audio_apps,
             list_mic_devices,

@@ -124,6 +124,12 @@ export async function deleteClip(path: string): Promise<void> {
   await tauriInvoke<void>("delete_clip", { path });
 }
 
+/** A URL the app's own player can play, or null when the clip must open outside (MKV, website demo). */
+export async function clipVideoSrc(path: string): Promise<string | null> {
+  if (!isDesktop || !/\.mp4$/i.test(path)) return null;
+  return convertFileSrc(await tauriInvoke<string>("play_clip_in_app", { path }));
+}
+
 export async function openClip(path: string): Promise<void> {
   if (!isDesktop) throw NEEDS_APP("Playing clips");
   await tauriInvoke<void>("open_clip", { path });

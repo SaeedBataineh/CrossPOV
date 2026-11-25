@@ -7,7 +7,6 @@ import {
   isDesktop,
   lookupLatestMatch,
   lookupStreamers,
-  openClip,
   type ClipInfo,
   type MatchPlayer,
   type MatchStreamers,
@@ -408,11 +407,13 @@ export default function Matches({
   matchesState,
   recorder,
   onNavigate,
+  onPlay,
 }: {
   settings: Settings;
   matchesState: ReturnType<typeof useMatches>;
   recorder: ReturnType<typeof useRecorder>;
   onNavigate: (p: Page) => void;
+  onPlay: (c: ClipInfo) => void;
 }) {
   const { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers } = matchesState;
   const [selected, setSelected] = useState<string | null>(null);
@@ -423,7 +424,7 @@ export default function Matches({
 
   const all = looked ? [looked.match, ...matches.filter((m) => m.id !== looked.match.id)] : matches;
   const match = all.find((m) => m.id === selected) ?? all[0];
-  const play = (c: ClipInfo) => void openClip(c.path).catch((err) => recorder.notify(String(err), "bad"));
+  const play = onPlay;
 
   async function recheck() {
     if (!match) return;

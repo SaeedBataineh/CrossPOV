@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
-import { deleteClip, isDesktop, openClip, openClipFolder, revealClip, thumbSrc, type ClipInfo } from "../lib/backend";
+import { deleteClip, isDesktop, openClipFolder, revealClip, thumbSrc, type ClipInfo } from "../lib/backend";
 import type { Settings } from "../lib/settings";
 import { formatDuration, formatSize, timeAgo, type useRecorder } from "../lib/useRecorder";
 
@@ -53,7 +53,7 @@ function Featured({ clip, onPlay, onReveal }: { clip: ClipInfo; onPlay: () => vo
   );
 }
 
-export default function Clips({ settings, recorder }: { settings: Settings; recorder: ReturnType<typeof useRecorder> }) {
+export default function Clips({ settings, recorder, onPlay }: { settings: Settings; recorder: ReturnType<typeof useRecorder>; onPlay: (c: ClipInfo) => void }) {
   const { clips, refreshClips, notify } = recorder;
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("newest");
@@ -107,7 +107,7 @@ export default function Clips({ settings, recorder }: { settings: Settings; reco
     <section className="s12 page" aria-label="Clips">
       {featured && (
         <div className="clips-top">
-          <Featured clip={featured} onPlay={run(() => openClip(featured.path))} onReveal={isDesktop ? run(() => revealClip(featured.path)) : undefined} />
+          <Featured clip={featured} onPlay={() => onPlay(featured)} onReveal={isDesktop ? run(() => revealClip(featured.path)) : undefined} />
           <aside className="summary">
             <div className="summary-stat"><b>{theirs}</b><span>streamer clips</span></div>
             <div className="summary-stat"><b>{clips.length - theirs}</b><span>your clips</span></div>
@@ -153,7 +153,7 @@ export default function Clips({ settings, recorder }: { settings: Settings; reco
                 <GalleryCard
                   key={c.path}
                   clip={c}
-                  onPlay={run(() => openClip(c.path))}
+                  onPlay={() => onPlay(c)}
                   onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
                   onDelete={() => void remove(c)}
                 />

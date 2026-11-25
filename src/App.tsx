@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Player } from "./components/Player";
 import { TopBar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
-import { isDesktop, loadSettings, saveSettings } from "./lib/backend";
+import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
@@ -17,6 +18,9 @@ export default function App() {
   const [page, setPage] = useState<Page>("clips");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** The clip playing in the app's own player. */
+  const [playing, setPlaying] = useState<ClipInfo | null>(null);
+  const closePlayer = useCallback(() => setPlaying(null), []);
   const recorder = useRecorder();
   const matchesState = useMatches();
   const update = useUpdateStatus();
@@ -71,14 +75,15 @@ export default function App() {
           </Notice>
         )}
         <Suspense fallback={<p className="muted s12">Loading…</p>}>
-          {page === "clips" && <Clips settings={settings} recorder={recorder} />}
-          {page === "matches" && <Matches settings={settings} matchesState={matchesState} recorder={recorder} onNavigate={setPage} />}
+          {page === "clips" && <Clips settings={settings} recorder={recorder} onPlay={setPlaying} />}
+          {page === "matches" && <Matches settings={settings} matchesState={matchesState} recorder={recorder} onNavigate={setPage} onPlay={setPlaying} />}
           {page === "streamers" && <Streamers settings={settings} recorder={recorder} matchesState={matchesState} quickSave={quickSave} onNavigate={setPage} />}
           {page === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
         </Suspense>
       </main>
       <ToastView toast={recorder.toast} />
     </div>
+    {playing && <Player clip={playing} onClose={closePlayer} notify={recorder.notify} />}
     <UpdateGate status={update} />
     </>
   );
