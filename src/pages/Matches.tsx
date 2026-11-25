@@ -60,12 +60,6 @@ function Rounds({ match, me, fightRounds }: { match: MatchSummary; me?: MatchPla
           );
         })}
       </div>
-      <span className="legend">
-        <span><i className="sw won" />won</span>
-        <span><i className="sw lost" />lost</span>
-        <span><i className="sw streamer" />fight with a streamer</span>
-        <span>number: your kills</span>
-      </span>
     </div>
   );
 }
@@ -178,20 +172,12 @@ function MatchView({
           <span className="eyebrow">{[match.mode, matchTimeAgo(match.startedAt)].join(" · ")}</span>
           <h1>{match.map}</h1>
           {verdict && <span className="verdict">{verdict}</span>}
+          {me && <span className="muted">{me.agent} · {me.kills} / {me.deaths} / {me.assists}</span>}
         </div>
         <div className="big-score" aria-label={`Score ${myScore ?? "?"} to ${theirScore ?? "?"}`}>
           <b className="mine">{myScore ?? "–"}</b>
           <span>:</span>
           <b>{theirScore ?? "–"}</b>
-        </div>
-        <div className="hero-stats">
-          {me && (
-            <>
-              <div><span>Agent</span><b>{me.agent}</b></div>
-              <div><span>K / D / A</span><b>{me.kills} / {me.deaths} / {me.assists}</b></div>
-            </>
-          )}
-          <div><span>Streamer fights</span><b>{fights.length}</b></div>
         </div>
         {actions && <div className="hero-actions">{actions}</div>}
       </div>
@@ -210,7 +196,7 @@ function MatchView({
                   <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
                 ) : (
                   <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
-                    <span className={`pending-text ${f.status.tone}`}>{f.status.text}</span>
+                    <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
                   </PendingCard>
                 );
               })}
@@ -449,6 +435,16 @@ export default function Matches({
       )}
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
+
+      <header className="page-head">
+        <h1>Matches</h1>
+        <span className="spacer" />
+        {isDesktop && (
+          <button type="button" className="btn quiet" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
+            {checking ? "Checking…" : "Check now"}
+          </button>
+        )}
+      </header>
       {!isDesktop && (
         <DemoLookup
           onFound={(m, riotId, web) => {
@@ -457,17 +453,8 @@ export default function Matches({
           }}
         />
       )}
-
       <div className="matches-layout">
       <nav className="match-list" aria-label="Your matches">
-        <div className="match-list-head">
-          <h2 className="section-title">Matches</h2>
-          {isDesktop && (
-            <button type="button" className="linkish muted small" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
-              {checking ? "Checking…" : "Check now"}
-            </button>
-          )}
-        </div>
         {all.map((m) => {
           const isLooked = m.id === looked?.match.id;
           const me = findMe(m, isLooked ? looked.riotId : settings.riotId);

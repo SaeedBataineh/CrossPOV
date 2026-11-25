@@ -24,28 +24,39 @@ const PADS = opts([15, 30, 60, 90, 120]);
 
 const Audio = lazy(() => import("./Audio"));
 
-/** Settings, with Audio as its own tab (one at a time, so each keeps its own unsaved changes). */
+type Section = "recording" | "streamers" | "audio" | "account";
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "recording", label: "Recording" },
+  { id: "streamers", label: "Streamer clips" },
+  { id: "audio", label: "Audio" },
+  { id: "account", label: "Account and app" },
+];
+
+/** Settings in one column, a tab per topic (Audio keeps its own unsaved changes). */
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
-  const [tab, setTab] = useState<"general" | "audio">("general");
+  const [tab, setTab] = useState<Section>("recording");
   return (
-    <>
-      <div className="s12 toolbar">
-        <h1 className="page-title">Settings</h1>
-        <div className="chips" role="tablist" aria-label="Settings sections">
-          <button type="button" role="tab" aria-selected={tab === "general"} onClick={() => setTab("general")}>General</button>
-          <button type="button" role="tab" aria-selected={tab === "audio"} onClick={() => setTab("audio")}>Audio</button>
-        </div>
+    <section className="s12 page narrow" aria-label="Settings">
+      <header className="page-head">
+        <h1>Settings</h1>
+      </header>
+      <div className="chips" role="tablist" aria-label="Settings sections">
+        {SECTIONS.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
       </div>
-      {tab === "general" ? <GeneralSettings settings={settings} onSaved={onSaved} /> : (
-        <Suspense fallback={<p className="muted s12">Loading…</p>}>
-          <Audio settings={settings} onSaved={onSaved} />
+      {tab === "audio" ? (
+        <Suspense fallback={<p className="muted">Loading…</p>}>
+          <div className="settings-audio"><Audio settings={settings} onSaved={onSaved} /></div>
         </Suspense>
+      ) : (
+        <GeneralSettings settings={settings} onSaved={onSaved} section={tab} />
       )}
-    </>
+    </section>
   );
 }
 
-function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
+function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved: (s: S) => void; section: Section }) {
   const d = useDraft(settings, onSaved);
   const { draft, set } = d;
   const [listening, setListening] = useState(false);
@@ -74,19 +85,16 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
 
   return (
     <>
-      <section className="panel s12" aria-label="Save settings">
-        <div className="row-wrap" style={{ padding: "8px 12px", gap: 10 }}>
-          <span className="m tiny muted">≈ {Math.round(targetMbps(draft))} Mbps · about {Math.round(estimateClipMb(draft))} MB per {draft.bufferSeconds} s clip</span>
-          <span className="spacer" />
-          <span className="m tiny muted" role="status">{d.status || (d.dirty ? "unsaved changes" : "all saved")}</span>
-          <button type="button" className="b sm" onClick={() => void d.reset()}>Reset to defaults</button>
-          {d.dirty && <button type="button" className="b sm" onClick={d.discard}>Undo</button>}
-          <button type="button" className="b sm r" onClick={() => void d.save()} disabled={!d.dirty || d.saving}>{d.saving ? "Saving…" : "Save"}</button>
-        </div>
-      </section>
+      <div className="save-bar">
+        <span className="muted small" role="status">{d.status || (d.dirty ? "You have unsaved changes" : "All changes saved")}</span>
+        <span className="spacer" />
+        {d.dirty && <button type="button" className="btn quiet" onClick={d.discard}>Undo</button>}
+        <button type="button" className="btn primary" onClick={() => void d.save()} disabled={!d.dirty || d.saving}>{d.saving ? "Saving…" : "Save"}</button>
+      </div>
 
-      <div className="s4 col">
-        <Panel title="Recording" color="var(--rec)" right={<span className="m tiny dim">your clips</span>}>
+      {section === "recording" && (
+        <>
+        <Panel title="Recording">
           <Row label="Frame rate"><Seg label="Frame rate" value={draft.fps} onChange={(v) => set("fps", v)} options={opts([30, 60, 120, 144, 240])} /></Row>
           <Row label="Resolution" help="native = your monitor">
             <Seg label="Resolution" value={draft.resolution} onChange={(v) => set("resolution", v)} options={[{ value: "native", label: "Native" }, { value: "1440p", label: "1440p" }, { value: "1080p", label: "1080p" }, { value: "720p", label: "720p" }]} />
@@ -102,7 +110,7 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
           </Row>
         </Panel>
 
-        <Panel title="Hotkey and replay" color="var(--warn)">
+        <Panel title="Hotkey and replay">
           <Row label="Save clip" help={listening ? "press the new key or combo · Esc cancels" : "works while you're in game"}>
             <span className="row">
               <span className="pill"><b>{draft.hotkey}</b></span>
@@ -113,11 +121,13 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
           </Row>
           <Row label="Clip length" help="how far back a hotkey clip goes"><Seg label="Clip length" value={draft.bufferSeconds} onChange={(v) => set("bufferSeconds", v)} options={opts([15, 30, 60, 120, 300])} /></Row>
           <Row label="Clip sound" help="a beep so you know it worked"><Toggle label="Clip sound" checked={draft.clipSound} onChange={(v) => set("clipSound", v)} /></Row>
+          <p className="note">About {Math.round(targetMbps(draft))} Mbps, so a {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB.</p>
         </Panel>
-      </div>
+        </>
+      )}
 
-      <div className="s4 col">
-        <Panel title="Streamer clips" color="var(--twitch)" right={<span className="m tiny dim">after each match</span>}>
+      {section === "streamers" && (
+        <Panel title="Streamer clips">
           <Row label="Auto-clip streamers" help="in your matches"><Toggle label="Auto-clip streamers" checked={draft.streamerAuto} onChange={(v) => set("streamerAuto", v)} /></Row>
           <Row label="When they killed you" help="turn off to skip every clip where the streamer killed you"><Toggle label="When they killed you" checked={draft.clipKilledYou} onChange={(v) => set("clipKilledYou", v)} /></Row>
           <Row label="When you killed them" help="their POV of your kill"><Toggle label="When you killed them" checked={draft.clipYouKilled} onChange={(v) => set("clipYouKilled", v)} /></Row>
@@ -130,13 +140,12 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
           </Row>
           <Row label="Grab right after the match" help="saves fights while they're still live"><Toggle label="Grab right after the match" checked={draft.grabAfterMatch} onChange={(v) => set("grabAfterMatch", v)} /></Row>
           <Row label="Wait for a VOD" help="some streamers publish late"><Seg label="Wait for a VOD" value={draft.vodWaitHours} onChange={(v) => set("vodWaitHours", v)} options={opts([12, 24, 48], (v) => `${v} h`)} /></Row>
-          <Row label="Side-by-side export" help="your POV next to theirs"><span className="pill">coming soon</span></Row>
-          <Row label="VOD archives, YouTube, Kick" help="more places to find VODs"><span className="pill">coming soon</span></Row>
         </Panel>
-      </div>
+      )}
 
-      <div className="s4 col">
-        <Panel title="Account" color="var(--kick)" right={<span className="m tiny good">● {draft.serverUrl.replace(/^https?:\/\//, "")}</span>}>
+      {section === "account" && (
+        <>
+        <Panel title="Account">
           <Row label="Riot ID" help={riotIdOk ? "only used to find your matches" : "type it as Name#TAG"}>
             <input className="input" style={{ width: 170 }} placeholder="Name#TAG" value={draft.riotId} onChange={(e) => set("riotId", e.target.value)} aria-invalid={!riotIdOk} aria-label="Riot ID" spellCheck={false} />
           </Row>
@@ -148,7 +157,7 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
           <p className="note">Your PC never talks to Riot or the game. Match data comes from the CrossPOV server.</p>
         </Panel>
 
-        <Panel title="Storage" color="var(--text)">
+        <Panel title="Storage">
           <Row label="Clip folder" help={<span className="path">{draft.clipFolder || "Videos\\CrossPOV"}</span>}>
             <button type="button" className="b sm" onClick={() => void browse()} disabled={!isDesktop}>Change</button>
           </Row>
@@ -158,13 +167,15 @@ function GeneralSettings({ settings, onSaved }: { settings: S; onSaved: (s: S) =
           <Row label="Delete oldest at the limit" help="your newest clip is always kept"><Toggle label="Delete oldest at the limit" checked={draft.pruneOldest} onChange={(v) => set("pruneOldest", v)} /></Row>
         </Panel>
 
-        <Panel title="App" color="var(--warn)">
+        <Panel title="App">
           <Row label="Start with Windows" help="starts quietly in the tray"><Toggle label="Start with Windows" checked={draft.startWithWindows} onChange={(v) => set("startWithWindows", v)} /></Row>
           <Row label="Close to tray" help="keeps recording ready"><Toggle label="Close to tray" checked={draft.minimizeToTray} onChange={(v) => set("minimizeToTray", v)} /></Row>
           <Row label="Notifications" help={'e.g. "3 streamer clips saved"'}><Toggle label="Notifications" checked={draft.notifications} onChange={(v) => set("notifications", v)} /></Row>
           <Row label="Version" help="Not endorsed by Riot Games"><span className="pill">v{__APP_VERSION__}</span></Row>
         </Panel>
-      </div>
+        <button type="button" className="linkish muted small" style={{ alignSelf: "flex-start" }} onClick={() => void d.reset()}>Reset all settings to defaults</button>
+        </>
+      )}
     </>
   );
 }

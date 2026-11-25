@@ -1,9 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Player } from "./components/Player";
-import { TopBar, type Page } from "./components/Shell";
+import { Sidebar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
-import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
+import { isDesktop, loadSettings, type ClipInfo } from "./lib/backend";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
@@ -32,22 +32,11 @@ export default function App() {
     loadSettings().then(setSettings, (err) => setLoadError(String(err)));
   }, []);
 
-  /** Saves a few settings at once, for quick switches outside the Settings page. */
-  const quickSave = useCallback(
-    async (patch: Partial<Settings>) => {
-      try {
-        setSettings(await saveSettings({ ...settings, ...patch }));
-      } catch (err) {
-        recorder.notify(`Could not save: ${String(err)}`, "bad");
-      }
-    },
-    [settings, recorder],
-  );
 
   return (
     <>
     <div className="app" inert={blocked}>
-      <TopBar
+      <Sidebar
         page={page}
         settings={settings}
         status={status}
@@ -58,8 +47,7 @@ export default function App() {
       <main className="main">
         {!isDesktop && (
           <p className="notice info s12" role="note">
-            <b>Website demo with sample data.</b> Recording, playing clips and downloading streamer clips need the Windows app. The
-            Matches page can look up a real match. <a href="/">About CrossPOV</a>
+            <b>Website demo with sample data.</b> Recording and streamer clips need the Windows app. <a href="/">About CrossPOV</a>
           </p>
         )}
         {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
@@ -77,7 +65,7 @@ export default function App() {
         <Suspense fallback={<p className="muted s12">Loading…</p>}>
           {page === "clips" && <Clips settings={settings} recorder={recorder} onPlay={setPlaying} />}
           {page === "matches" && <Matches settings={settings} matchesState={matchesState} recorder={recorder} onNavigate={setPage} onPlay={setPlaying} />}
-          {page === "streamers" && <Streamers settings={settings} recorder={recorder} matchesState={matchesState} quickSave={quickSave} onNavigate={setPage} />}
+          {page === "streamers" && <Streamers settings={settings} recorder={recorder} matchesState={matchesState} onNavigate={setPage} />}
           {page === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
         </Suspense>
       </main>
