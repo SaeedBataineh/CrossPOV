@@ -120,6 +120,22 @@ fn run_ffmpeg(ffmpeg: &Path, args: &[String]) -> Result<(), String> {
 }
 
 /// Segment file names from FFmpeg's list, oldest first, as full paths.
+/// The main screen's real height in pixels (not scaled by Windows' display
+/// zoom), which is what the recorder captures.
+#[cfg(windows)]
+fn primary_screen_height() -> Option<u32> {
+    use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS};
+    let mut mode = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
+    // SAFETY: `mode` is a valid DEVMODEW with dmSize set; a null device name means the main screen.
+    let ok = unsafe { EnumDisplaySettingsW(windows::core::PCWSTR::null(), ENUM_CURRENT_SETTINGS, &mut mode) };
+    (ok.as_bool() && mode.dmPelsHeight > 0).then_some(mode.dmPelsHeight)
+}
+
+#[cfg(not(windows))]
+fn primary_screen_height() -> Option<u32> {
+    None
+}
+
 fn read_segment_list(plan: &RecordPlan) -> Vec<PathBuf> {
     fs::read_to_string(plan.list_file())
         .unwrap_or_default()
@@ -336,6 +352,7 @@ impl Recorder {
             compat,
             segment_dir,
             segment_count: ffmpeg::segment_count(settings.buffer_seconds),
+            screen_height: primary_screen_height(),
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)

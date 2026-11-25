@@ -220,6 +220,9 @@ pub struct RecordPlan {
     pub compat: bool,
     pub segment_dir: PathBuf,
     pub segment_count: u32,
+    /// Height of the screen being recorded, if known. A screen no taller than
+    /// the chosen resolution isn't resized at all.
+    pub screen_height: Option<u32>,
 }
 
 impl RecordPlan {
@@ -266,19 +269,26 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         push(&mut a, &["-thread_queue_size", "1024", "-i", "pipe:0"]);
     }
 
-    // Video filters. At native size on a GPU encoder the frames go straight
-    // from capture to encoder without touching the CPU.
-    let height = target_height(s.resolution);
+    // Video filters. On a GPU encoder the frames go straight from capture to
+    // encoder without touching the CPU, resized on the GPU if needed. The CPU
+    // path (copy out, convert, resize) is for Media Foundation, the test
+    // pattern, and compatibility mode when a driver refuses the GPU path.
+    let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h));
     let on_gpu = plan.source == VideoSource::Desktop;
+    let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
     let mut vf: Vec<String> = Vec::new();
-    if on_gpu && (height.is_some() || !plan.encoder.takes_gpu_frames() || plan.compat) {
-        vf.push("hwdownload".into());
-        vf.push("format=bgra".into());
-    }
-    if let Some(h) = height {
-        vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
-    }
-    if !vf.is_empty() || !on_gpu {
+    if gpu_path {
+        if let Some(h) = height {
+            vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
+        }
+    } else {
+        if on_gpu {
+            vf.push("hwdownload".into());
+            vf.push("format=bgra".into());
+        }
+        if let Some(h) = height {
+            vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
+        }
         vf.push("format=nv12".into());
     }
 
@@ -391,7 +401,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34 }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -410,10 +420,36 @@ mod tests {
     }
 
     #[test]
-    fn scaling_downloads_then_scales() {
+    fn gpu_encoders_resize_on_the_gpu() {
         let s = Settings { resolution: Resolution::P720, ..Settings::default() };
         let args = joined(&s, &plan(VideoSource::Desktop, VideoEncoder::Amf, false));
+        assert!(args.contains("[0:v]scale_d3d11=width=-2:height='min(ih,720)':format=nv12[v]"), "{args}");
+        assert!(!args.contains("hwdownload"), "{args}");
+    }
+
+    #[test]
+    fn compatibility_mode_resizes_on_the_cpu() {
+        let s = Settings { resolution: Resolution::P720, ..Settings::default() };
+        let p = RecordPlan { compat: true, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let args = joined(&s, &p);
         assert!(args.contains("[0:v]hwdownload,format=bgra,scale=-2:'min(ih,720)':flags=bilinear,format=nv12[v]"), "{args}");
+    }
+
+    #[test]
+    fn screen_already_small_enough_is_not_resized() {
+        let s = Settings { resolution: Resolution::P1080, ..Settings::default() };
+        for screen in [1080, 900] {
+            let p = RecordPlan { screen_height: Some(screen), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+            let args = joined(&s, &p);
+            assert!(!args.contains("scale"), "{screen}: {args}");
+            assert!(args.contains("-map 0:v"), "{args}");
+        }
+        // Media Foundation still needs frames in normal memory, but no resize.
+        let p = RecordPlan { screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Qsv, false) };
+        assert!(joined(&s, &p).contains("[0:v]hwdownload,format=bgra,format=nv12[v]"));
+        // A taller screen is resized.
+        let p = RecordPlan { screen_height: Some(1440), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        assert!(joined(&s, &p).contains("scale_d3d11"));
     }
 
     #[test]
