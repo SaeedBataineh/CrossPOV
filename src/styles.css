@@ -391,3 +391,18 @@ select.input { padding-right: 6px; }
 .player video { display: block; width: 100%; max-height: calc(100vh - 160px); background: #000; }
 .player-bar { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
 @media (max-width: 700px) { .player-backdrop { padding: 8px; } .player-bar { flex-wrap: wrap; } }
+
+/* ---------- Matches feed ---------- */
+.page.narrow-wide { max-width: 1120px; }
+.match-feed { display: flex; flex-direction: column; gap: 14px; }
+.match-card { display: flex; flex-direction: column; gap: 16px; padding: 20px 22px; border-radius: 16px; background: var(--panel); }
+.match-card-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.match-card-head > b { font-size: 19px; font-weight: 700; white-space: nowrap; }
+.match-card-head .muted { font-size: 14px; }
+.match-card-head .linkish { font-size: 14px; text-decoration: none; white-space: nowrap; }
+.match-card-head .linkish:hover { color: var(--text); }
+.match-details { display: flex; flex-direction: column; gap: 18px; padding-top: 4px; border-top: 1px solid var(--line); padding-top: 18px; }
+.match-details .soft-box, .match-details .soft-row { background: var(--raised); }
+.match-details .streamer-card { background: var(--raised); }
+.match-card .gallery { grid-template-columns: repeat(auto-fill, minmax(max(180px, calc((100% - 48px) / 4)), 1fr)); gap: 18px 16px; }
+.match-card .gtitle { font-size: 14px; }

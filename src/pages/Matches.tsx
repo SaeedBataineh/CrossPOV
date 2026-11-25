@@ -152,93 +152,81 @@ function MatchView({
     clips.find((c) => c.kind === "theirs" && c.streamer?.toLowerCase() === f.login.toLowerCase() && c.round === f.round + 1 && (!c.map || c.map === match.map));
   const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
 
-  const myScore = me ? match.teams.find((t) => t.id === me.team)?.roundsWon : match.teams[0]?.roundsWon;
-  const theirScore = me ? match.teams.find((t) => t.id !== me.team)?.roundsWon : match.teams[1]?.roundsWon;
-  const verdict = r ? (r.letter === "W" ? "Victory" : r.letter === "L" ? "Defeat" : "Draw") : "";
-  const streamerNote = web === "checking" ? "Checking who was live on Twitch…"
-    : !checked ? "Streamers are checked a minute or two after the match."
-    : liveList.length ? null
-    : "Nobody in this lobby was streaming.";
+  const [open, setOpen] = useState(false);
+  const score = r ? r.score : match.teams.map((t) => t.roundsWon).join("–");
   const progressOf = (puuid: string) => {
     const st = streamers?.players.find((x) => x.puuid === puuid);
     // A bar only while clips are actually downloading.
     return st && st.status === "working" && !st.checking ? progress(st) : null;
   };
+  // Cards only for clips saved or on their way; a streamer with no clips coming
+  // (sub-only VOD, no VOD) is one line in the header instead of empty boxes.
+  const cards = fights.filter((f) => clipFor(f) || f.status.tone === "warn" || f.status.tone === "purple");
+  const issues = liveList.map((p) => live.get(p.puuid)!).filter((l) => l.tone === "bad").map((l) => `${l.name}: ${l.text}`);
+  const why = web === "checking" ? "checking who was live…"
+    : !checked ? "streamers checked a minute or two after the match"
+    : !liveList.length ? "no streamers"
+    : issues.length ? issues.join(", ")
+    : !fights.length && me ? "you didn't fight the streamers"
+    : "";
 
   return (
-    <div className="stack" style={{ gap: 28 }}>
-      <div className={`match-hero ${r?.letter === "W" ? "win" : r?.letter === "L" ? "loss" : ""}`}>
-        <div className="hero-main">
-          <span className="eyebrow">{[match.mode, matchTimeAgo(match.startedAt)].join(" · ")}</span>
-          <h1>{match.map}</h1>
-          {verdict && <span className="verdict">{verdict}</span>}
-          {me && <span className="muted">{me.agent} · {me.kills} / {me.deaths} / {me.assists}</span>}
-        </div>
-        <div className="big-score" aria-label={`Score ${myScore ?? "?"} to ${theirScore ?? "?"}`}>
-          <b className="mine">{myScore ?? "–"}</b>
-          <span>:</span>
-          <b>{theirScore ?? "–"}</b>
-        </div>
-        {actions && <div className="hero-actions">{actions}</div>}
+    <article className="match-card">
+      <div className="match-card-head">
+        <b className="map">{match.map}</b>
+        <b style={{ color: resultColor(r?.letter) }}>{score}</b>
+        <span className="muted grow ellipsis">
+          {[me && `${me.agent} · ${me.kills} / ${me.deaths} / ${me.assists}`, matchTimeAgo(match.startedAt), why].filter(Boolean).join(" · ")}
+        </span>
+        <button type="button" className="linkish muted" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Details"}</button>
       </div>
 
-      <Rounds match={match} me={me} fightRounds={fightRounds} />
+      {cards.length > 0 && (
+        <div className="gallery">
+          {cards.map((f) => {
+            const c = clipFor(f);
+            const title = `R${f.round + 1} · ${what(f)}`;
+            return c ? (
+              <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
+            ) : (
+              <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
+                <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
+              </PendingCard>
+            );
+          })}
+        </div>
+      )}
 
-      {(fights.length > 0 || (checked && liveList.length > 0)) && (
-        <section className="stack" style={{ gap: 14 }} aria-label="Your fights with streamers">
-          <h2 className="section-title">Your fights with them {fights.length > 0 && <span>{fights.length}</span>}</h2>
-          {fights.length > 0 ? (
-            <div className="gallery">
-              {fights.map((f) => {
-                const c = clipFor(f);
-                const title = `Round ${f.round + 1} · ${what(f)}`;
-                return c ? (
-                  <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
-                ) : (
-                  <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
-                    <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
-                  </PendingCard>
+      {open && (
+        <div className="match-details">
+          {liveList.length > 0 && (
+            <div className="streamer-cards">
+              {liveList.map((p) => {
+                const l = live.get(p.puuid)!;
+                const pct = progressOf(p.puuid);
+                return (
+                  <div key={p.puuid} className="streamer-card">
+                    <span className="avatar" aria-hidden="true">{l.name.slice(0, 2).toUpperCase()}</span>
+                    <span className="grow stack" style={{ gap: 3 }}>
+                      <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
+                      <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>
+                      <span className={`small ${l.tone}`}>{l.text}</span>
+                      {pct != null && pct < 100 && <span className="bar"><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
+                    </span>
+                  </div>
                 );
               })}
             </div>
-          ) : me ? (
-            <p className="muted" style={{ margin: 0 }}>You didn't fight any of them this match.</p>
-          ) : null}
-        </section>
+          )}
+          {children}
+          <Rounds match={match} me={me} fightRounds={fightRounds} />
+          <Scoreboard match={match} me={me} live={live} />
+          {!me && <p className="muted" style={{ margin: 0 }}>Your Riot ID isn't in this match, so your fights can't be shown.</p>}
+          {actions}
+        </div>
       )}
-      <section className="stack" style={{ gap: 14 }} aria-label="Streamers in this match">
-        <h2 className="section-title">Streamers in this match {liveList.length > 0 && <span>{liveList.length}</span>}</h2>
-        {streamerNote && <p className="muted" style={{ margin: 0 }}>{streamerNote}</p>}
-        {liveList.length > 0 && (
-          <div className="streamer-cards">
-            {liveList.map((p) => {
-              const l = live.get(p.puuid)!;
-              const pct = progressOf(p.puuid);
-              return (
-                <div key={p.puuid} className="streamer-card">
-                  <span className="avatar" aria-hidden="true">{l.name.slice(0, 2).toUpperCase()}</span>
-                  <span className="grow stack" style={{ gap: 3 }}>
-                    <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
-                    <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>
-                    <span className={`small ${l.tone}`}>{l.text}</span>
-                    {pct != null && pct < 100 && <span className="bar"><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {children}
-      </section>
-
-      <section className="stack" style={{ gap: 14 }} aria-label="Players">
-        <h2 className="section-title">Players</h2>
-        <Scoreboard match={match} me={me} live={live} />
-      </section>
-
-      {!me && <p className="muted">Your Riot ID isn't in this match, so your fights can't be shown.</p>}
-      {streamers?.error && <p className="small bad">{streamers.error}</p>}
-    </div>
+      {streamers?.error && <p className="small bad" style={{ margin: 0 }}>{streamers.error}</p>}
+    </article>
   );
 }
 
@@ -402,31 +390,28 @@ export default function Matches({
   onPlay: (c: ClipInfo) => void;
 }) {
   const { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers } = matchesState;
-  const [selected, setSelected] = useState<string | null>(null);
-  const [rechecking, setRechecking] = useState(false);
+  const [rechecking, setRechecking] = useState<string | null>(null);
   const [recheckError, setRecheckError] = useState("");
   /** Website demo: a real match the visitor looked up. */
   const [looked, setLooked] = useState<{ match: MatchSummary; riotId: string; web?: WebStreamer[] | "checking" } | null>(null);
 
   const all = looked ? [looked.match, ...matches.filter((m) => m.id !== looked.match.id)] : matches;
-  const match = all.find((m) => m.id === selected) ?? all[0];
   const play = onPlay;
 
-  async function recheck() {
-    if (!match) return;
-    setRechecking(true);
+  async function recheck(id: string) {
+    setRechecking(id);
     setRecheckError("");
     try {
-      await checkStreamers(match.id);
+      await checkStreamers(id);
     } catch (err) {
       setRecheckError(String(err));
     } finally {
-      setRechecking(false);
+      setRechecking(null);
     }
   }
 
   return (
-    <section className="s12 page" aria-label="Matches">
+    <section className="s12 page narrow-wide" aria-label="Matches">
       {status && !status.configured && isDesktop && (
         <Notice tone="warn">
           Add your Riot ID in Settings so CrossPOV can find your matches.{" "}
@@ -449,57 +434,38 @@ export default function Matches({
         <DemoLookup
           onFound={(m, riotId, web) => {
             setLooked({ match: m, riotId, web });
-            setSelected(m.id);
           }}
         />
       )}
-      <div className="matches-layout">
-      <nav className="match-list" aria-label="Your matches">
-        {all.map((m) => {
-          const isLooked = m.id === looked?.match.id;
-          const me = findMe(m, isLooked ? looked.riotId : settings.riotId);
-          const r = result(m, me);
-          const n = streamers[m.id]?.players.length ?? 0;
-          return (
-            <button key={m.id} type="button" aria-current={m.id === match?.id ? "true" : undefined} onClick={() => setSelected(m.id)}>
-              <span className={`res-bar ${r?.letter === "W" ? "win" : r?.letter === "L" ? "loss" : ""}`} aria-hidden="true" />
-              <span className="grow stack" style={{ gap: 2 }}>
-                <b>{m.map}</b>
-                <span className="muted small">{[me?.agent, matchTimeAgo(m.startedAt)].filter(Boolean).join(" · ")}</span>
-              </span>
-              <span className="stack" style={{ gap: 2, alignItems: "flex-end" }}>
-                <b style={{ color: resultColor(r?.letter) }}>{r ? r.score : m.teams.map((t) => t.roundsWon).join("–")}</b>
-                {n > 0 && <span className="streamer-count">{n} streamer{n === 1 ? "" : "s"}</span>}
-              </span>
-            </button>
-          );
-        })}
-      </nav>
-      <div className="match-detail">
-      {match && match.id === looked?.match.id ? (
-        <MatchView match={match} riotId={looked.riotId} clips={[]} web={looked.web} onPlay={play} />
-      ) : match ? (
-        <MatchView
-          match={match}
-          riotId={settings.riotId}
-          clips={recorder.clips}
-          streamers={streamers[match.id]}
-          onPlay={play}
-          actions={isDesktop && <button type="button" className="btn quiet" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? "Checking…" : "Check again"}</button>}
-        >
-          {(streamers[match.id]?.suggested ?? []).map((s) => (
-            <Suggestion key={s.login} match={match} riotId={settings.riotId} s={s} onAdded={putStreamers} />
-          ))}
-          {isDesktop && <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />}
-        </MatchView>
+      {all.length ? (
+        <div className="match-feed">
+          {all.map((m) =>
+            m.id === looked?.match.id ? (
+              <MatchView key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onPlay={play} />
+            ) : (
+              <MatchView
+                key={m.id}
+                match={m}
+                riotId={settings.riotId}
+                clips={recorder.clips}
+                streamers={streamers[m.id]}
+                onPlay={play}
+                actions={isDesktop && <button type="button" className="btn quiet" style={{ alignSelf: "flex-start" }} onClick={() => void recheck(m.id)} disabled={rechecking === m.id}>{rechecking === m.id ? "Checking…" : "Check this match again"}</button>}
+              >
+                {(streamers[m.id]?.suggested ?? []).map((s) => (
+                  <Suggestion key={s.login} match={m} riotId={settings.riotId} s={s} onAdded={putStreamers} />
+                ))}
+                {isDesktop && <AddChannel match={m} riotId={settings.riotId} onAdded={putStreamers} />}
+              </MatchView>
+            ),
+          )}
+        </div>
       ) : (
         <div className="empty-state">
           <b>No matches yet</b>
           <span>{settings.riotId ? "Play a match. It shows up a minute or two after it ends." : "Add your Riot ID in Settings first."}</span>
         </div>
       )}
-      </div>
-      </div>
     </section>
   );
 }
