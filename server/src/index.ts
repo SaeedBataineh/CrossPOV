@@ -29,7 +29,7 @@ const VERSION = "1";
 const REGIONS = new Set(["na", "eu", "ap", "kr", "br", "latam"]);
 const LATEST_TTL = 60; // seconds: a new match can appear at any time
 const MATCH_TTL = 60 * 60 * 24 * 7; // finished matches never change
-const STREAMERS_TTL = 5 * 60; // VODs appear and grow, so re-check every few minutes
+const STREAMERS_TTL = 2 * 60; // VODs appear and grow, so re-check every couple of minutes
 
 class HttpError extends Error {
   status: number;

@@ -17,6 +17,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    fastvod,
     clips::{self, ClipInfo, ClipMeta, STREAMER_CLIPS},
     ffmpeg::{self, NoWindow},
     matches::{find_me, MatchStore, MatchSummary},
@@ -43,6 +44,26 @@ pub struct Vod {
     pub duration_sec: f64,
     pub offset_sec: f64,
     pub live: bool,
+}
+
+/// Twitch's VOD of a live stream trails the broadcast by about this much.
+const LIVE_VOD_LAG_S: f64 = 90.0;
+
+impl Vod {
+    /// How much of the VOD can be downloaded now. A live stream's VOD grows
+    /// in real time, so this doesn't wait for the server to report it.
+    pub fn available_sec(&self, now_ms: u64) -> f64 {
+        if !self.live {
+            return self.duration_sec;
+        }
+        let started = time::OffsetDateTime::parse(&self.started_at, &time::format_description::well_known::Rfc3339)
+            .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as f64)
+            .unwrap_or(0.0);
+        if started <= 0.0 {
+            return self.duration_sec;
+        }
+        self.duration_sec.max((now_ms as f64 - started) / 1000.0 - LIVE_VOD_LAG_S)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,6 +113,11 @@ pub struct StreamerCheck {
 #[derive(Deserialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[cfg(test)]
+pub fn test_agent() -> ureq::Agent {
+    agent()
 }
 
 fn agent() -> ureq::Agent {
@@ -259,12 +285,17 @@ pub fn locate_ytdlp() -> Option<PathBuf> {
     ffmpeg::which(YTDLP_EXE)
 }
 
-pub fn ytdlp_args(vod_url: &str, from: f64, to: f64, quality: DownloadQuality, ffmpeg: &Path, out_stem: &Path) -> Vec<String> {
-    let format = match quality {
+/// yt-dlp format choice for a download quality.
+pub fn ytdlp_format(quality: DownloadQuality) -> &'static str {
+    match quality {
         DownloadQuality::Source => "best",
         DownloadQuality::P1080 => "best[height<=1080]/best",
         DownloadQuality::P720 => "best[height<=720]/best",
-    };
+    }
+}
+
+pub fn ytdlp_args(vod_url: &str, from: f64, to: f64, quality: DownloadQuality, ffmpeg: &Path, out_stem: &Path) -> Vec<String> {
+    let format = ytdlp_format(quality);
     vec![
         "--no-warnings".into(),
         "--quiet".into(),
@@ -556,6 +587,8 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
 
 /// Re-ask the server this often per unfinished match (VODs appear and grow).
 const RECHECK: Duration = Duration::from_secs(10 * 60);
+/// ...and this often while a streamer still has clips to come.
+const RECHECK_PENDING: Duration = Duration::from_secs(3 * 60);
 const TICK: Duration = Duration::from_secs(60);
 const MAX_FAILURES: u32 = 3;
 /// Checks with no streamer found before a match is marked done.
@@ -714,7 +747,10 @@ impl StreamerWorker {
         let me = find_me(m, &s.riot_id).map(|p| p.puuid.clone());
 
         // Ask the server (at most every RECHECK, unless forced).
-        let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= RECHECK.as_millis() as u64);
+        // While clips are still to come (VOD still growing), ask more often.
+        let pending = state.players.iter().any(|p| p.status == StreamerStatus::Working);
+        let every = if pending { RECHECK_PENDING } else { RECHECK };
+        let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= every.as_millis() as u64);
         if due {
             let mut scanner_pending = false;
             match fetch_streamers(&s.server_url, m, me.as_deref()) {
@@ -781,6 +817,8 @@ impl StreamerWorker {
                 continue;
             }
             let mut waiting = false;
+            // Fast path: the VOD's chunk playlist, asked of yt-dlp once per streamer.
+            let mut fast_playlist: Option<Result<String, String>> = None;
             for w in &windows {
                 if p.done.contains(&w.key()) {
                     continue;
@@ -791,7 +829,7 @@ impl StreamerWorker {
                 if from < 0.0 {
                     continue; // Moment happened before their stream began.
                 }
-                if to > vod.duration_sec {
+                if to > vod.available_sec(now_ms()) {
                     waiting = true; // VOD hasn't caught up yet (still live / processing).
                     continue;
                 }
@@ -803,7 +841,22 @@ impl StreamerWorker {
                 let _ = fs::create_dir_all(&out_dir);
                 let short = file_safe(&m.id, 8);
                 let stem = out_dir.join(format!("{}_R{}_{}_{}", file_safe(&p.channel.login, 40), w.round + 1, w.moment.slug(), short));
-                match download(&ytdlp, &ff, ytdlp_args(&vod.url, from, to, s.download_quality, &ff, &stem)) {
+                let clip_path = stem.with_extension("mp4");
+                let playlist = fast_playlist.get_or_insert_with(|| fastvod::playlist_url(&ytdlp, &vod.url, ytdlp_format(s.download_quality)));
+                let slow = || download(&ytdlp, &ff, ytdlp_args(&vod.url, from, to, s.download_quality, &ff, &stem));
+                let result = match playlist {
+                    // The fast way; if a chunk or the cut fails, the slower way, one chunk at a time.
+                    Ok(pl) => fastvod::fetch_clip(&agent(), pl, from, to, &ff, &clip_path).or_else(|e| {
+                        eprintln!("fast download failed ({e}), using yt-dlp");
+                        slow()
+                    }),
+                    // yt-dlp couldn't get the VOD: sub-only or deleted would fail the slow way too.
+                    Err(e) => match classify_error(e) {
+                        err @ (DownloadError::SubOnly | DownloadError::Gone) => Err(err),
+                        _ => slow(),
+                    },
+                };
+                match result {
                     Ok(()) => {
                         let clip = stem.with_extension("mp4");
                         let thumb = clips::thumb_path(&root, &clip);
@@ -1001,6 +1054,16 @@ mod tests {
         // Older servers send neither field.
         let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
         assert!(old.suggested.is_empty() && old.scanner.is_none());
+    }
+
+    #[test]
+    fn a_live_vod_counts_as_long_as_the_stream_so_far() {
+        let started = "2026-11-24T19:00:00Z";
+        let vod = Vod { id: "1".into(), url: String::new(), started_at: started.into(), duration_sec: 600.0, offset_sec: 0.0, live: true };
+        let two_hours_later = 1_795_546_800_000 + 7_200_000; // 2026-11-24T19:00:00Z + 2 h, in ms
+        assert_eq!(vod.available_sec(two_hours_later), 7_200.0 - LIVE_VOD_LAG_S, "doesn't wait for the server's 600 s");
+        let ended = Vod { live: false, ..vod };
+        assert_eq!(ended.available_sec(two_hours_later), 600.0, "a finished VOD is as long as Twitch says");
     }
 
     #[test]

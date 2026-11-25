@@ -7,6 +7,7 @@
 
 mod audio;
 mod clips;
+mod fastvod;
 mod ffmpeg;
 mod matches;
 mod procs;
