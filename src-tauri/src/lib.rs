@@ -40,8 +40,9 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 /// A network error in words people can act on.
 pub(crate) fn net_error(detail: &str) -> String {
     let d = detail.to_lowercase();
-    let why = if d.contains("resolution") || d.contains("resolve") || d.contains("dns") || d.contains("11001") || d.contains("11002") {
-        "your internet or DNS didn't answer"
+    // 11001-11004: Windows' "host not found", "try again", "no recovery", "no data" DNS errors.
+    let why = if d.contains("resolution") || d.contains("resolve") || d.contains("dns") || ["11001", "11002", "11003", "11004"].iter().any(|c| d.contains(c)) || d.contains("requested name is valid") {
+        "your PC couldn't look up crosspov.com (a DNS problem: check your internet, VPN or DNS settings)"
     } else if d.contains("timed out") || d.contains("timeout") {
         "the connection timed out"
     } else if d.contains("cert") || d.contains("tls") || d.contains("ssl") {
@@ -572,7 +573,9 @@ mod net_tests {
     #[test]
     fn network_errors_are_readable() {
         let dns = net_error("io: This is usually a temporary error during hostname resolution (os error 11002)");
-        assert!(dns.contains("internet or DNS"), "{dns}");
+        assert!(dns.contains("DNS problem"), "{dns}");
+        let no_data = net_error("io: The requested name is valid, but no data of the requested type was found. (os error 11004)");
+        assert!(no_data.contains("DNS problem"), "{no_data}");
         let tls = net_error("native-tls: unable to find any user-specified roots in the final cert chain");
         assert!(tls.contains("secure connection"), "{tls}");
         assert!(dns.contains("tries again by itself"));
