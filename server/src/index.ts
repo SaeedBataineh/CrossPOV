@@ -342,6 +342,8 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
 }
 
 const RELEASES = "https://github.com/SaeedBataineh/CrossPOV/releases/latest";
+/** Where release files live; only files from here are ever handed out. */
+const RELEASE_FILES = "https://github.com/SaeedBataineh/CrossPOV/releases/";
 
 /**
  * Short, permanent download links for the website:
@@ -350,20 +352,51 @@ const RELEASES = "https://github.com/SaeedBataineh/CrossPOV/releases/latest";
  */
 export async function downloadRedirect(pathname: string, env: Env, ctx?: ExecutionContext): Promise<Response | null> {
   const path = pathname.replace(/\/+$/, "");
-  if (path === "/download") return Response.redirect(`${RELEASES}/download/CrossPOV.exe`, 302);
+  if (path === "/download") return serveFile(`${RELEASES}/download/CrossPOV.exe`, "CrossPOV.exe");
   if (path !== "/download/installer") return null;
   try {
     const url = await cachedData("installer-url", LATEST_TTL_S, ctx, async () => {
       const res = await fetch(env.LATEST_JSON_URL ?? LATEST_JSON, { headers: { accept: "application/json" } });
       const body = (await res.json()) as { platforms?: Record<string, { url?: string }> };
       const u = body.platforms?.["windows-x86_64"]?.url;
-      if (!u || !u.startsWith("https://github.com/SaeedBataineh/CrossPOV/releases/download/")) throw new Error("no installer");
+      if (!u || !u.startsWith(`${RELEASE_FILES}download/`)) throw new Error("no installer");
       return u;
     });
-    return Response.redirect(url, 302);
+    return serveFile(url, decodeURIComponent(url.split("/").pop() ?? "CrossPOV-setup.exe"));
   } catch {
-    return Response.redirect(RELEASES, 302); // the release page lists it
+    return unavailable();
   }
+}
+
+/**
+ * Hands out a release file from crosspov.com itself, so the download link
+ * (and the browser's downloads list) shows crosspov.com rather than where
+ * the file is hosted. Cloudflare keeps a copy for a few minutes.
+ */
+async function serveFile(url: string, filename: string): Promise<Response> {
+  if (!url.startsWith(RELEASE_FILES) || !/^[\w.-]+\.exe$/.test(filename)) return unavailable();
+  try {
+    const res = await fetch(url, { redirect: "follow", cf: { cacheTtl: 300, cacheEverything: true } } as RequestInit);
+    if (!res.ok || !res.body) return unavailable();
+    const headers = new Headers({
+      "content-type": "application/vnd.microsoft.portable-executable",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "public, max-age=300",
+      "x-content-type-options": "nosniff",
+    });
+    const length = res.headers.get("content-length");
+    if (length) headers.set("content-length", length);
+    return new Response(res.body, { status: 200, headers });
+  } catch {
+    return unavailable();
+  }
+}
+
+function unavailable(): Response {
+  return new Response("The download isn't available right now. Please try again in a minute.", {
+    status: 503,
+    headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "60" },
+  });
 }
 
 /** Browser protections for the website: only our own code runs, nobody can frame it. */

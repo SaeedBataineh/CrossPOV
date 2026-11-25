@@ -238,24 +238,38 @@ test("the same match asked for twice at once is fetched once", async () => {
 
 import { downloadRedirect } from "../src/index.ts";
 
-test("download links point at the newest release", async () => {
-  const exe = await downloadRedirect("/download", {});
-  assert.equal(exe?.status, 302);
-  assert.equal(exe?.headers.get("location"), "https://github.com/SaeedBataineh/CrossPOV/releases/latest/download/CrossPOV.exe");
+test("downloads come from crosspov.com itself, never a link to where they're hosted", async () => {
   assert.equal(await downloadRedirect("/demo", {}), null);
   const realFetch = globalThis.fetch;
+  const asked: string[] = [];
   const setup = "https://github.com/SaeedBataineh/CrossPOV/releases/download/v9.9.9/CrossPOV_9.9.9_x64-setup.exe";
-  globalThis.fetch = (async () => Response.json({ version: "9.9.9", platforms: { "windows-x86_64": { url: setup } } })) as typeof fetch;
+  globalThis.fetch = (async (u: RequestInfo | URL) => {
+    asked.push(String(u));
+    if (String(u).endsWith("latest.json")) return Response.json({ version: "9.9.9", platforms: { "windows-x86_64": { url: setup } } });
+    return new Response("MZ fake exe", { headers: { "content-length": "11" } });
+  }) as typeof fetch;
   try {
-    const inst = await downloadRedirect("/download/installer/", {});
-    assert.equal(inst?.headers.get("location"), setup);
+    const exe = (await downloadRedirect("/download", {}))!;
+    assert.equal(exe.status, 200);
+    assert.equal(exe.headers.get("location"), null, "no redirect to GitHub");
+    assert.equal(exe.headers.get("content-disposition"), 'attachment; filename="CrossPOV.exe"');
+    assert.equal(await exe.text(), "MZ fake exe");
+    assert.equal(asked[0], "https://github.com/SaeedBataineh/CrossPOV/releases/latest/download/CrossPOV.exe");
+    const inst = (await downloadRedirect("/download/installer/", {}))!;
+    assert.equal(inst.headers.get("content-disposition"), 'attachment; filename="CrossPOV_9.9.9_x64-setup.exe"');
   } finally {
     globalThis.fetch = realFetch;
   }
   globalThis.fetch = (async () => Response.json({ platforms: { "windows-x86_64": { url: "https://evil.example/x.exe" } } })) as typeof fetch;
   try {
-    const safe = await downloadRedirect("/download/installer", {});
-    assert.equal(safe?.headers.get("location"), "https://github.com/SaeedBataineh/CrossPOV/releases/latest", "only our own release files");
+    const safe = (await downloadRedirect("/download/installer", {}))!;
+    assert.equal(safe.status, 503, "only our own release files are ever handed out");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  globalThis.fetch = (async () => new Response("nope", { status: 404 })) as typeof fetch;
+  try {
+    assert.equal((await downloadRedirect("/download", {}))!.status, 503, "a missing file is an error page, not a GitHub link");
   } finally {
     globalThis.fetch = realFetch;
   }
