@@ -1,0 +1,63 @@
+name: Back up streamer accounts
+
+# Once a day: copies the saved streamer accounts (Riot account -> Twitch
+# channel, and the removal list) off the VPS, so they survive the VPS dying.
+# The copy is encrypted with the SCANNER_KEY secret before it's uploaded,
+# because this repository is public: anyone can download the artifact, nobody
+# without the key can read it. Kept 90 days.
+#
+# To restore (a new VPS, after 'Deploy scanner to VPS' has run):
+#   1. Download the newest 'streamer-accounts' artifact from this workflow.
+#   2. openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in streamers.json.enc -out streamers.json -pass pass:<SCANNER_KEY>
+#   3. Copy streamers.json to the VPS and run, as the crosspov user:
+#      cd /opt/crosspov && CROSSPOV_DB=/opt/crosspov/readings.db ./venv/bin/python scanner/links_admin.py import streamers.json
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up SSH
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          body=$(printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | grep -v -- '-----')
+          { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | tr -d ' ' ; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User crosspov\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n' "$HOST" > ~/.ssh/config
+
+      - name: Copy and encrypt
+        env:
+          PASS: ${{ secrets.SCANNER_KEY }}
+        run: |
+          if [ ${#PASS} -lt 32 ]; then echo "::error::SCANNER_KEY secret is missing"; exit 1; fi
+          mkdir -p out
+          # Plain JSON exists only in this pipe, never on disk or in the log.
+          ssh vps "cd /opt/crosspov && CROSSPOV_DB=/opt/crosspov/readings.db ./venv/bin/python scanner/links_admin.py export" \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -out out/streamers.json.enc -pass env:PASS
+          size=$(stat -c%s out/streamers.json.enc)
+          if [ "$size" -lt 32 ]; then echo "::error::the backup came out empty"; exit 1; fi
+          # Check it decrypts and count what's in it (numbers only in the log).
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in out/streamers.json.enc -pass env:PASS \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(f\"{len(d['links'])} accounts, {len(set(l['login'] for l in d['links']))} channels, {len(d['optout'])} removed\")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: streamer-accounts
+          path: out/streamers.json.enc
+          retention-days: 90
+          if-no-files-found: error

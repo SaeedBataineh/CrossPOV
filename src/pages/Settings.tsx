@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 import { Panel, Row, Seg, Toggle } from "../components/ui";
-import { isDesktop, pickFolder } from "../lib/backend";
+import { diagnostics, isDesktop, pickFolder } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
 import { useDraft } from "../lib/useDraft";
 
@@ -23,6 +23,30 @@ const opts = <T extends string | number>(values: T[], label: (v: T) => string = 
 const PADS = opts([15, 30, 60, 90, 120]);
 
 const Audio = lazy(() => import("./Audio"));
+
+/** "Copy diagnostics": what the app is doing, ready to paste into a message when something's wrong. */
+function ProblemReport() {
+  const [text, setText] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    const report = await diagnostics().catch((err) => `Couldn't collect diagnostics: ${String(err)}`);
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopied(true);
+      setText(null);
+    } catch {
+      setText(report); // clipboard blocked: show it to copy by hand
+    }
+  }
+  return (
+    <>
+      <Row label="Something not working?" help={copied ? "Copied. Paste it into your message to us." : "copies a short report (versions, errors, settings) to paste when asking for help"}>
+        <button type="button" className="b sm" onClick={() => void copy()}>Copy diagnostics</button>
+      </Row>
+      {text && <textarea className="input" readOnly value={text} rows={10} style={{ margin: "0 18px 16px", height: "auto", fontFamily: "var(--mono)", fontSize: 12 }} aria-label="Diagnostics" />}
+    </>
+  );
+}
 
 type Section = "recording" | "streamers" | "audio" | "account";
 const SECTIONS: { id: Section; label: string }[] = [
@@ -173,6 +197,7 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Close to tray" help="keeps recording ready"><Toggle label="Close to tray" checked={draft.minimizeToTray} onChange={(v) => set("minimizeToTray", v)} /></Row>
           <Row label="Notifications" help={'e.g. "3 streamer clips saved"'}><Toggle label="Notifications" checked={draft.notifications} onChange={(v) => set("notifications", v)} /></Row>
           <Row label="Version" help="Not endorsed by Riot Games"><span className="pill">v{__APP_VERSION__}</span></Row>
+          <ProblemReport />
         </Panel>
         <button type="button" className="linkish muted small" style={{ alignSelf: "flex-start" }} onClick={() => void d.reset()}>Reset all settings to defaults</button>
         </>

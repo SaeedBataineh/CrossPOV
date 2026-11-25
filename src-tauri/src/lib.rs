@@ -251,6 +251,57 @@ fn recorder_status(state: State<'_, AppState>) -> RecorderStatus {
     state.recorder.status()
 }
 
+/// A short report the user can copy and send when something isn't working:
+/// versions, what the recorder and the match checks are doing, recent
+/// errors, and the settings that matter. No clips, keys or file contents.
+#[tauri::command]
+fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
+    use std::fmt::Write as _;
+    let s = state.get();
+    let rec = state.recorder.status();
+    let m = state.matches.status();
+    let mut out = String::new();
+    let _ = writeln!(out, "CrossPOV {} ({})", env!("CARGO_PKG_VERSION"), if tools::EMBEDDED { "single exe" } else { "installed" });
+    let _ = writeln!(out, "Windows: {}", sysinfo::System::long_os_version().unwrap_or_else(|_| "unknown".into()));
+    let _ = writeln!(out, "Time: {}", time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default());
+    let _ = writeln!(out, "\n[Recorder]\nstate: {:?}\nencoder: {}", rec.state, rec.encoder.as_deref().unwrap_or("-"));
+    for (k, v) in [("message", &rec.message), ("audio", &rec.audio_warning), ("hotkey", &rec.hotkey_error)] {
+        if let Some(v) = v {
+            let _ = writeln!(out, "{k}: {v}");
+        }
+    }
+    let missing: Vec<&str> = tools::missing().iter().map(|t| t.name).collect();
+    let _ = writeln!(out, "tools: {}", if missing.is_empty() { "ok".to_string() } else { format!("missing {}", missing.join(", ")) });
+    let _ = writeln!(out, "ffmpeg: {}", ffmpeg::locate().map(|p| p.display().to_string()).unwrap_or_else(|| "not found".into()));
+    let _ = writeln!(out, "\n[Matches]\nRiot ID: {} ({})", if s.riot_id.is_empty() { "not set" } else { &s.riot_id }, s.region);
+    let _ = writeln!(out, "last check: {}", m.last_check_ms.map(|t| format!("{} s ago", (now_ms_lib().saturating_sub(t)) / 1000)).unwrap_or_else(|| "never".into()));
+    if let Some(e) = &m.error {
+        let _ = writeln!(out, "error: {e}");
+    }
+    let _ = writeln!(out, "\n[Streamer clips] auto: {}, before/after: {}/{} s, quality: {:?}", s.streamer_auto, s.seconds_before, s.seconds_after, s.download_quality);
+    for ms in state.streamers.all().into_iter().filter(|x| !x.players.is_empty() || x.error.is_some()).take(8) {
+        let _ = write!(out, "match {}…:", &ms.match_id.chars().take(8).collect::<String>());
+        if let Some(e) = &ms.error {
+            let _ = write!(out, " error: {e};");
+        }
+        for p in &ms.players {
+            let _ = write!(out, " {} {:?} {}/{} shift {:.0}s{}{};", p.channel.login, p.status, p.clips, p.fights, p.delay_sec, if p.checking { " checking" } else { "" }, p.message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default());
+        }
+        let _ = writeln!(out);
+    }
+    let _ = writeln!(
+        out,
+        "\n[Settings] {} fps, {:?}, quality {:?}, encoder {:?}, {:?}, buffer {} s, hotkey {}, clips {}",
+        s.fps, s.resolution, s.quality, s.encoder, s.format, s.buffer_seconds, s.hotkey,
+        clip_folder(&app, &s).display()
+    );
+    out
+}
+
+fn now_ms_lib() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 #[tauri::command]
 fn save_clip_now(app: AppHandle) {
     save_clip_async(&app);
@@ -535,6 +586,7 @@ pub fn run() {
             default_clip_folder,
             open_clip_folder,
             recorder_status,
+            diagnostics,
             save_clip_now,
             list_clips,
             delete_clip,

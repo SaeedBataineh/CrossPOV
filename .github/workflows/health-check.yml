@@ -1,0 +1,55 @@
+name: Health check
+
+# Every 30 minutes: is everything working? If not, this run fails and GitHub
+# emails you (failed scheduled runs are emailed to whoever last changed this
+# file's schedule, i.e. the repository owner). Checks:
+#   - crosspov.com answers and has its match-data and Twitch settings,
+#   - the VPS scanner answers and has read a stream in the last 30 minutes,
+#   - the download and the version page work.
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Website and API
+        run: |
+          set -u
+          fail=0
+          problem() { echo "::error::$1"; fail=1; }
+          # A couple of tries: one slow answer isn't an outage.
+          for i in 1 2 3; do
+            health=$(curl -s --max-time 30 https://crosspov.com/api/health) && [ -n "$health" ] && break
+            sleep 20
+          done
+          echo "health: $health"
+          printf '%s' "$health" | python3 -c '
+          import json, sys, time
+          try:
+              h = json.load(sys.stdin)
+          except Exception:
+              print("::error::crosspov.com/api/health did not answer"); sys.exit(1)
+          bad = []
+          if not h.get("ok"): bad.append("the server reports a problem")
+          if not h.get("matchData"): bad.append("match data (HenrikDev key) is not set up")
+          if not h.get("twitch"): bad.append("Twitch credentials are not set up")
+          s = h.get("scanner") or {}
+          if not isinstance(s, dict) or not s.get("ok"):
+              why = s.get("error", "no answer") if isinstance(s, dict) else str(s)
+              bad.append("the VPS scanner is not answering (" + why + ")")
+          elif not s.get("newest_ms") or time.time() * 1000 - s["newest_ms"] > 30 * 60_000:
+              bad.append("the VPS scanner has not read any stream for 30 minutes (stuck or stopped)")
+          for b in bad: print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          ' || fail=1
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -r 0-1023 https://crosspov.com/download)
+          [ "$code" = "200" ] || [ "$code" = "206" ] || problem "the download at crosspov.com/download answered $code"
+          curl -s --max-time 30 https://crosspov.com/api/version | grep -q '"version"' || problem "crosspov.com/api/version did not answer"
+          exit $fail

@@ -130,6 +130,12 @@ export async function clipVideoSrc(path: string): Promise<string | null> {
   return convertFileSrc(await tauriInvoke<string>("play_clip_in_app", { path }));
 }
 
+/** A short report about what the app is doing, for problem reports. */
+export async function diagnostics(): Promise<string> {
+  if (!isDesktop) return `CrossPOV website demo\n${navigator.userAgent}`;
+  return tauriInvoke<string>("diagnostics");
+}
+
 export async function openClip(path: string): Promise<void> {
   if (!isDesktop) throw NEEDS_APP("Playing clips");
   await tauriInvoke<void>("open_clip", { path });
