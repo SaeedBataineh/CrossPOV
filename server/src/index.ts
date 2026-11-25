@@ -12,10 +12,11 @@
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
+import { scannerHealth, scannerStreams, type ScannerEnv } from "./scanner.ts";
 import { clientVersion, LATEST_JSON, outdated, parseLatest, type Latest } from "./appVersion.ts";
 import { checkChannel, findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
 
-export interface Env extends TwitchEnv {
+export interface Env extends TwitchEnv, ScannerEnv {
   HENRIK_API_KEY?: string;
   /** Optional override, used by tests. */
   HENRIK_BASE?: string;
@@ -195,7 +196,13 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
       throw err;
     }
   });
-  return json({ ...all, streamers: all.streamers.filter((s) => s.puuid !== me) }, 200, ttl);
+  // Streamers the scoreboard scanner found (any name), not already found by name.
+  // Its answer can take a few minutes ("pending"); apps check again later.
+  const scan = await scannerStreams(env, match);
+  const known = new Set(all.streamers.map((s) => s.channel.login.toLowerCase()));
+  const suggested = scan.streams.filter((s) => !known.has(s.login.toLowerCase()));
+  const pending = scan.status === "pending";
+  return json({ ...all, streamers: all.streamers.filter((s) => s.puuid !== me), suggested, scanner: scan.status }, 200, pending ? 0 : ttl);
 }
 
 async function channel(region: string, id: string, url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -267,6 +274,7 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
         version: VERSION,
         matchData: Boolean(env.HENRIK_API_KEY),
         twitch: Boolean(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET),
+        scanner: await scannerHealth(env),
       });
     }
     if (url.pathname === "/api/version") {

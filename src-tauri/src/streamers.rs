@@ -59,6 +59,34 @@ pub struct StreamerHit {
 #[derive(Deserialize)]
 struct StreamersResponse {
     streamers: Vec<StreamerHit>,
+    /// Streams the scoreboard scanner found in this match (any name).
+    #[serde(default)]
+    suggested: Vec<Suggested>,
+    /// "pending" while the scanner is still checking.
+    #[serde(default)]
+    scanner: Option<String>,
+}
+
+/// A stream the scoreboard scanner saw in this match. Which player it is
+/// isn't known, so the user picks from the team (once).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Suggested {
+    pub login: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Team id of the streamer in this match.
+    pub team: String,
+    /// Their measured broadcast delay, used to place clips.
+    #[serde(default)]
+    pub delay_sec: Option<f64>,
+}
+
+/// What the server knows about a match's streamers.
+pub struct StreamerCheck {
+    pub hits: Vec<StreamerHit>,
+    pub suggested: Vec<Suggested>,
+    pub scanner_pending: bool,
 }
 
 #[derive(Deserialize)]
@@ -85,7 +113,7 @@ fn agent() -> ureq::Agent {
 }
 
 /// Asks the server which players in a match were streaming.
-pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Result<Vec<StreamerHit>, String> {
+pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Result<StreamerCheck, String> {
     let url = format!("{}/api/match/{}/{}/streamers", server.trim_end_matches('/'), m.region, m.id);
     let mut req = agent().get(&url);
     if let Some(me) = me {
@@ -95,7 +123,7 @@ pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Resu
     let status = res.status().as_u16();
     if status == 200 {
         let body: StreamersResponse = res.body_mut().read_json().map_err(|e| format!("Unexpected answer from the server: {e}"))?;
-        Ok(body.streamers)
+        Ok(StreamerCheck { hits: body.streamers, suggested: body.suggested, scanner_pending: body.scanner.as_deref() == Some("pending") })
     } else {
         Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")))
     }
@@ -343,6 +371,9 @@ pub struct PlayerState {
     /// Added by the user with "Played against a streamer it missed?".
     #[serde(default)]
     pub manual: bool,
+    /// Their broadcast delay in seconds (from the scoreboard scanner), added to VOD times.
+    #[serde(default)]
+    pub delay_sec: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -357,6 +388,9 @@ pub struct MatchStreamers {
     /// How many times the server has been asked about this match.
     #[serde(default)]
     pub checks: u32,
+    /// Streams the scoreboard scanner found, waiting for the user to say which player they were.
+    #[serde(default)]
+    pub suggested: Vec<Suggested>,
 }
 
 fn now_ms() -> u64 {
@@ -403,6 +437,9 @@ pub struct Link {
     pub added_ms: u64,
     /// Later matches where this link found the streamer live.
     pub seen: u32,
+    /// Their broadcast delay in seconds, if the scoreboard scanner measured it.
+    #[serde(default)]
+    pub delay_sec: f64,
 }
 
 #[derive(Clone)]
@@ -430,13 +467,13 @@ impl LinkStore {
         }
     }
     /// Adds or updates the link for a player.
-    pub fn save(&self, puuid: &str, login: &str, label: &str) {
+    pub fn save(&self, puuid: &str, login: &str, label: &str, delay_sec: f64) {
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut links = self.all();
         // One link per player and one player per channel: relinking a channel
         // to someone else (e.g. the wrong player was picked) replaces it.
         links.retain(|l| l.puuid != puuid && l.login != login);
-        links.push(Link { puuid: puuid.into(), login: login.into(), label: label.into(), added_ms: now_ms(), seen: 0 });
+        links.push(Link { puuid: puuid.into(), login: login.into(), label: label.into(), added_ms: now_ms(), seen: 0, delay_sec });
         self.write(&links);
     }
     pub fn remove(&self, puuid: &str) {
@@ -509,6 +546,7 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 failures: 0,
                 message: None,
                 manual: false,
+                delay_sec: 0.0,
             });
         }
     }
@@ -594,14 +632,17 @@ impl StreamerWorker {
 
     /// Adds a channel the user says belongs to a player in this match, and
     /// remembers it on this PC so later matches against them are checked too.
-    pub fn add_manual(&self, match_id: &str, puuid: &str, login: &str) -> Result<MatchStreamers, String> {
+    /// `delay_sec`: the streamer's broadcast delay when the scoreboard scanner measured it.
+    pub fn add_manual(&self, match_id: &str, puuid: &str, login: &str, delay_sec: Option<f64>) -> Result<MatchStreamers, String> {
         let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let m = self.matches.list().into_iter().find(|m| m.id == match_id).ok_or("Match not found")?;
         let player = m.players.iter().find(|p| p.puuid == puuid).ok_or("Player not in this match")?;
         let login = clean_login(login).ok_or("That isn't a Twitch channel name.")?;
         let hit = fetch_channel(&s.server_url, &m, puuid, &login)?.ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
         let me_player = find_me(&m, &s.riot_id);
-        self.links.save(puuid, &login, &player_label(player, me_player));
+        // Keep a delay measured earlier unless the scanner measured it now.
+        let delay = delay_sec.or_else(|| self.links.all().into_iter().find(|l| l.login == login).map(|l| l.delay_sec)).unwrap_or(0.0).clamp(0.0, 300.0);
+        self.links.save(puuid, &login, &player_label(player, me_player), delay);
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.store.get(&m.id);
         let me = me_player.map(|p| p.puuid.clone());
@@ -610,7 +651,9 @@ impl StreamerWorker {
         merge_hits(&mut state, vec![hit], &m, me.as_deref(), &s);
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == player.puuid) {
             p.manual = true;
+            p.delay_sec = delay;
         }
+        state.suggested.retain(|x| x.login.to_lowercase() != login);
         state.finished = false;
         self.store.put(&state);
         (self.listener)(&state, None);
@@ -642,6 +685,7 @@ impl StreamerWorker {
                     merge_hits(state, vec![hit], m, me, s);
                     if let Some(x) = state.players.iter_mut().find(|x| x.puuid == p.puuid) {
                         x.manual = true;
+                        x.delay_sec = link.delay_sec;
                     }
                     self.links.mark_seen(&p.puuid);
                 }
@@ -672,9 +716,14 @@ impl StreamerWorker {
         // Ask the server (at most every RECHECK, unless forced).
         let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= RECHECK.as_millis() as u64);
         if due {
+            let mut scanner_pending = false;
             match fetch_streamers(&s.server_url, m, me.as_deref()) {
-                Ok(hits) => {
-                    merge_hits(&mut state, hits, m, me.as_deref(), &s);
+                Ok(check) => {
+                    merge_hits(&mut state, check.hits, m, me.as_deref(), &s);
+                    // Scanner finds not yet linked to a player (and not one the user already linked).
+                    let linked: Vec<String> = state.players.iter().map(|p| p.channel.login.to_lowercase()).collect();
+                    state.suggested = check.suggested.into_iter().filter(|x| !linked.contains(&x.login.to_lowercase())).collect();
+                    scanner_pending = check.scanner_pending;
                     state.error = None;
                 }
                 Err(e) => state.error = Some(e),
@@ -685,7 +734,10 @@ impl StreamerWorker {
                 self.check_links(m, &s, me.as_deref(), &mut state);
             }
             state.checked_ms = Some(now_ms());
-            state.checks += 1;
+            // While the scanner is still checking, this check doesn't count towards "nobody was streaming".
+            if !scanner_pending {
+                state.checks += 1;
+            }
             self.store.put(&state);
             (self.listener)(&state, None);
         }
@@ -700,7 +752,7 @@ impl StreamerWorker {
         // Most matches have no streamers at all: two clean checks (10 min
         // apart) are enough, so they aren't re-checked for an hour.
         let settled = state.players.iter().all(|p| p.status != StreamerStatus::Working);
-        let nobody_streaming = state.players.is_empty() && state.checks >= NO_STREAMER_CHECKS && state.error.is_none();
+        let nobody_streaming = state.players.is_empty() && state.suggested.is_empty() && state.checks >= NO_STREAMER_CHECKS && state.error.is_none();
         let all_done = settled && state.checked_ms.is_some() && state.error.is_none() && now_ms().saturating_sub(started) > m.length_ms + 3_600_000;
         if nobody_streaming || all_done {
             state.finished = true;
@@ -733,7 +785,9 @@ impl StreamerWorker {
                 if p.done.contains(&w.key()) {
                     continue;
                 }
-                let (from, to) = (vod.offset_sec + w.start, vod.offset_sec + w.end);
+                // Their broadcast delay puts each moment that much later in the VOD.
+                let shift = vod.offset_sec + p.delay_sec;
+                let (from, to) = (shift + w.start, shift + w.end);
                 if from < 0.0 {
                     continue; // Moment happened before their stream began.
                 }
@@ -940,6 +994,16 @@ mod tests {
     }
 
     #[test]
+    fn reads_scanner_suggestions_from_the_server() {
+        let body = r#"{"matchId":"m","streamers":[],"suggested":[{"login":"streamer_x","team":"Red","delaySec":30}],"scanner":"done"}"#;
+        let r: StreamersResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(r.suggested, vec![Suggested { login: "streamer_x".into(), display_name: None, team: "Red".into(), delay_sec: Some(30.0) }]);
+        // Older servers send neither field.
+        let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
+        assert!(old.suggested.is_empty() && old.scanner.is_none());
+    }
+
+    #[test]
     fn cleans_typed_channel_names() {
         assert_eq!(clean_login("https://www.twitch.tv/Some_Streamer/videos").as_deref(), Some("some_streamer"));
         assert_eq!(clean_login("twitch.tv/abc?x=1").as_deref(), Some("abc"));
@@ -952,14 +1016,14 @@ mod tests {
     fn links_are_remembered_and_removed() {
         let path = std::env::temp_dir().join(format!("crosspov-links-{}.json", std::process::id()));
         let store = LinkStore::new(path.clone());
-        store.save("p1", "streamer_one", "Enemy · Raze");
-        store.save("p2", "other", "Teammate · Sova");
-        store.save("p1", "renamed", "Enemy · Raze");
+        store.save("p1", "streamer_one", "Enemy · Raze", 0.0);
+        store.save("p2", "other", "Teammate · Sova", 30.0);
+        store.save("p1", "renamed", "Enemy · Raze", 0.0);
         let all = store.all();
         assert_eq!(all.len(), 2, "one link per player");
-        store.save("p3", "renamed", "Enemy · Jett");
+        store.save("p3", "renamed", "Enemy · Jett", 0.0);
         assert!(store.all().iter().all(|l| l.puuid != "p1"), "one player per channel: relinking moves it");
-        store.save("p1", "renamed", "Enemy · Raze");
+        store.save("p1", "renamed", "Enemy · Raze", 0.0);
         assert_eq!(all.iter().find(|l| l.puuid == "p1").unwrap().login, "renamed");
         store.mark_seen("p2");
         assert_eq!(store.all().iter().find(|l| l.puuid == "p2").unwrap().seen, 1);

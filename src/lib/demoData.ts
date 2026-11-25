@@ -80,6 +80,8 @@ export function demoStreamers(): MatchStreamers[] {
         { puuid: "s2", name: "streamer_two", channel: ch("streamer_two"), vod: vod(4360), status: "clipped", clips: 3, fights: 3, message: null, manual: false },
         { puuid: "s1", name: "streamer_one", channel: ch("streamer_one"), vod: vod(310), status: "working", clips: 1, fights: 2, message: null, manual: false },
       ],
+      // Found by the scoreboard scanner: name doesn't match, so the user picks the player.
+      suggested: [{ login: "quiet_queue", displayName: "quiet_queue", team: "Red", delaySec: 30 }],
     },
     {
       matchId: "demo-lotus",

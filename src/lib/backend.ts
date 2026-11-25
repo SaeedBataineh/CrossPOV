@@ -234,12 +234,23 @@ export interface StreamerPlayer {
   manual: boolean;
 }
 
+/** A stream the scoreboard scanner saw in this match; the user says which player it was. */
+export interface SuggestedStreamer {
+  login: string;
+  displayName?: string | null;
+  /** Team id of the streamer in the match. */
+  team: string;
+  /** Their measured broadcast delay, used to place clips. */
+  delaySec?: number | null;
+}
+
 export interface MatchStreamers {
   matchId: string;
   checkedMs: number | null;
   error: string | null;
   players: StreamerPlayer[];
   finished: boolean;
+  suggested?: SuggestedStreamer[];
 }
 
 export async function streamerStates(): Promise<MatchStreamers[]> {
@@ -255,9 +266,9 @@ export async function checkStreamersNow(matchId: string): Promise<MatchStreamers
   return tauriInvoke<MatchStreamers>("check_streamers_now", { matchId });
 }
 
-export async function addStreamerChannel(matchId: string, puuid: string, login: string): Promise<MatchStreamers> {
+export async function addStreamerChannel(matchId: string, puuid: string, login: string, delaySec?: number | null): Promise<MatchStreamers> {
   if (!isDesktop) throw NEEDS_APP("Adding a channel");
-  return tauriInvoke<MatchStreamers>("add_streamer_channel", { matchId, puuid, login });
+  return tauriInvoke<MatchStreamers>("add_streamer_channel", { matchId, puuid, login, delaySec: delaySec ?? null });
 }
 
 export const onStreamersUpdated = (cb: (s: MatchStreamers) => void) => listen("streamers-updated", cb);

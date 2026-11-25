@@ -1,0 +1,115 @@
+name: Deploy scanner to VPS
+
+# Installs the always-on scoreboard scanner and its API on the VPS and keeps
+# them running (the crosspov user's crontab restarts them if they stop).
+# Runs when the scanner code changes, or by hand: Actions -> Deploy scanner
+# to VPS -> Run workflow.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   VPS_HOST, VPS_SSH_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET (as for "Scanner on VPS")
+#   SCANNER_KEY          shared secret the CrossPOV server signs its requests with
+#                        (the same value goes in Cloudflare as SCANNER_KEY)
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "tools/scanner/**"
+      - "tools/scoreboard_poc/hud.py"
+      - "tools/scoreboard_poc/poc.py"
+      - "tools/scoreboard_poc/digits.npz"
+      - ".github/workflows/deploy-scanner.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the scanner code
+        run: |
+          pip install -q numpy pillow requests
+          cd tools/scanner && python -m unittest -v test_matcher test_verify test_api
+
+      - name: Check secrets
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          TID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TSECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          SKEY: ${{ secrets.SCANNER_KEY }}
+        run: |
+          missing=""
+          for v in HOST KEY TID TSECRET SKEY; do [ -n "${!v}" ] || missing="$missing $v"; done
+          if [ -n "$missing" ]; then echo "::error::Missing secrets:$missing (SKEY = SCANNER_KEY)"; exit 1; fi
+          [ ${#SKEY} -ge 32 ] || { echo "::error::SCANNER_KEY must be at least 32 characters"; exit 1; }
+
+      - name: Set up SSH
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          body=$(printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | grep -v -- '-----')
+          { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | tr -d ' ' ; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keygen -y -f ~/.ssh/deploy > /dev/null
+          ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User crosspov\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n  ServerAliveInterval 30\n' "$HOST" > ~/.ssh/config
+          ssh vps 'echo "connected as $(whoami) on $(hostname)"'
+
+      - name: Copy code and settings
+        env:
+          TID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TSECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          SKEY: ${{ secrets.SCANNER_KEY }}
+        run: |
+          ssh vps 'mkdir -p /opt/crosspov/scanner /opt/crosspov/scoreboard_poc'
+          scp tools/scanner/*.py tools/scanner/run.sh vps:/opt/crosspov/scanner/
+          scp tools/scoreboard_poc/poc.py tools/scoreboard_poc/hud.py tools/scoreboard_poc/digits.npz vps:/opt/crosspov/scoreboard_poc/
+          ssh vps 'mv /opt/crosspov/scanner/run.sh /opt/crosspov/run.sh && chmod +x /opt/crosspov/run.sh'
+          # Secrets travel over SSH stdin into a file only the crosspov user can read.
+          printf 'TWITCH_CLIENT_ID=%s\nTWITCH_CLIENT_SECRET=%s\nSCANNER_KEY=%s\n' "$TID" "$TSECRET" "$SKEY" | ssh vps 'umask 077 && cat > /opt/crosspov/.env'
+          ssh vps '/opt/crosspov/venv/bin/pip install -q --upgrade numpy pillow requests yt-dlp imageio-ffmpeg'
+
+      - name: Start (or restart) and keep running
+        run: |
+          ssh vps 'bash -s' <<'REMOTE'
+          set -e
+          # Restart with the new code; the watchdog starts them again right away.
+          pkill -u "$(id -u)" -f "[s]canner/scanner.py" || true
+          pkill -u "$(id -u)" -f "[s]canner/api.py" || true
+          sleep 2
+          ( crontab -l 2>/dev/null | grep -v "crosspov/run.sh" || true
+            echo "*/2 * * * * /opt/crosspov/run.sh"
+            echo "@reboot /opt/crosspov/run.sh" ) | crontab -
+          /opt/crosspov/run.sh
+          sleep 8
+          pgrep -u "$(id -u)" -af "[s]canner/" || { echo "not running"; tail -n 30 /opt/crosspov/logs/*.log; exit 1; }
+          tail -n 5 /opt/crosspov/logs/api.log
+          REMOTE
+
+      - name: Check the API answers from outside
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          # An unsigned request must get 401: that proves the port is open and the API checks signatures.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$HOST:8787/health" || true)
+          echo "unsigned /health -> $code"
+          if [ "$code" != "401" ]; then
+            echo "::warning::The API isn't reachable from outside on port 8787 (got '$code'). A firewall may block it: as root on the VPS run 'ufw allow 8787/tcp' (only if ufw is enabled)."
+          fi
+
+      - name: First sweep
+        run: |
+          # The first sweep takes a few minutes; show its log line once it's done.
+          for i in $(seq 1 40); do
+            if ssh vps 'grep -q "sweep:" /opt/crosspov/logs/scanner.log 2>/dev/null'; then break; fi
+            sleep 15
+          done
+          ssh vps 'tail -n 5 /opt/crosspov/logs/scanner.log'

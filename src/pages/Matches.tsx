@@ -9,6 +9,7 @@ import {
   lookupStreamers,
   type MatchPlayer,
   type MatchStreamers,
+  type SuggestedStreamer,
   type MatchSummary,
   type WebStreamer,
 } from "../lib/backend";
@@ -202,6 +203,62 @@ function MatchDetail({
         {streamers?.error && <p className="note bad">{streamers.error}</p>}
       </Panel>
     </>
+  );
+}
+
+/** One stream the scoreboard scanner found in this match: the user picks which player it was. */
+function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId: string; s: SuggestedStreamer; onAdded: (m: MatchStreamers) => void }) {
+  const me = findMe(match, riotId);
+  const team = match.players.filter((p) => p.team === s.team && p.puuid !== me?.puuid);
+  const [puuid, setPuuid] = useState(team.length === 1 ? team[0].puuid : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const side = !me ? `team ${s.team}` : s.team === me.team ? "your team" : "the enemy team";
+
+  async function link() {
+    setBusy(true);
+    setError("");
+    try {
+      onAdded(await addStreamerChannel(match.id, puuid, s.login, s.delaySec));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sr" style={{ flexWrap: "wrap" }}>
+      <span>
+        <b>
+          <a href={`https://www.twitch.tv/${s.login}`} target="_blank" rel="noreferrer">{s.displayName || s.login}</a> was in this match, on {side}
+        </b>
+        <small>Seen on their stream's scoreboard and checked in their VOD{s.delaySec ? ` (stream delay about ${s.delaySec} s)` : ""}. Which player were they?</small>
+        {error && <small className="bad">{error}</small>}
+      </span>
+      <span className="row">
+        <select className="input" aria-label={`Which player was ${s.login}`} value={puuid} onChange={(e) => setPuuid(e.target.value)}>
+          <option value="">Which player?</option>
+          {team.map((p) => (
+            <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {p.agent}</option>
+          ))}
+        </select>
+        <button type="button" className="b sm r" disabled={!puuid || busy} onClick={() => void link()}>{busy ? "Checking…" : "Link"}</button>
+      </span>
+    </div>
+  );
+}
+
+function Suggestions({ match, riotId, streamers, onAdded }: { match: MatchSummary; riotId: string; streamers?: MatchStreamers; onAdded: (m: MatchStreamers) => void }) {
+  const list = streamers?.suggested ?? [];
+  if (!list.length) return null;
+  return (
+    <Panel title="Found by scoreboard" color="var(--twitch)" right={<span className="m tiny dim">{list.length} stream{list.length === 1 ? "" : "s"}</span>}>
+      {list.map((s) => (
+        <Suggestion key={s.login} match={match} riotId={riotId} s={s} onAdded={onAdded} />
+      ))}
+      <p className="note">These streamers didn't match by name (smurf or a different name). Pick the player once; CrossPOV remembers it on this PC.</p>
+    </Panel>
   );
 }
 
@@ -419,6 +476,7 @@ export default function Matches({
               streamers={streamers[match.id]}
               actions={<button type="button" className="b sm" onClick={() => void recheck()} disabled={rechecking}>{rechecking ? "Checking…" : "Check again"}</button>}
             />
+            <Suggestions match={match} riotId={settings.riotId} streamers={streamers[match.id]} onAdded={putStreamers} />
             {isDesktop && <AddChannel match={match} riotId={settings.riotId} onAdded={putStreamers} />}
           </>
         ) : (

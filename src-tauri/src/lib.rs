@@ -283,9 +283,9 @@ async fn check_streamers_now(state: State<'_, AppState>, match_id: String) -> Re
 
 /// "Played against a streamer it missed?": the user names a player's channel.
 #[tauri::command]
-async fn add_streamer_channel(state: State<'_, AppState>, match_id: String, puuid: String, login: String) -> Result<MatchStreamers, String> {
+async fn add_streamer_channel(state: State<'_, AppState>, match_id: String, puuid: String, login: String, delay_sec: Option<f64>) -> Result<MatchStreamers, String> {
     let worker = state.streamers.clone();
-    tauri::async_runtime::spawn_blocking(move || worker.add_manual(&match_id, &puuid, &login)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || worker.add_manual(&match_id, &puuid, &login, delay_sec)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

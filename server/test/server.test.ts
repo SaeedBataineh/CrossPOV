@@ -276,3 +276,40 @@ test("recent matches lists ids from HenrikDev's stored matches", async () => {
   assert.deepEqual(r.body.matches, [{ id: MATCH_ID, map: "Ascent", mode: "Competitive", startedAt: "2026-11-24T19:00:00.000Z" }]);
   assert.match(r.calls[0].url, /\/valorant\/v1\/stored-matches\/eu\/A\/B\?size=10$/);
 });
+
+import { scannerMatch, scannerStreams, sign } from "../src/scanner.ts";
+
+test("scanner requests are signed exactly like the VPS checks them", async () => {
+  // Value computed by tools/scanner/api.py signature() for the same inputs.
+  assert.equal(await sign("k".repeat(40), "1700000000", "POST", "/match", '{"a":1}'), "fe3a6c3e5075baa69bf7cfd09bea71a3d7e53bf7404debe10e4cad3fec78b58a");
+});
+
+test("scanner gets the score timeline only, and is skipped when not set up", async () => {
+  const m = fromHenrikV4(SAMPLE);
+  assert.equal(scannerMatch(m), null, "too few rounds to match on");
+  const full = { ...m, rounds: [0, 1, 2, 3, 4].map((i) => ({ index: i, winner: "Blue", startMs: i * 100_000 })) };
+  const body = scannerMatch(full)!;
+  assert.deepEqual(body.teams, ["Blue", "Red"]);
+  assert.equal(body.rounds.length, 5);
+  assert.ok(!("players" in body), "no player data leaves the server");
+  assert.deepEqual(await scannerStreams({}, full), { status: "off", streams: [] });
+  const realFetch = globalThis.fetch;
+  let sent: RequestInit | undefined;
+  globalThis.fetch = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+    sent = init;
+    return Response.json({ status: "done", streams: [{ login: "streamer_x", team: "Red", delaySec: 30 }, { login: "bad login!", team: "Red" }] });
+  }) as typeof fetch;
+  try {
+    const r = await scannerStreams({ SCANNER_URL: "http://vps.test:8787", SCANNER_KEY: "k".repeat(40) }, full);
+    assert.deepEqual(r.streams.map((s) => s.login), ["streamer_x"], "odd logins are dropped");
+    assert.ok(new Headers(sent?.headers).get("x-crosspov-signature"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  globalThis.fetch = (async () => { throw new Error("down"); }) as typeof fetch;
+  try {
+    assert.equal((await scannerStreams({ SCANNER_URL: "http://vps.test:8787", SCANNER_KEY: "k".repeat(40) }, full)).status, "error", "a down scanner never breaks streamer checks");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
