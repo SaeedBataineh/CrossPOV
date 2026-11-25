@@ -287,7 +287,7 @@ impl MatchWatcher {
         let me = self.clone();
         thread::Builder::new()
             .name("match-watcher".into())
-            .spawn(move || me.run())
+            .spawn(move || crate::keep_running(|| me.run()))
             .expect("spawn match watcher");
     }
 

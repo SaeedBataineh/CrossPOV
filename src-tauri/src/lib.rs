@@ -289,6 +289,9 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
         }
         let _ = writeln!(out);
     }
+    if let Some(c) = recent_crashes() {
+        let _ = writeln!(out, "\n[Crashes]\n{c}");
+    }
     let _ = writeln!(
         out,
         "\n[Settings] {} fps, {:?}, quality {:?}, encoder {:?}, {:?}, buffer {} s, hotkey {}, clips {}",
@@ -471,7 +474,52 @@ fn webview_available() -> bool {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Runs a background task, and if it crashes, logs it and starts it again a
+/// little later instead of taking the app down (one bad match must never
+/// close CrossPOV).
+pub(crate) fn keep_running(task: impl Fn()) {
+    loop {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(&task)).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+}
+
+/// Where crashes are written (%LOCALAPPDATA%\app.crosspov.desktop\crash.log).
+fn crash_log_path() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("app.crosspov.desktop").join("crash.log"))
+}
+
+/// The end of the crash log, for Copy diagnostics.
+pub(crate) fn recent_crashes() -> Option<String> {
+    let text = std::fs::read_to_string(crash_log_path()?).ok()?;
+    let tail: Vec<&str> = text.lines().rev().take(12).collect();
+    (!tail.is_empty()).then(|| tail.into_iter().rev().collect::<Vec<_>>().join("\n"))
+}
+
+/// Writes every crash (which part, what, where) to crash.log, keeping the file small.
+fn log_crashes() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(path) = crash_log_path() {
+            let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+            let old = std::fs::read_to_string(&path).unwrap_or_default();
+            // Keep the last 100 lines (whole lines, so no character is cut in half).
+            let lines: Vec<&str> = old.lines().collect();
+            let keep: String = lines[lines.len().saturating_sub(100)..].iter().map(|l| format!("{l}\n")).collect();
+            let when = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
+            let thread = std::thread::current().name().unwrap_or("main").to_string();
+            let what = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+            let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+            let _ = std::fs::write(&path, format!("{keep}{when} v{} [{thread}] {what} at {at}\n", env!("CARGO_PKG_VERSION")));
+        }
+        default(info);
+    }));
+}
+
 pub fn run() {
+    log_crashes();
     // Single-exe update: the old copy started us and is closing; wait for it
     // so the one-instance check doesn't hand control back to it.
     updater::finish_self_update();

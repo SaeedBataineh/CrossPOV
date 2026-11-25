@@ -733,7 +733,7 @@ impl StreamerWorker {
         let me = self.clone();
         thread::Builder::new()
             .name("streamer-clips".into())
-            .spawn(move || me.run())
+            .spawn(move || crate::keep_running(|| me.run()))
             .expect("spawn streamer worker");
     }
 

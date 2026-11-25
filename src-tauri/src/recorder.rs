@@ -205,7 +205,7 @@ impl Recorder {
         let me = self.clone();
         thread::Builder::new()
             .name("recorder".into())
-            .spawn(move || me.supervise())
+            .spawn(move || crate::keep_running(|| me.supervise()))
             .expect("spawn recorder thread");
     }
 

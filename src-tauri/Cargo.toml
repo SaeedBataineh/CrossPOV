@@ -41,7 +41,9 @@ single-exe = []
 codegen-units = 1
 lto = true
 opt-level = "s"
-panic = "abort"
+# "unwind": a crash in one background task is caught (and logged to
+# crash.log) instead of closing the whole app.
+panic = "unwind"
 strip = true
 
 [target."cfg(windows)".dependencies]
