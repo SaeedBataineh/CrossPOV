@@ -110,6 +110,8 @@ async function listen<T>(event: string, cb: (payload: T) => void): Promise<Unlis
 export const onRecorderStatus = (cb: (s: RecorderStatus) => void) => listen("recorder-status", cb);
 export const onClipSaved = (cb: (c: ClipInfo) => void) => listen("clip-saved", cb);
 export const onClipFailed = (cb: (msg: string) => void) => listen("clip-failed", cb);
+/** The window was reopened from the tray after its page slept: anything may have changed meanwhile. */
+export const onWindowAwake = (cb: () => void) => listen<null>("window-awake", () => cb());
 
 export async function saveClipNow(): Promise<void> {
   if (isDesktop) await tauriInvoke<void>("save_clip_now");

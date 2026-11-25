@@ -15,7 +15,23 @@ const Streamers = lazy(() => import("./pages/Streamers"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 
 export default function App() {
-  const [page, setPage] = useState<Page>("clips");
+  // Remembered for this session, so waking the window from the tray keeps your place.
+  const [page, setPageState] = useState<Page>(() => {
+    try {
+      const saved = sessionStorage.getItem("page");
+      return saved === "matches" || saved === "streamers" || saved === "settings" ? saved : "clips";
+    } catch {
+      return "clips";
+    }
+  });
+  const setPage = useCallback((p: Page) => {
+    setPageState(p);
+    try {
+      sessionStorage.setItem("page", p);
+    } catch {
+      /* not remembered: fine */
+    }
+  }, []);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** The clip playing in the app's own player. */

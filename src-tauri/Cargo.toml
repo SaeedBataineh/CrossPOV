@@ -47,6 +47,8 @@ panic = "unwind"
 strip = true
 
 [target."cfg(windows)".dependencies]
+# The same version Tauri already uses: puts the hidden window's browser to sleep.
+webview2-com = "0.39.1"
 windows-core = "0.62.2"
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",

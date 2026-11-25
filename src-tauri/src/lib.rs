@@ -181,11 +181,76 @@ fn save_clip_async(app: &AppHandle) {
     });
 }
 
+/// Counts closes to the tray, so a pending "free the window" timer can tell
+/// the window was reopened (and closed again) since it started.
+static TRAY_CLOSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How long a window closed to the tray is kept asleep (instant to reopen)
+/// before it's destroyed to free all its memory.
+const FREE_HIDDEN_WINDOW_AFTER: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Closing to the tray: hide the window and put its browser to sleep (page
+/// paused, memory trimmed) so reopening is instant; after a while, destroy
+/// it, and the next open builds it fresh.
+fn close_to_tray(window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+    set_asleep(window, true);
+    let close = TRAY_CLOSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(FREE_HIDDEN_WINDOW_AFTER);
+        if TRAY_CLOSES.load(std::sync::atomic::Ordering::SeqCst) == close && !window.is_visible().unwrap_or(true) {
+            let _ = window.destroy();
+        }
+    });
+}
+
+/// Suspends (or resumes) the window's WebView2 and lowers (or restores) its memory use.
+#[cfg(windows)]
+fn set_asleep(window: &tauri::WebviewWindow, asleep: bool) {
+    let _ = window.with_webview(move |webview| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2TrySuspendCompletedHandler, ICoreWebView2_19, ICoreWebView2_3, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+            COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+        };
+        use windows::core::Interface;
+        let controller = webview.controller();
+        // SAFETY: COM calls on the window's own WebView2, on the thread that owns it (with_webview runs there).
+        unsafe {
+            if asleep {
+                let _ = controller.SetIsVisible(false); // Suspending needs it marked hidden.
+            }
+            let Ok(core) = controller.CoreWebView2() else { return };
+            if let Ok(c) = core.cast::<ICoreWebView2_19>() {
+                let level = if asleep { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+                let _ = c.SetMemoryUsageTargetLevel(level);
+            }
+            if let Ok(c) = core.cast::<ICoreWebView2_3>() {
+                let _ = if asleep { c.TrySuspend(None::<&ICoreWebView2TrySuspendCompletedHandler>) } else { c.Resume() };
+            }
+            if !asleep {
+                let _ = controller.SetIsVisible(true);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn set_asleep(_window: &tauri::WebviewWindow, _asleep: bool) {}
+
 pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        let was_hidden = !window.is_visible().unwrap_or(true);
+        TRAY_CLOSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst); // cancels a pending free
+        if was_hidden {
+            set_asleep(&window, false);
+        }
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        if was_hidden {
+            // The page was paused while hidden: it reloads its data.
+            let _ = window.emit("window-awake", ());
+        }
         return;
     }
     let Some(config) = app.config().app.windows.iter().find(|w| w.label == MAIN_WINDOW).cloned() else {
@@ -571,6 +636,17 @@ pub fn run() {
     let app = tauri::Builder::default()
         // Must be first: a second launch just brings the running app forward.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                if window.label() == MAIN_WINDOW && app.state::<AppState>().get().minimize_to_tray {
+                    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+                        api.prevent_close();
+                        close_to_tray(&w);
+                    }
+                }
+            }
+        })
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![MINIMIZED_ARG])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
