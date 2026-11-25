@@ -159,8 +159,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          # FFmpeg and yt-dlp are packed inside the exe (unpacked on first run), and
-          # every copy, installed or not, updates by replacing its own exe.
+          # FFmpeg and yt-dlp are not inside the exe: it downloads them on first run and
+          # only accepts these exact files (build.rs compiles in their SHA-256).
+          # Every copy, installed or not, updates by replacing its own exe.
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
             npx tauri build --features single-exe
           } else {
@@ -206,6 +207,41 @@ jobs:
           name: CrossPOV-windows
           path: out/*
           if-no-files-found: error
+
+      - name: Name the tools by their fingerprint
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools-out | Out-Null
+          foreach ($t in @(@("ffmpeg", "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"), @("yt-dlp", "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"))) {
+            $h = (Get-FileHash $t[1] -Algorithm SHA256).Hash.ToLower()
+            Copy-Item $t[1] "tools-out/$($t[0])-$($h.Substring(0, 16)).exe"
+          }
+          Get-ChildItem tools-out | Format-Table Name, Length
+
+      # Before the app release, so a new version never points at tools that aren't there yet.
+      - name: Publish the tools the app downloads
+        if: env.RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tools
+          target_commitish: ${{ github.sha }}
+          name: CrossPOV tools (FFmpeg and yt-dlp)
+          body: FFmpeg and yt-dlp, downloaded by CrossPOV on first run. Each file is named after the start of its SHA-256; the app checks the whole fingerprint before using it.
+          files: tools-out/*
+          make_latest: false
+
+      - name: Check the published tools download and match
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          foreach ($f in Get-ChildItem tools-out) {
+            $url = "https://github.com/${{ github.repository }}/releases/download/tools/$($f.Name)"
+            $dl = Join-Path $env:RUNNER_TEMP $f.Name
+            Invoke-WebRequest $url -OutFile $dl
+            if ((Get-FileHash $dl).Hash -ne (Get-FileHash $f.FullName).Hash) { throw "$url doesn't match the built file" }
+            "$($f.Name) OK"
+          }
 
       - name: Publish the Release
         if: env.RELEASE == 'true'

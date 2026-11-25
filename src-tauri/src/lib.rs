@@ -57,6 +57,31 @@ pub(crate) const USER_AGENT: &str = concat!("CrossPOV/", env!("CARGO_PKG_VERSION
 /// Passed by the "Start with Windows" entry so the app starts in the tray.
 pub(crate) const MINIMIZED_ARG: &str = "--minimized";
 
+/// First run of the single exe (or new tool versions): download FFmpeg and
+/// yt-dlp, showing progress where the recorder status goes, then start
+/// recording. Without internet it keeps trying every minute.
+fn get_tools_then_record(recorder: &Recorder) {
+    loop {
+        recorder.show_tools_status("Downloading recording tools (one time only)…".into(), false);
+        let mut shown = u64::MAX;
+        let result = tools::download(&mut |done, total| {
+            let mb = done / 1_000_000;
+            if mb != shown {
+                shown = mb;
+                let of = if total > 0 { format!(" of {} MB", total / 1_000_000) } else { String::new() };
+                recorder.show_tools_status(format!("Downloading recording tools (one time only): {mb}{of}…"), false);
+            }
+        });
+        match result {
+            Ok(()) => return recorder.spawn(),
+            Err(err) => {
+                recorder.show_tools_status(format!("{err} CrossPOV can't record until it has them; it tries again every minute."), true);
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            }
+        }
+    }
+}
+
 pub(crate) struct AppState {
     settings: Mutex<Settings>,
     path: PathBuf,
@@ -410,10 +435,8 @@ pub fn run() {
         )
         .setup(|app| {
             let handle = app.handle().clone();
-            // Single-exe build: put FFmpeg and yt-dlp where the app can run them (once per version).
-            if let Err(err) = handle.path().app_local_data_dir().map_err(|e| e.to_string()).and_then(|d| tools::unpack(&d)) {
-                eprintln!("{err}");
-            }
+            // Single-exe build: FFmpeg and yt-dlp are downloaded into the local data folder.
+            tools::init(&handle.path().app_local_data_dir()?);
             let path = handle.path().app_config_dir()?.join("settings.json");
             let mut settings = Settings::load(&path);
             if settings.clip_folder.is_empty() {
@@ -482,7 +505,12 @@ pub fn run() {
             watcher.spawn();
             streamer_worker.spawn();
             apply_hotkey(&handle, &hotkey);
-            recorder.spawn();
+            if tools::missing().is_empty() {
+                recorder.spawn();
+            } else {
+                let recorder = recorder.clone();
+                std::thread::Builder::new().name("tools".into()).spawn(move || get_tools_then_record(&recorder))?;
+            }
 
             build_tray(&handle)?;
             if !std::env::args().any(|a| a == MINIMIZED_ARG) {

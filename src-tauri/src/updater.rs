@@ -165,7 +165,7 @@ impl Updates {
         }
         let updater = builder
             .on_before_exit(move || {
-                // The installer replaces ffmpeg.exe and yt-dlp.exe, so nothing may still be using them.
+                // The new version may replace or delete ffmpeg.exe and yt-dlp.exe, so nothing may still be using them.
                 recorder.halt();
                 kill_helpers();
             })
@@ -234,14 +234,14 @@ fn game_running() -> bool {
 }
 
 /// Stops FFmpeg / yt-dlp copies started from the app's own folder (or, in
-/// the single-exe build, from the folder they were unpacked to).
+/// the single-exe build, from the folders they were downloaded to).
 fn kill_helpers() {
     let procs = Procs::new();
     if let Some(dir) = start_exe().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
         procs.kill_in_dir(&dir, std::process::id());
     }
-    if let Some(dir) = crate::tools::dir() {
-        procs.kill_in_dir(dir, std::process::id());
+    for dir in crate::tools::dirs() {
+        procs.kill_in_dir(&dir, std::process::id());
     }
 }
 

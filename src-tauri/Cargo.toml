@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
@@ -20,6 +21,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 cpal = "0.18.2"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-notification = "2.8.1"
@@ -29,8 +31,9 @@ tauri-plugin-updater = "2"
 time = { version = "0.3", features = ["local-offset", "parsing", "formatting", "macros"] }
 
 [features]
-# One self-contained CrossPOV.exe: FFmpeg and yt-dlp are embedded and unpacked
-# on first run, and the app updates by replacing its own exe.
+# One self-contained CrossPOV.exe that updates by replacing itself. FFmpeg and
+# yt-dlp are downloaded on first run and checked against fingerprints build.rs
+# takes from src-tauri/binaries (see tools.rs).
 single-exe = []
 
 # Small, fast release binary.

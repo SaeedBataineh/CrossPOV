@@ -20,6 +20,15 @@ function Root() {
   return <Landing />;
 }
 
+// No browser right-click menu (Back, Reload, Inspect...) in the desktop app.
+// Text boxes keep theirs so copy and paste still work.
+if (isDesktop) {
+  window.addEventListener("contextmenu", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (!t?.closest("input, textarea, [contenteditable='true']")) e.preventDefault();
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Suspense fallback={null}>

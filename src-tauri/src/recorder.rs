@@ -185,6 +185,14 @@ impl Recorder {
         inner.settings = settings;
     }
 
+    /// Shown while the single exe downloads FFmpeg (`failed`: it couldn't, and will retry).
+    pub fn show_tools_status(&self, message: String, failed: bool) {
+        self.set_status(|s| {
+            s.state = if failed { RecState::NoFfmpeg } else { RecState::Starting };
+            s.message = Some(message);
+        });
+    }
+
     /// Stops FFmpeg for good (until the app restarts), e.g. so an update can replace its files.
     pub fn halt(&self) {
         let mut inner = self.lock();
