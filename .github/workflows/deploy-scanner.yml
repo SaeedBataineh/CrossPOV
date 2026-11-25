@@ -109,7 +109,7 @@ jobs:
         run: |
           # The first sweep takes a few minutes; show its log line once it's done.
           for i in $(seq 1 40); do
-            if ssh vps 'grep -q "sweep:" /opt/crosspov/logs/scanner.log 2>/dev/null'; then break; fi
+            if ssh vps 'grep -q "new pictures" /opt/crosspov/logs/scanner.log 2>/dev/null'; then break; fi
             sleep 15
           done
-          ssh vps 'tail -n 5 /opt/crosspov/logs/scanner.log'
+          ssh vps 'grep "sweep" /opt/crosspov/logs/scanner.log | tail -n 3'
