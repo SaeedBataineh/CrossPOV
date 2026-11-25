@@ -203,6 +203,7 @@ export function GalleryCard({ clip, title, meta, onPlay, onReveal, onDelete }: {
         {src ? <img src={src} alt="" loading="lazy" decoding="async" /> : (
           <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#ffffff1a" /><path d="M10 8l6 4-6 4z" fill="#ffffffcc" /></svg>
         )}
+        {src && <span className="hover-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg></span>}
         {isTheirs(clip) && clip.streamer && <span className="badge">{clip.streamer}</span>}
         {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
       </button>

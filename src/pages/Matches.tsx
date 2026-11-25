@@ -15,7 +15,7 @@ import {
   type MatchSummary,
   type WebStreamer,
 } from "../lib/backend";
-import { result, resultColor, streamerLabel } from "../lib/matchInfo";
+import { progress, result, resultColor, streamerLabel } from "../lib/matchInfo";
 import { REGIONS, type Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
 import { timeAgo, type useRecorder } from "../lib/useRecorder";
@@ -43,59 +43,63 @@ function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefin
 }
 
 
-/** Rounds strip and both teams: the details, shown on request. */
-function Scoreboard({ match, me, live, fightRounds, web, checked }: {
-  match: MatchSummary;
-  me?: MatchPlayer;
-  live: Map<string, Live | null>;
-  fightRounds: Set<number>;
-  web?: WebStreamer[] | "checking";
-  checked: boolean;
-}) {
+/** Every round as a coloured block: won, lost, and the ones with a streamer fight marked. */
+function Rounds({ match, me, fightRounds }: { match: MatchSummary; me?: MatchPlayer; fightRounds: Set<number> }) {
+  if (!match.rounds.length) return null;
   const myKills = me ? match.kills.filter((k) => k.killer === me.puuid) : [];
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="rounds">
+        {match.rounds.map((round) => {
+          const kills = myKills.filter((k) => k.round === round.index).length;
+          const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "lost", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
+          return (
+            <div key={round.index} className={cls} title={`Round ${round.index + 1}${kills ? `: ${kills} kill${kills === 1 ? "" : "s"}` : ""}${fightRounds.has(round.index) ? " · fought a streamer" : ""}`}>
+              <span>{round.index + 1}</span>
+              {kills > 0 && <i>{kills}</i>}
+            </div>
+          );
+        })}
+      </div>
+      <span className="legend">
+        <span><i className="sw won" />won</span>
+        <span><i className="sw lost" />lost</span>
+        <span><i className="sw streamer" />fight with a streamer</span>
+        <span>number: your kills</span>
+      </span>
+    </div>
+  );
+}
+
+/** Both teams, shown on request. */
+function Scoreboard({ match, me, live }: { match: MatchSummary; me?: MatchPlayer; live: Map<string, Live | null> }) {
   const teams = [...new Set(match.players.map((p) => p.team))].sort((a, b) => (a === me?.team ? -1 : b === me?.team ? 1 : 0));
   return (
-    <div className="stack" style={{ gap: 16 }}>
-      {match.rounds.length > 0 && (
-        <div className="stack" style={{ gap: 8 }}>
-          <div className="rounds">
-            {match.rounds.map((round) => {
-              const kills = myKills.filter((k) => k.round === round.index).length;
-              const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "lost", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
-              return <div key={round.index} className={cls} title={`Round ${round.index + 1}${kills ? `: ${kills} kill${kills === 1 ? "" : "s"}` : ""}`}><span>{round.index + 1}</span></div>;
-            })}
-          </div>
-          <span className="muted small">Green won, red lost, outlined rounds had a fight with a streamer.</span>
-        </div>
-      )}
-      <div className="teams">
-        {teams.map((team) => {
-          const t = match.teams.find((x) => x.id === team);
-          const mine = team === me?.team;
-          const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills);
-          return (
-            <table key={team} className="tbl">
-              <thead><tr><th colSpan={3}>{mine ? "Your team" : me ? "Enemy team" : `Team ${team}`}{t ? ` · ${t.roundsWon}` : ""}</th></tr></thead>
+    <div className="teams">
+      {teams.map((team) => {
+        const t = match.teams.find((x) => x.id === team);
+        const mine = team === me?.team;
+        const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills);
+        return (
+          <div key={team} className="soft-box" style={{ padding: "6px 4px" }}>
+            <table className="tbl">
+              <thead><tr><th colSpan={2}>{mine ? "Your team" : me ? "Enemy team" : `Team ${team}`}{t ? ` · ${t.roundsWon}` : ""}</th><th style={{ textAlign: "right" }}>K / D / A</th></tr></thead>
               <tbody>
                 {players.map((p) => {
                   const l = live.get(p.puuid);
                   return (
                     <tr key={p.puuid}>
-                      <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span> <span className="muted">· {p.agent}</span></td>
-                      <td className="num">{p.kills}/{p.deaths}/{p.assists}</td>
-                      <td style={{ textAlign: "right" }}>
-                        {p.puuid === me?.puuid ? <span className="dim">you</span>
-                          : l ? <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>
-                          : <span className="dim">{web === "checking" ? "checking…" : checked ? "" : ""}</span>}
-                      </td>
+                      <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span><span className="muted small" style={{ display: "block" }}>{p.agent}{p.puuid === me?.puuid ? " · you" : ""}</span></td>
+                      <td>{l && <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>}</td>
+                      <td className="num" style={{ textAlign: "right" }}>{p.kills} / {p.deaths} / {p.assists}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -156,60 +160,98 @@ function MatchView({
     clips.find((c) => c.kind === "theirs" && c.streamer?.toLowerCase() === f.login.toLowerCase() && c.round === f.round + 1 && (!c.map || c.map === match.map));
   const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
 
-  const outcome = r ? `${r.letter === "W" ? "Win" : r.letter === "L" ? "Loss" : "Draw"} ${r.score}` : match.teams.map((t) => t.roundsWon).join("–");
-  const streamerLine = web === "checking" ? "Checking who was live on Twitch…"
+  const myScore = me ? match.teams.find((t) => t.id === me.team)?.roundsWon : match.teams[0]?.roundsWon;
+  const theirScore = me ? match.teams.find((t) => t.id !== me.team)?.roundsWon : match.teams[1]?.roundsWon;
+  const verdict = r ? (r.letter === "W" ? "Victory" : r.letter === "L" ? "Defeat" : "Draw") : "";
+  const streamerNote = web === "checking" ? "Checking who was live on Twitch…"
     : !checked ? "Streamers are checked a minute or two after the match."
-    : liveList.length ? `${liveList.length} streamer${liveList.length === 1 ? " was" : "s were"} in this match.`
+    : liveList.length ? null
     : "Nobody in this lobby was streaming.";
+  const progressOf = (puuid: string) => {
+    const st = streamers?.players.find((x) => x.puuid === puuid);
+    return st ? progress(st) : null;
+  };
 
   return (
-    <div className="stack" style={{ gap: 20 }}>
-      <div className="match-head">
-        <div className="stack" style={{ gap: 6 }}>
-          <h1>{match.map} · <span style={{ color: resultColor(r?.letter) }}>{outcome}</span></h1>
-          <span className="muted">
-            {[me && `You played ${me.agent}, ${me.kills}/${me.deaths}/${me.assists}`, match.mode, matchTimeAgo(match.startedAt)].filter(Boolean).join(" · ")}
-          </span>
+    <div className="stack" style={{ gap: 28 }}>
+      <div className={`match-hero ${r?.letter === "W" ? "win" : r?.letter === "L" ? "loss" : ""}`}>
+        <div className="hero-main">
+          <span className="eyebrow">{[match.mode, matchTimeAgo(match.startedAt)].join(" · ")}</span>
+          <h1>{match.map}</h1>
+          {verdict && <span className="verdict">{verdict}</span>}
         </div>
-        <span className="row" style={{ gap: 8 }}>
+        <div className="big-score" aria-label={`Score ${myScore ?? "?"} to ${theirScore ?? "?"}`}>
+          <b className="mine">{myScore ?? "–"}</b>
+          <span>:</span>
+          <b>{theirScore ?? "–"}</b>
+        </div>
+        <div className="hero-stats">
+          {me && (
+            <>
+              <div><span>Agent</span><b>{me.agent}</b></div>
+              <div><span>K / D / A</span><b>{me.kills} / {me.deaths} / {me.assists}</b></div>
+            </>
+          )}
+          <div><span>Streamer fights</span><b>{fights.length}</b></div>
+        </div>
+        <div className="hero-actions">
           {actions}
           <button type="button" className="btn quiet" aria-expanded={showBoard} onClick={() => setShowBoard(!showBoard)}>{showBoard ? "Hide scoreboard" : "Scoreboard"}</button>
-        </span>
-      </div>
-
-      <div className="streamer-line">
-        <span>{streamerLine}</span>
-        {liveList.map((p) => {
-          const l = live.get(p.puuid)!;
-          return (
-            <a key={p.puuid} className="streamer-chip" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">
-              <b>{l.name}</b> <span className={l.tone}>{l.text}</span>
-            </a>
-          );
-        })}
-      </div>
-
-      {fights.length > 0 && (
-        <div className="gallery">
-          {fights.map((f) => {
-            const c = clipFor(f);
-            const title = `Round ${f.round + 1} · ${what(f)}`;
-            return c ? (
-              <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
-            ) : (
-              <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
-                <span className={`pending-text ${f.status.tone}`}>{f.status.text}</span>
-              </PendingCard>
-            );
-          })}
         </div>
+      </div>
+
+      <Rounds match={match} me={me} fightRounds={fightRounds} />
+
+      {showBoard && <Scoreboard match={match} me={me} live={live} />}
+
+      {(fights.length > 0 || (checked && liveList.length > 0)) && (
+        <section className="stack" style={{ gap: 14 }} aria-label="Your fights with streamers">
+          <h2 className="section-title">Your fights with them {fights.length > 0 && <span>{fights.length}</span>}</h2>
+          {fights.length > 0 ? (
+            <div className="gallery">
+              {fights.map((f) => {
+                const c = clipFor(f);
+                const title = `Round ${f.round + 1} · ${what(f)}`;
+                return c ? (
+                  <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
+                ) : (
+                  <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
+                    <span className={`pending-text ${f.status.tone}`}>{f.status.text}</span>
+                  </PendingCard>
+                );
+              })}
+            </div>
+          ) : me ? (
+            <p className="muted" style={{ margin: 0 }}>You didn't fight any of them this match.</p>
+          ) : null}
+        </section>
       )}
-      {checked && liveList.length > 0 && !fights.length && me && <p className="muted">You didn't fight any of them this match.</p>}
+      <section className="stack" style={{ gap: 14 }} aria-label="Streamers in this match">
+        <h2 className="section-title">Streamers in this match {liveList.length > 0 && <span>{liveList.length}</span>}</h2>
+        {streamerNote && <p className="muted" style={{ margin: 0 }}>{streamerNote}</p>}
+        {liveList.length > 0 && (
+          <div className="streamer-cards">
+            {liveList.map((p) => {
+              const l = live.get(p.puuid)!;
+              const pct = progressOf(p.puuid);
+              return (
+                <div key={p.puuid} className="streamer-card">
+                  <span className="avatar" aria-hidden="true">{l.name.slice(0, 2).toUpperCase()}</span>
+                  <span className="grow stack" style={{ gap: 3 }}>
+                    <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
+                    <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>
+                    <span className={`small ${l.tone}`}>{l.text}</span>
+                    {pct != null && pct < 100 && <span className="bar"><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {children}
+      </section>
+
       {!me && <p className="muted">Your Riot ID isn't in this match, so your fights can't be shown.</p>}
-
-      {children}
-
-      {showBoard && <Scoreboard match={match} me={me} live={live} fightRounds={fightRounds} web={web} checked={checked} />}
       {streamers?.error && <p className="small bad">{streamers.error}</p>}
     </div>
   );
@@ -415,26 +457,37 @@ export default function Matches({
         />
       )}
 
-      <div className="match-strip" role="list" aria-label="Your matches">
+      <div className="matches-layout">
+      <nav className="match-list" aria-label="Your matches">
+        <div className="match-list-head">
+          <h2 className="section-title">Matches</h2>
+          {isDesktop && (
+            <button type="button" className="linkish muted small" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
+              {checking ? "Checking…" : "Check now"}
+            </button>
+          )}
+        </div>
         {all.map((m) => {
           const isLooked = m.id === looked?.match.id;
           const me = findMe(m, isLooked ? looked.riotId : settings.riotId);
           const r = result(m, me);
           const n = streamers[m.id]?.players.length ?? 0;
           return (
-            <button key={m.id} type="button" role="listitem" aria-current={m.id === match?.id ? "true" : undefined} onClick={() => setSelected(m.id)}>
-              <b>{m.map} <span style={{ color: resultColor(r?.letter) }}>{r ? r.score : m.teams.map((t) => t.roundsWon).join("–")}</span></b>
-              <span>{matchTimeAgo(m.startedAt)}{n ? ` · ${n} streamer${n === 1 ? "" : "s"}` : ""}</span>
+            <button key={m.id} type="button" aria-current={m.id === match?.id ? "true" : undefined} onClick={() => setSelected(m.id)}>
+              <span className={`res-bar ${r?.letter === "W" ? "win" : r?.letter === "L" ? "loss" : ""}`} aria-hidden="true" />
+              <span className="grow stack" style={{ gap: 2 }}>
+                <b>{m.map}</b>
+                <span className="muted small">{[me?.agent, matchTimeAgo(m.startedAt)].filter(Boolean).join(" · ")}</span>
+              </span>
+              <span className="stack" style={{ gap: 2, alignItems: "flex-end" }}>
+                <b style={{ color: resultColor(r?.letter) }}>{r ? r.score : m.teams.map((t) => t.roundsWon).join("–")}</b>
+                {n > 0 && <span className="streamer-count">{n} streamer{n === 1 ? "" : "s"}</span>}
+              </span>
             </button>
           );
         })}
-        {isDesktop && (
-          <button type="button" className="strip-action" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
-            {checking ? "Checking…" : "Check now"}
-          </button>
-        )}
-      </div>
-
+      </nav>
+      <div className="match-detail">
       {match && match.id === looked?.match.id ? (
         <MatchView match={match} riotId={looked.riotId} clips={[]} web={looked.web} onPlay={play} />
       ) : match ? (
@@ -457,6 +510,8 @@ export default function Matches({
           <span>{settings.riotId ? "Play a match. It shows up a minute or two after it ends." : "Add your Riot ID in Settings first."}</span>
         </div>
       )}
+      </div>
+      </div>
     </section>
   );
 }
