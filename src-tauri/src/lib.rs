@@ -192,9 +192,26 @@ pub(crate) fn show_main_window(app: &AppHandle) {
         eprintln!("main window config missing");
         return;
     };
-    match WebviewWindowBuilder::from_config(app, &config).and_then(|b| b.build()) {
+    // The window starts hidden (and dark) and appears once the page has
+    // loaded, so reopening from the tray never flashes an empty white window.
+    let builder = WebviewWindowBuilder::from_config(app, &config).map(|b| {
+        b.on_page_load(|window, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        })
+    });
+    match builder.and_then(|b| b.build()) {
         Ok(window) => {
-            let _ = window.set_focus();
+            // Never stay invisible if the page is slow or fails to load.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if !window.is_visible().unwrap_or(true) {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            });
         }
         Err(err) => eprintln!("could not open window: {err}"),
     }

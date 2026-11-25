@@ -19,6 +19,8 @@
         "minWidth": 900,
         "minHeight": 600,
         "center": true,
+        "visible": false,
+        "backgroundColor": "#0e0e12",
         "create": false
       }
     ],
