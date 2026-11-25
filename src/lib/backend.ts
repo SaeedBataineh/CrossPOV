@@ -234,6 +234,8 @@ export interface StreamerPlayer {
   manual: boolean;
   /** A linked channel whose VOD is still being compared with this match. */
   checking?: boolean;
+  /** Rough seconds until all their clips are saved. */
+  etaSec?: number | null;
 }
 
 /** A stream the scoreboard scanner saw in this match; the user says which player it was. */

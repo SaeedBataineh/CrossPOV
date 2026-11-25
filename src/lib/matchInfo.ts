@@ -15,14 +15,23 @@ export function result(m: MatchSummary, me?: MatchPlayer): { letter: "W" | "L" |
 export const resultColor = (letter?: string) => (letter === "W" ? "var(--win)" : letter === "L" ? "var(--loss)" : "#555");
 
 /** Text and colour class for one streamer's progress. */
+/** "under a minute left", "about 3 min left", "about 1 h 20 min left". */
+export function timeLeft(sec: number): string {
+  if (sec < 60) return "under a minute left";
+  const min = Math.round(sec / 60);
+  return min < 60 ? `about ${min} min left` : `about ${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""} left`;
+}
+
 export function streamerLabel(s: StreamerPlayer): { text: string; tone: "good" | "warn" | "purple" | "bad" | "muted" } {
-  if (s.checking) return { text: s.manual ? "checking it was this match…" : "lining up their VOD…", tone: "purple" };
+  // The VPS lines a VOD up in under a minute; the app asks every 20 s.
+  if (s.checking) return { text: `${s.manual ? "checking it was this match" : "lining up their VOD"} · about a minute`, tone: "purple" };
+  const eta = s.status === "working" && s.etaSec ? ` · ${timeLeft(s.etaSec)}` : "";
   if (s.status === "failed" && s.message?.includes("different game")) return { text: "was in a different game", tone: "bad" };
   if (s.status === "failed" && s.message?.includes("other team")) return { text: "wrong player picked", tone: "bad" };
   switch (s.status) {
     case "working":
-      if (s.vod?.live) return { text: `live · waits for VOD (${s.clips}/${s.fights})`, tone: "purple" };
-      return { text: `downloading ${s.clips}/${s.fights}`, tone: "warn" };
+      if (s.vod?.live) return { text: `live · waits for VOD (${s.clips}/${s.fights})${eta}`, tone: "purple" };
+      return { text: `downloading ${s.clips}/${s.fights}${eta}`, tone: "warn" };
     case "clipped":
       return { text: `${s.clips} ${s.clips === 1 ? "clip" : "clips"} saved`, tone: "good" };
     case "noFights":

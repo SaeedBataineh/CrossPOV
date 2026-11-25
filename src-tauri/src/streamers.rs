@@ -441,6 +441,9 @@ pub struct PlayerState {
     /// nothing is downloaded until the check says it's the right game.
     #[serde(default)]
     pub checking: bool,
+    /// Rough seconds until all their clips are saved (shown as "about 2 min left").
+    #[serde(default)]
+    pub eta_sec: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -640,6 +643,7 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 manual: false,
                 delay_sec: 0.0,
                 checking: false,
+                eta_sec: None,
             });
             if let (Some(v), Some(p)) = (&shift, state.players.last_mut()) {
                 apply_shift(p, v);
@@ -660,6 +664,17 @@ fn apply_shift(p: &mut PlayerState, v: &VerifyInfo) {
     }
 }
 
+/// Seconds until every fight is saved: the ones the VOD already covers at
+/// `per_clip` each, plus the wait for a live stream's VOD to reach the rest.
+pub fn eta(windows: &[Window], done: &[String], shift: f64, available: f64, per_clip: f64) -> Option<u64> {
+    let left: Vec<&Window> = windows.iter().filter(|w| !done.contains(&w.key())).collect();
+    if left.is_empty() {
+        return None;
+    }
+    let wait = left.iter().map(|w| shift + w.end - available).fold(0.0_f64, f64::max);
+    Some((wait + left.len() as f64 * per_clip).ceil().max(1.0) as u64)
+}
+
 /// Used when a VOD's shift couldn't be measured (scanner down, scoreboard
 /// hidden): the match clock starts about at agent select, so VODs run this
 /// much late plus the streamer's own delay. Measured: 74 and 87 s.
@@ -671,7 +686,11 @@ const FALLBACK_SHIFT_S: f64 = 75.0;
 const RECHECK: Duration = Duration::from_secs(10 * 60);
 /// ...and this often while a streamer still has clips to come.
 const RECHECK_PENDING: Duration = Duration::from_secs(3 * 60);
-const TICK: Duration = Duration::from_secs(60);
+/// ...and this often while a streamer's VOD is being lined up (the scanner takes under a minute).
+const RECHECK_CHECKING: Duration = Duration::from_secs(20);
+const TICK: Duration = Duration::from_secs(20);
+/// Assumed time to save one clip until the first one has been timed.
+const FIRST_CLIP_GUESS_S: f64 = 15.0;
 const MAX_FAILURES: u32 = 3;
 /// Checks with no streamer found before a match is marked done.
 const NO_STREAMER_CHECKS: u32 = 2;
@@ -687,6 +706,8 @@ pub struct StreamerWorker {
     clip_root: Arc<Mutex<PathBuf>>,
     listener: Arc<StreamerListener>,
     busy: Arc<Mutex<()>>,
+    /// Average seconds one clip took to save on this PC, for time estimates.
+    clip_secs: Arc<Mutex<f64>>,
 }
 
 impl StreamerWorker {
@@ -699,6 +720,7 @@ impl StreamerWorker {
             clip_root: Arc::new(Mutex::new(clip_root)),
             listener: Arc::new(listener),
             busy: Arc::new(Mutex::new(())),
+            clip_secs: Arc::new(Mutex::new(FIRST_CLIP_GUESS_S)),
         }
     }
 
@@ -838,7 +860,8 @@ impl StreamerWorker {
         // Ask the server (at most every RECHECK, unless forced).
         // While clips are still to come (VOD still growing), ask more often.
         let pending = state.players.iter().any(|p| p.status == StreamerStatus::Working);
-        let every = if pending { RECHECK_PENDING } else { RECHECK };
+        let lining_up = state.players.iter().any(|p| p.checking);
+        let every = if lining_up { RECHECK_CHECKING } else if pending { RECHECK_PENDING } else { RECHECK };
         let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= every.as_millis() as u64);
         if due {
             let mut scanner_pending = false;
@@ -917,12 +940,16 @@ impl StreamerWorker {
             let mut waiting = false;
             // Fast path: the VOD's chunk playlist, asked of yt-dlp once per streamer.
             let mut fast_playlist: Option<Result<String, String>> = None;
+            let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
+            let per_clip = *self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
+            state.players[i].eta_sec = eta(&windows, &state.players[i].done, vod.offset_sec + late, vod.available_sec(now_ms()), per_clip);
+            (self.listener)(state, None);
             for w in &windows {
-                if p.done.contains(&w.key()) {
+                if state.players[i].done.contains(&w.key()) {
                     continue;
                 }
+                let clip_started = std::time::Instant::now();
                 // Agent select and their broadcast delay put each moment this much later in the VOD.
-                let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
                 let shift = vod.offset_sec + late;
                 let (from, to) = (shift + w.start, shift + w.end);
                 if from < 0.0 {
@@ -976,9 +1003,17 @@ impl StreamerWorker {
                             map: Some(m.map.clone()),
                         };
                         clips::write_meta(&root, &clip, &meta);
+                        // Learn how long a clip takes here, for the next estimates.
+                        let took = clip_started.elapsed().as_secs_f64();
+                        let avg = {
+                            let mut a = self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
+                            *a = *a * 0.6 + took * 0.4;
+                            *a
+                        };
                         let pl = &mut state.players[i];
                         pl.done.push(w.key());
                         pl.clips += 1;
+                        pl.eta_sec = eta(&windows, &pl.done, vod.offset_sec + late, vod.available_sec(now_ms()), avg);
                         if let Some(info) = clips::list(&root).into_iter().find(|c| c.path == clip.to_string_lossy()) {
                             (self.listener)(state, Some(&info));
                         }
@@ -1006,6 +1041,9 @@ impl StreamerWorker {
             let pl = &mut state.players[i];
             if pl.status == StreamerStatus::Working && !waiting && windows.iter().all(|w| pl.done.contains(&w.key())) {
                 pl.status = StreamerStatus::Clipped;
+            }
+            if pl.status != StreamerStatus::Working {
+                pl.eta_sec = None;
             }
         }
     }
@@ -1175,6 +1213,7 @@ mod tests {
             manual: true,
             delay_sec: 0.0,
             checking: false,
+            eta_sec: None,
         };
         // Still reading their VOD: wait, download nothing.
         apply_verify(&mut p, &VerifyInfo { verdict: "pending".into(), delay_sec: None });
@@ -1195,6 +1234,21 @@ mod tests {
         }
         let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
         assert!(old.verify.is_none());
+    }
+
+    #[test]
+    fn estimates_the_time_left() {
+        let w = |start: f64, round: u32| Window { start, end: start + 120.0, round, moment: Moment::YouKilled };
+        let windows = vec![w(100.0, 1), w(400.0, 3), w(900.0, 7)];
+        // VOD covers everything: 3 clips at 15 s each.
+        assert_eq!(eta(&windows, &[], 80.0, 99_999.0, 15.0), Some(45));
+        // One done: 2 left.
+        assert_eq!(eta(&windows, &[windows[0].key()], 80.0, 99_999.0, 15.0), Some(30));
+        // Live stream: the last fight ends at 80 + 1020 = 1100 s into the VOD, which has 1000 s so far.
+        assert_eq!(eta(&windows, &[], 80.0, 1000.0, 15.0), Some(100 + 45));
+        // All done: nothing to show.
+        let all: Vec<String> = windows.iter().map(|x| x.key()).collect();
+        assert_eq!(eta(&windows, &all, 80.0, 0.0, 15.0), None);
     }
 
     #[test]
