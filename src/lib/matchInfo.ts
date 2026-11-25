@@ -30,6 +30,7 @@ export function streamerLabel(s: StreamerPlayer): { text: string; tone: "good" |
   if (s.status === "failed" && s.message?.includes("other team")) return { text: "wrong player picked", tone: "bad" };
   switch (s.status) {
     case "working":
+      if (!s.fights) return { text: s.vod?.live ? "live · waits for VOD" : "looking for your fights", tone: "purple" };
       if (s.vod?.live) return { text: `live · waits for VOD (${s.clips}/${s.fights})${eta}`, tone: "purple" };
       return { text: `downloading ${s.clips}/${s.fights}${eta}`, tone: "warn" };
     case "clipped":

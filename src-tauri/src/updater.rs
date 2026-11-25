@@ -229,9 +229,7 @@ async fn tokio_sleep(d: Duration) {
 }
 
 fn game_running() -> bool {
-    let mut p = Procs::new();
-    p.refresh();
-    p.is_running(&procs::game_exe())
+    procs::game_running()
 }
 
 /// Stops FFmpeg / yt-dlp copies started from the app's own folder (or, in

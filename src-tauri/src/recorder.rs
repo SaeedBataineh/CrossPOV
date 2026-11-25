@@ -16,7 +16,7 @@ use crate::{
     audio::AudioPipe,
     clips::{self, ClipInfo, ClipMeta, MY_CLIPS},
     ffmpeg::{self, NoWindow, RecordPlan, VideoEncoder, VideoSource, SEGMENT_SECONDS},
-    procs::{self, Procs},
+    procs,
     settings::{Container, Settings},
 };
 
@@ -229,11 +229,8 @@ impl Recorder {
         } else {
             VideoSource::TestPattern
         };
-        let game = procs::game_exe();
-        let mut procs = Procs::new();
         loop {
-            procs.refresh();
-            let want = always || procs.is_running(&game);
+            let want = always || procs::game_running();
             self.tick(want, &path, detected, source);
             thread::sleep(POLL);
         }

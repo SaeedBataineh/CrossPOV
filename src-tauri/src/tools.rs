@@ -109,7 +109,32 @@ pub fn missing() -> Vec<Tool> {
 
 fn missing_in(tools: &[Tool], root: Option<&Path>) -> Vec<Tool> {
     let Some(root) = root else { return tools.to_vec() };
-    tools.iter().copied().filter(|t| sha256_file(&t.path(root)).as_deref() != Some(t.sha256)).collect()
+    tools.iter().copied().filter(|t| !verified(t, root)).collect()
+}
+
+/// "size modified-time" of a file, to notice if it changed since it was checked.
+fn stamp(path: &Path) -> Option<String> {
+    let m = fs::metadata(path).ok()?;
+    let modified = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some(format!("{} {modified}", m.len()))
+}
+
+/// Is the tool on disk and the exact expected file? The full fingerprint (reading
+/// ~30 MB) is checked once; after that a small note of the file's size and
+/// modified time stands in for it until the file changes.
+fn verified(t: &Tool, root: &Path) -> bool {
+    let path = t.path(root);
+    let note = path.with_file_name(format!("{}.checked", t.name));
+    let Some(now) = stamp(&path) else { return false };
+    if fs::read_to_string(&note).ok().as_deref() == Some(now.as_str()) {
+        return true;
+    }
+    if sha256_file(&path).as_deref() == Some(t.sha256) {
+        let _ = fs::write(&note, &now);
+        return true;
+    }
+    let _ = fs::remove_file(&note);
+    false
 }
 
 /// Download progress, in bytes over all missing tools.
@@ -160,6 +185,9 @@ fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent,
         // Rename into place only once it's complete and checked.
         let _ = fs::remove_file(&path);
         fs::rename(&part, &path).map_err(|e| format!("Couldn't save {}: {e}", tool.name))?;
+        if let Some(now) = stamp(&path) {
+            let _ = fs::write(path.with_file_name(format!("{}.checked", tool.name)), now);
+        }
     }
     remove_old(tools, root);
     Ok(())
@@ -259,6 +287,12 @@ mod tests {
         assert_eq!(fs::read(tool.path(&root)).unwrap(), body);
         assert_eq!(seen, (body.len() as u64, body.len() as u64), "progress reaches the end");
         assert!(missing_in(&[tool], Some(&root)).is_empty());
+        assert!(tool.path(&root).with_file_name("ffmpeg.exe.checked").exists(), "checked once, noted");
+        // Changing the file (another size) is noticed despite the note.
+        fs::write(tool.path(&root), b"swapped").unwrap();
+        assert_eq!(missing_in(&[tool], Some(&root)), vec![tool]);
+        fs::write(tool.path(&root), &body).unwrap();
+        assert!(missing_in(&[tool], Some(&root)).is_empty(), "the right file again: fine");
         assert!(!root.join("ffmpeg").join("0000000000000000").exists(), "old version removed");
         assert!(!root.join("0.1.4").exists(), "old packed-in tools removed");
         // Already there: nothing is downloaded (the server would refuse a second request).

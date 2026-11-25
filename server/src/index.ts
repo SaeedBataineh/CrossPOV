@@ -166,7 +166,27 @@ async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<
     const match: MatchSummary = fromHenrikV4(first);
     return { match };
   });
+  // Start finding streamers and lining up their VODs now, in the background,
+  // so the answer is ready (or nearly) when the app asks a moment later.
+  if (ctx && body.match) ctx.waitUntil(warmStreamers(region, body.match, env, ctx));
   return json(body, 200, LATEST_TTL);
+}
+
+const warmed = new Set<string>();
+
+/** Looks the match's streamers up once, ahead of the app asking. Only for matches that just ended. */
+async function warmStreamers(region: string, match: MatchSummary, env: Env, ctx: ExecutionContext): Promise<void> {
+  const endedAgo = Date.now() - Date.parse(match.startedAt) - match.lengthMs;
+  if (!(endedAgo < 30 * 60_000) || warmed.has(match.id)) return;
+  warmed.add(match.id);
+  if (warmed.size > 500) warmed.clear();
+  try {
+    // The app loads the full match next: keep the one we already have.
+    await cachedData(`match/${match.id.toLowerCase()}`, MATCH_TTL, ctx, async () => match);
+    await streamers(region, match.id, new URL("https://warm.local/"), env, ctx);
+  } catch (err) {
+    console.log(`warm-up for ${match.id} failed: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 async function loadMatch(region: string, id: string, env: Env, ctx?: ExecutionContext): Promise<MatchSummary> {

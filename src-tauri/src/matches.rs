@@ -20,7 +20,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    procs::{self, Procs},
+    procs,
     settings::Settings,
 };
 
@@ -292,16 +292,13 @@ impl MatchWatcher {
     }
 
     fn run(&self) {
-        let game = procs::game_exe();
-        let mut procs = Procs::new();
         let mut was_running = false;
         let mut closed_at: Option<Instant> = None;
         let mut close_checks = 0usize;
         let mut last_check: Option<Instant> = None;
         let mut failures = 0u32;
         loop {
-            procs.refresh();
-            let running = procs.is_running(&game);
+            let running = procs::game_running();
             if running {
                 closed_at = None;
             } else if was_running {

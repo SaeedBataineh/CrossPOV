@@ -11,6 +11,23 @@ pub fn game_exe() -> String {
     std::env::var("CROSSPOV_GAME_EXE").unwrap_or_else(|_| "VALORANT-Win64-Shipping.exe".into())
 }
 
+/// Is the game open? One shared, cached look at the process list for the
+/// whole app (the recorder, the match checker and the streamer downloader all
+/// ask), refreshed at most every 2 s instead of each part scanning on its own.
+pub fn game_running() -> bool {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static SHARED: OnceLock<Mutex<(Procs, Option<Instant>, bool)>> = OnceLock::new();
+    let shared = SHARED.get_or_init(|| Mutex::new((Procs::new(), None, false)));
+    let mut g = shared.lock().unwrap_or_else(|e| e.into_inner());
+    if g.1.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+        g.0.refresh();
+        g.2 = g.0.is_running(&game_exe());
+        g.1 = Some(Instant::now());
+    }
+    g.2
+}
+
 pub struct Procs {
     /// None if the OS refused to give us a process list (very unlikely).
     sys: Option<System>,

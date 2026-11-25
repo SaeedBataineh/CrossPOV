@@ -21,7 +21,7 @@ use crate::{
     clips::{self, ClipInfo, ClipMeta, STREAMER_CLIPS},
     ffmpeg::{self, NoWindow},
     matches::{find_me, MatchStore, MatchSummary},
-    procs::{self, Procs},
+    procs,
     settings::{DownloadQuality, Settings},
 };
 
@@ -613,6 +613,27 @@ pub fn player_label(player: &crate::matches::MatchPlayer, me: Option<&crate::mat
     format!("{side} · {}", player.agent)
 }
 
+/// Settles streamers that can't make progress, so none shows "downloading 0/0"
+/// for ever: no fights with you means nothing to clip, and a match that ran out
+/// of time keeps what it got.
+pub fn settle_stuck(state: &mut MatchStreamers, me_known: bool) {
+    for p in state.players.iter_mut().filter(|p| p.status == StreamerStatus::Working && !p.checking) {
+        if me_known && p.fights == 0 {
+            p.status = StreamerStatus::NoFights;
+        } else if state.finished {
+            if p.clips > 0 {
+                p.status = StreamerStatus::Clipped;
+            } else {
+                p.status = StreamerStatus::Failed;
+                p.message = Some("Their VOD wasn't ready in time.".into());
+            }
+        }
+        if p.status != StreamerStatus::Working {
+            p.eta_sec = None;
+        }
+    }
+}
+
 /// Merges a fresh server answer into what we already know for a match.
 pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchSummary, me: Option<&str>, s: &Settings) {
     for hit in hits {
@@ -674,6 +695,8 @@ pub fn eta(windows: &[Window], done: &[String], shift: f64, available: f64, per_
 /// Used when a VOD's shift couldn't be measured (scanner down, scoreboard
 /// hidden): the match clock starts about at agent select, so VODs run this
 /// much late plus the streamer's own delay. Measured: 74 and 87 s.
+/// Streamers downloaded at the same time.
+const PARALLEL_STREAMERS: usize = 3;
 const FALLBACK_SHIFT_S: f64 = 75.0;
 
 // ---------- worker ----------
@@ -704,6 +727,8 @@ pub struct StreamerWorker {
     busy: Arc<Mutex<()>>,
     /// Average seconds one clip took to save on this PC, for time estimates.
     clip_secs: Arc<Mutex<f64>>,
+    /// Matches with nothing left to do: skipped without reading their file.
+    settled: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl StreamerWorker {
@@ -717,6 +742,7 @@ impl StreamerWorker {
             listener: Arc::new(listener),
             busy: Arc::new(Mutex::new(())),
             clip_secs: Arc::new(Mutex::new(FIRST_CLIP_GUESS_S)),
+            settled: Arc::new(Mutex::new(Default::default())),
         }
     }
 
@@ -738,15 +764,13 @@ impl StreamerWorker {
     }
 
     fn run(&self) {
-        let game = procs::game_exe();
-        let mut procs = Procs::new();
         loop {
-            procs.refresh();
             let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
             // Without "grab right after the match", wait until the game is closed.
-            let may_download = s.grab_after_match || !procs.is_running(&game);
+            let may_download = s.grab_after_match || !procs::game_running();
             if s.streamer_auto {
-                for m in self.matches.list() {
+                let settled = self.settled.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                for m in self.matches.list().into_iter().filter(|m| !settled.contains(&m.id)) {
                     if let Err(e) = self.process(&m, false, may_download) {
                         eprintln!("streamer clips for {}: {e}", m.id);
                     }
@@ -842,7 +866,16 @@ impl StreamerWorker {
         // A VOD still being lined up keeps the match going however old it is
         // (e.g. an old match checked again by hand), or it would never finish.
         let lining_up = state.players.iter().any(|p| p.checking);
+        if force {
+            self.settled.lock().unwrap_or_else(|e| e.into_inner()).remove(&m.id);
+        }
         if state.finished && !force && !lining_up {
+            if state.players.iter().any(|p| p.status == StreamerStatus::Working) {
+                settle_stuck(&mut state, find_me(m, &s.riot_id).is_some());
+                self.store.put(&state);
+                (self.listener)(&state, None);
+            }
+            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
             return Ok(());
         }
         let started = time::OffsetDateTime::parse(&m.started_at, &time::format_description::well_known::Rfc3339)
@@ -851,7 +884,10 @@ impl StreamerWorker {
         let window_ms = u64::from(s.vod_wait_hours) * 3_600_000;
         if !force && !lining_up && now_ms().saturating_sub(started) > window_ms + m.length_ms {
             state.finished = true;
+            let me_known = find_me(m, &s.riot_id).is_some();
+            settle_stuck(&mut state, me_known);
             self.store.put(&state);
+            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
             return Ok(());
         }
         let me = find_me(m, &s.riot_id).map(|p| p.puuid.clone());
@@ -903,6 +939,13 @@ impl StreamerWorker {
             }
         }
 
+        // Count fights again: an older answer may have come in before your Riot ID matched.
+        if let Some(me) = me.as_deref() {
+            for p in state.players.iter_mut().filter(|p| p.status == StreamerStatus::Working) {
+                p.fights = fight_windows(m, me, &p.puuid, &s).len() as u32;
+            }
+        }
+        settle_stuck(&mut state, me.is_some());
         // Done when every streamer is settled and no VOD is still growing.
         // Most matches have no streamers at all: two clean checks (10 min
         // apart) are enough, so they aren't re-checked for an hour.
@@ -911,6 +954,10 @@ impl StreamerWorker {
         let all_done = settled && state.checked_ms.is_some() && state.error.is_none() && now_ms().saturating_sub(started) > m.length_ms + 3_600_000;
         if nobody_streaming || all_done {
             state.finished = true;
+            settle_stuck(&mut state, me.is_some());
+        }
+        if state.finished && !state.players.iter().any(|p| p.checking) {
+            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
         }
         self.store.put(&state);
         (self.listener)(&state, None);
@@ -922,128 +969,159 @@ impl StreamerWorker {
             state.error = Some("yt-dlp or FFmpeg is missing. Reinstall CrossPOV.".into());
             return;
         };
+        let todo: Vec<usize> = (0..state.players.len())
+            .filter(|&i| state.players[i].status == StreamerStatus::Working && !state.players[i].checking && state.players[i].vod.is_some())
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        // Several streamers at once: each clip waits mostly on the network, so
+        // a few in parallel finish much sooner without loading the PC.
+        let shared = Mutex::new(std::mem::take(state));
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..todo.len().min(PARALLEL_STREAMERS) {
+                scope.spawn(|| loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(&i) = todo.get(n) else { break };
+                    self.download_player(i, m, me, s, &shared, &ytdlp, &ff);
+                });
+            }
+        });
+        *state = shared.into_inner().unwrap_or_else(|e| e.into_inner());
+    }
+
+    /// Clips one streamer's side of your fights. Holds the lock only to read
+    /// or record progress, never while downloading.
+    #[allow(clippy::too_many_arguments)]
+    fn download_player(&self, i: usize, m: &MatchSummary, me: &str, s: &Settings, shared: &Mutex<MatchStreamers>, ytdlp: &Path, ff: &Path) {
+        let lock = || shared.lock().unwrap_or_else(|e| e.into_inner());
         let root = self.clip_root.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let out_dir = root.join(STREAMER_CLIPS);
-        for i in 0..state.players.len() {
-            let p = state.players[i].clone();
-            if p.status != StreamerStatus::Working || p.checking {
+        let p = lock().players[i].clone();
+        let Some(vod) = p.vod.clone() else { return };
+        let windows = fight_windows(m, me, &p.puuid, s);
+        if windows.is_empty() {
+            lock().players[i].status = StreamerStatus::NoFights;
+            return;
+        }
+        let mut waiting = false;
+        // Fast path: the VOD's chunk playlist, asked of yt-dlp once per streamer.
+        let mut fast_playlist: Option<Result<String, String>> = None;
+        let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
+        let per_clip = *self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
+        {
+            let mut st = lock();
+            st.players[i].eta_sec = eta(&windows, &st.players[i].done, vod.offset_sec + late, vod.available_sec(now_ms()), per_clip);
+            (self.listener)(&st, None);
+        }
+        for w in &windows {
+            if p.done.contains(&w.key()) {
                 continue;
             }
-            let Some(vod) = p.vod.clone() else { continue };
-            let windows = fight_windows(m, me, &p.puuid, s);
-            if windows.is_empty() {
-                state.players[i].status = StreamerStatus::NoFights;
+            let clip_started = std::time::Instant::now();
+            crate::trail(&format!("streamer clip: {} round {}", p.channel.login, w.round + 1));
+            // Agent select and their broadcast delay put each moment this much later in the VOD.
+            let shift = vod.offset_sec + late;
+            let (from, to) = (shift + w.start, shift + w.end);
+            if from < 0.0 {
+                continue; // Moment happened before their stream began.
+            }
+            if to > vod.available_sec(now_ms()) {
+                waiting = true; // VOD hasn't caught up yet (still live / processing).
                 continue;
             }
-            let mut waiting = false;
-            // Fast path: the VOD's chunk playlist, asked of yt-dlp once per streamer.
-            let mut fast_playlist: Option<Result<String, String>> = None;
-            let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
-            let per_clip = *self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
-            state.players[i].eta_sec = eta(&windows, &state.players[i].done, vod.offset_sec + late, vod.available_sec(now_ms()), per_clip);
-            (self.listener)(state, None);
-            for w in &windows {
-                if state.players[i].done.contains(&w.key()) {
-                    continue;
+            if !is_twitch_vod_url(&vod.url) {
+                let mut st = lock();
+                st.players[i].status = StreamerStatus::Failed;
+                st.players[i].message = Some("The server sent an unexpected video link, so nothing was downloaded.".into());
+                break;
+            }
+            let _ = fs::create_dir_all(&out_dir);
+            let short = file_safe(&m.id, 8);
+            let stem = out_dir.join(format!("{}_R{}_{}_{}", file_safe(&p.channel.login, 40), w.round + 1, w.moment.slug(), short));
+            let clip_path = stem.with_extension("mp4");
+            let playlist = fast_playlist.get_or_insert_with(|| fastvod::playlist_url(ytdlp, &vod.url, ytdlp_format(s.download_quality)));
+            let slow = || download(ytdlp, ff, ytdlp_args(&vod.url, from, to, s.download_quality, ff, &stem));
+            let result = match playlist {
+                // The fast way; if a chunk or the cut fails, the slower way, one chunk at a time.
+                Ok(pl) => fastvod::fetch_clip(&agent(), pl, from, to, ff, &clip_path).or_else(|e| {
+                    eprintln!("fast download failed ({e}), using yt-dlp");
+                    slow()
+                }),
+                // yt-dlp couldn't get the VOD: sub-only or deleted would fail the slow way too.
+                Err(e) => match classify_error(e) {
+                    err @ (DownloadError::SubOnly | DownloadError::Gone) => Err(err),
+                    _ => slow(),
+                },
+            };
+            match result {
+                Ok(()) => {
+                    let clip = stem.with_extension("mp4");
+                    let thumb = clips::thumb_path(&root, &clip);
+                    if let Some(dir) = thumb.parent() {
+                        let _ = fs::create_dir_all(dir);
+                    }
+                    let _ = Command::new(ff)
+                        .args(ffmpeg::thumbnail_args(&clip, &thumb))
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .no_window()
+                        .status();
+                    let meta = ClipMeta {
+                        duration_sec: Some(to - from),
+                        streamer: Some(p.channel.display_name.clone()),
+                        round: Some(w.round + 1),
+                        moment: Some(w.moment.label().into()),
+                        map: Some(m.map.clone()),
+                    };
+                    clips::write_meta(&root, &clip, &meta);
+                    // Learn how long a clip takes here, for the next estimates.
+                    let took = clip_started.elapsed().as_secs_f64();
+                    let avg = {
+                        let mut a = self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
+                        *a = *a * 0.6 + took * 0.4;
+                        *a
+                    };
+                    let info = clips::list(&root).into_iter().find(|c| c.path == clip.to_string_lossy());
+                    let mut st = lock();
+                    let pl = &mut st.players[i];
+                    pl.done.push(w.key());
+                    pl.clips += 1;
+                    pl.eta_sec = eta(&windows, &pl.done, vod.offset_sec + late, vod.available_sec(now_ms()), avg);
+                    if let Some(info) = info {
+                        (self.listener)(&st, Some(&info));
+                    }
                 }
-                let clip_started = std::time::Instant::now();
-                crate::trail(&format!("streamer clip: {} round {}", p.channel.login, w.round + 1));
-                // Agent select and their broadcast delay put each moment this much later in the VOD.
-                let shift = vod.offset_sec + late;
-                let (from, to) = (shift + w.start, shift + w.end);
-                if from < 0.0 {
-                    continue; // Moment happened before their stream began.
-                }
-                if to > vod.available_sec(now_ms()) {
-                    waiting = true; // VOD hasn't caught up yet (still live / processing).
-                    continue;
-                }
-                if !is_twitch_vod_url(&vod.url) {
-                    state.players[i].status = StreamerStatus::Failed;
-                    state.players[i].message = Some("The server sent an unexpected video link, so nothing was downloaded.".into());
+                Err(DownloadError::SubOnly) => {
+                    lock().players[i].status = StreamerStatus::SubOnly;
                     break;
                 }
-                let _ = fs::create_dir_all(&out_dir);
-                let short = file_safe(&m.id, 8);
-                let stem = out_dir.join(format!("{}_R{}_{}_{}", file_safe(&p.channel.login, 40), w.round + 1, w.moment.slug(), short));
-                let clip_path = stem.with_extension("mp4");
-                let playlist = fast_playlist.get_or_insert_with(|| fastvod::playlist_url(&ytdlp, &vod.url, ytdlp_format(s.download_quality)));
-                let slow = || download(&ytdlp, &ff, ytdlp_args(&vod.url, from, to, s.download_quality, &ff, &stem));
-                let result = match playlist {
-                    // The fast way; if a chunk or the cut fails, the slower way, one chunk at a time.
-                    Ok(pl) => fastvod::fetch_clip(&agent(), pl, from, to, &ff, &clip_path).or_else(|e| {
-                        eprintln!("fast download failed ({e}), using yt-dlp");
-                        slow()
-                    }),
-                    // yt-dlp couldn't get the VOD: sub-only or deleted would fail the slow way too.
-                    Err(e) => match classify_error(e) {
-                        err @ (DownloadError::SubOnly | DownloadError::Gone) => Err(err),
-                        _ => slow(),
-                    },
-                };
-                match result {
-                    Ok(()) => {
-                        let clip = stem.with_extension("mp4");
-                        let thumb = clips::thumb_path(&root, &clip);
-                        if let Some(dir) = thumb.parent() {
-                            let _ = fs::create_dir_all(dir);
-                        }
-                        let _ = Command::new(&ff)
-                            .args(ffmpeg::thumbnail_args(&clip, &thumb))
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null())
-                            .no_window()
-                            .status();
-                        let meta = ClipMeta {
-                            duration_sec: Some(to - from),
-                            streamer: Some(p.channel.display_name.clone()),
-                            round: Some(w.round + 1),
-                            moment: Some(w.moment.label().into()),
-                            map: Some(m.map.clone()),
-                        };
-                        clips::write_meta(&root, &clip, &meta);
-                        // Learn how long a clip takes here, for the next estimates.
-                        let took = clip_started.elapsed().as_secs_f64();
-                        let avg = {
-                            let mut a = self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
-                            *a = *a * 0.6 + took * 0.4;
-                            *a
-                        };
-                        let pl = &mut state.players[i];
-                        pl.done.push(w.key());
-                        pl.clips += 1;
-                        pl.eta_sec = eta(&windows, &pl.done, vod.offset_sec + late, vod.available_sec(now_ms()), avg);
-                        if let Some(info) = clips::list(&root).into_iter().find(|c| c.path == clip.to_string_lossy()) {
-                            (self.listener)(state, Some(&info));
-                        }
+                Err(DownloadError::Gone) => {
+                    let mut st = lock();
+                    st.players[i].status = StreamerStatus::Failed;
+                    st.players[i].message = Some("The VOD isn't available any more.".into());
+                    break;
+                }
+                Err(DownloadError::Other(e)) => {
+                    let mut st = lock();
+                    let pl = &mut st.players[i];
+                    pl.failures += 1;
+                    pl.message = Some(e);
+                    if pl.failures >= MAX_FAILURES {
+                        pl.status = StreamerStatus::Failed;
                     }
-                    Err(DownloadError::SubOnly) => {
-                        state.players[i].status = StreamerStatus::SubOnly;
-                        break;
-                    }
-                    Err(DownloadError::Gone) => {
-                        state.players[i].status = StreamerStatus::Failed;
-                        state.players[i].message = Some("The VOD isn't available any more.".into());
-                        break;
-                    }
-                    Err(DownloadError::Other(e)) => {
-                        let pl = &mut state.players[i];
-                        pl.failures += 1;
-                        pl.message = Some(e);
-                        if pl.failures >= MAX_FAILURES {
-                            pl.status = StreamerStatus::Failed;
-                        }
-                        break;
-                    }
+                    break;
                 }
             }
-            let pl = &mut state.players[i];
-            if pl.status == StreamerStatus::Working && !waiting && windows.iter().all(|w| pl.done.contains(&w.key())) {
-                pl.status = StreamerStatus::Clipped;
-            }
-            if pl.status != StreamerStatus::Working {
-                pl.eta_sec = None;
-            }
+        }
+        let mut st = lock();
+        let pl = &mut st.players[i];
+        if pl.status == StreamerStatus::Working && !waiting && windows.iter().all(|w| pl.done.contains(&w.key())) {
+            pl.status = StreamerStatus::Clipped;
+        }
+        if pl.status != StreamerStatus::Working {
+            pl.eta_sec = None;
         }
     }
 }
@@ -1345,6 +1423,36 @@ mod tests {
         fs::write(dir.join(format!("{}.streamers.json", m.id)), br#"{"matchId":"x","checkedMs":1,"error":null,"players":[],"finished":false}"#).unwrap();
         assert_eq!(store.get(&m.id).checks, 0);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stuck_streamers_are_settled() {
+        let mut state = MatchStreamers::default();
+        let mk = |puuid: &str, fights: u32, clips: u32| PlayerState {
+            puuid: puuid.into(),
+            name: puuid.into(),
+            channel: Channel { id: "1".into(), login: puuid.into(), display_name: puuid.into() },
+            status: StreamerStatus::Working,
+            vod: None,
+            clips,
+            fights,
+            done: Vec::new(),
+            failures: 0,
+            message: None,
+            manual: false,
+            delay_sec: 0.0,
+            checking: false,
+            eta_sec: Some(30),
+        };
+        state.players = vec![mk("a", 0, 0), mk("b", 2, 1), mk("c", 2, 0)];
+        settle_stuck(&mut state, true);
+        assert_eq!(state.players[0].status, StreamerStatus::NoFights);
+        assert_eq!(state.players[1].status, StreamerStatus::Working);
+        state.finished = true;
+        settle_stuck(&mut state, true);
+        assert_eq!(state.players[1].status, StreamerStatus::Clipped);
+        assert_eq!(state.players[2].status, StreamerStatus::Failed);
+        assert!(state.players.iter().all(|p| p.eta_sec.is_none()));
     }
 
     #[test]

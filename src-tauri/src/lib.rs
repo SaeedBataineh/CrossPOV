@@ -280,7 +280,7 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     }
     let _ = writeln!(out, "\n[Streamer clips] auto: {}, before/after: {}/{} s, quality: {:?}", s.streamer_auto, s.seconds_before, s.seconds_after, s.download_quality);
     for ms in state.streamers.all().into_iter().filter(|x| !x.players.is_empty() || x.error.is_some()).take(8) {
-        let _ = write!(out, "match {}…:", &ms.match_id.chars().take(8).collect::<String>());
+        let _ = write!(out, "match {}…:", ms.match_id.chars().take(8).collect::<String>());
         if let Some(e) = &ms.error {
             let _ = write!(out, " error: {e};");
         }
