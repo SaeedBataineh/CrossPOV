@@ -94,33 +94,44 @@ pub fn list(root: &Path) -> Vec<ClipInfo> {
     for (dir, kind) in [(MY_CLIPS, ClipKind::Mine), (STREAMER_CLIPS, ClipKind::Theirs)] {
         let Ok(entries) = fs::read_dir(root.join(dir)) else { continue };
         for entry in entries.flatten() {
-            let path = entry.path();
             let Ok(meta) = entry.metadata() else { continue };
-            if !meta.is_file() || !is_video(&path) {
-                continue;
+            if let Some(c) = build(root, entry.path(), kind, &meta) {
+                out.push(c);
             }
-            let thumb = thumb_path(root, &path);
-            let details: ClipMeta = fs::read(meta_path(root, &path))
-                .ok()
-                .and_then(|b| serde_json::from_slice(&b).ok())
-                .unwrap_or_default();
-            out.push(ClipInfo {
-                name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
-                path: path.to_string_lossy().into_owned(),
-                kind,
-                size_bytes: meta.len(),
-                created_ms: modified_ms(&meta),
-                duration_sec: details.duration_sec,
-                thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
-                streamer: details.streamer,
-                round: details.round,
-                moment: details.moment,
-                map: details.map,
-            });
         }
     }
     out.sort_by_key(|c| std::cmp::Reverse(c.created_ms));
     out
+}
+
+/// One clip's details, without reading the rest of the folder.
+pub fn info(root: &Path, clip: &Path, kind: ClipKind) -> Option<ClipInfo> {
+    let meta = fs::metadata(clip).ok()?;
+    build(root, clip.to_path_buf(), kind, &meta)
+}
+
+fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Option<ClipInfo> {
+    if !meta.is_file() || !is_video(&path) {
+        return None;
+    }
+    let thumb = thumb_path(root, &path);
+    let details: ClipMeta = fs::read(meta_path(root, &path))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    Some(ClipInfo {
+        name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
+        kind,
+        size_bytes: meta.len(),
+        created_ms: modified_ms(meta),
+        duration_sec: details.duration_sec,
+        thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+        streamer: details.streamer,
+        round: details.round,
+        moment: details.moment,
+        map: details.map,
+    })
 }
 
 /// Only paths of clips inside the clip folder may be deleted or opened.
@@ -174,6 +185,22 @@ mod tests {
         fs::create_dir_all(dir.join(MY_CLIPS)).unwrap();
         fs::create_dir_all(dir.join(STREAMER_CLIPS)).unwrap();
         dir
+    }
+
+    #[test]
+    fn one_clip_matches_the_full_list() {
+        let root = temp_root("info");
+        let clip = root.join(STREAMER_CLIPS).join("st_R3_kill_ab.mp4");
+        fs::write(&clip, b"x").unwrap();
+        write_meta(&root, &clip, &ClipMeta { streamer: Some("St".into()), round: Some(3), ..Default::default() });
+        fs::write(root.join(STREAMER_CLIPS).join("notes.txt"), b"x").unwrap();
+        let one = info(&root, &clip, ClipKind::Theirs).unwrap();
+        let all = list(&root);
+        assert_eq!(all.len(), 1);
+        assert_eq!((&all[0].path, all[0].size_bytes, all[0].round), (&one.path, one.size_bytes, one.round));
+        assert_eq!(one.streamer.as_deref(), Some("St"));
+        assert!(info(&root, &root.join(STREAMER_CLIPS).join("notes.txt"), ClipKind::Theirs).is_none());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

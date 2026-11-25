@@ -94,7 +94,7 @@ pub fn playlist_url(ytdlp: &Path, vod_url: &str, format: &str) -> Result<String,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .no_window()
+        .background()
         .output()
         .map_err(|e| format!("couldn't run yt-dlp: {e}"))?;
     let url = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string();
@@ -164,7 +164,7 @@ pub fn fetch_clip(agent: &ureq::Agent, playlist: &str, from: f64, to: f64, ffmpe
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .no_window()
+        .background()
         .output();
     let _ = fs::remove_file(&joined);
     let result = result.map_err(|e| format!("couldn't run FFmpeg: {e}"))?;

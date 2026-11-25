@@ -15,17 +15,22 @@ pub fn game_exe() -> String {
 /// whole app (the recorder, the match checker and the streamer downloader all
 /// ask), refreshed at most every 2 s instead of each part scanning on its own.
 pub fn game_running() -> bool {
+    shared(|p| p.is_running(&game_exe()))
+}
+
+/// Runs `f` on the app's shared process list, re-read (names and parents
+/// only) if it's over 2 s old. The audio mixer uses it too, to spot apps.
+pub fn shared<T>(f: impl FnOnce(&Procs) -> T) -> T {
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
-    static SHARED: OnceLock<Mutex<(Procs, Option<Instant>, bool)>> = OnceLock::new();
-    let shared = SHARED.get_or_init(|| Mutex::new((Procs::new(), None, false)));
+    static SHARED: OnceLock<Mutex<(Procs, Option<Instant>)>> = OnceLock::new();
+    let shared = SHARED.get_or_init(|| Mutex::new((Procs { sys: System::new().ok() }, None)));
     let mut g = shared.lock().unwrap_or_else(|e| e.into_inner());
     if g.1.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
-        g.0.refresh();
-        g.2 = g.0.is_running(&game_exe());
+        g.0.refresh_light();
         g.1 = Some(Instant::now());
     }
-    g.2
+    f(&g.0)
 }
 
 pub struct Procs {
@@ -46,6 +51,14 @@ impl Procs {
         if let Some(sys) = self.sys.as_mut() {
             let kind = ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet);
             sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+        }
+    }
+
+    /// Names and parents only: skips opening each new process to find its
+    /// file path, which is most of the cost of a scan.
+    pub fn refresh_light(&mut self) {
+        if let Some(sys) = self.sys.as_mut() {
+            sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
         }
     }
 

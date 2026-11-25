@@ -56,6 +56,10 @@ pub fn which(name: &str) -> Option<PathBuf> {
 /// Stops a console window flashing up for every FFmpeg run on Windows.
 pub trait NoWindow {
     fn no_window(&mut self) -> &mut Self;
+    /// No window, and "below normal" priority, so background work (streamer
+    /// downloads, thumbnails) never takes CPU from the game. Programs it starts
+    /// (yt-dlp's FFmpeg) inherit it.
+    fn background(&mut self) -> &mut Self;
 }
 
 impl NoWindow for Command {
@@ -67,6 +71,17 @@ impl NoWindow for Command {
     }
     #[cfg(not(windows))]
     fn no_window(&mut self) -> &mut Self {
+        self
+    }
+    #[cfg(windows)]
+    fn background(&mut self) -> &mut Self {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        self.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+    }
+    #[cfg(not(windows))]
+    fn background(&mut self) -> &mut Self {
         self
     }
 }

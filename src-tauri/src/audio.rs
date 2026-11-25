@@ -24,14 +24,17 @@ use cpal::{
 
 use crate::{
     ffmpeg::AUDIO_RATE,
-    procs::{self, Procs},
+    procs,
     settings::{AudioMode, Settings},
 };
 
 /// At most this much audio is queued per source before old samples are
 /// dropped, which bounds latency if a device delivers in bursts.
 const MAX_QUEUE_SECONDS: f64 = 0.3;
-const TICK: Duration = Duration::from_millis(10);
+/// How often the mixer wakes. Each wake writes all audio due since the last
+/// one, so a longer tick only means fewer, larger writes (latency is bounded
+/// by MAX_QUEUE_SECONDS anyway).
+const TICK: Duration = Duration::from_millis(20);
 /// How often to look for apps that opened or closed.
 const RESCAN: Duration = Duration::from_secs(3);
 
@@ -281,7 +284,6 @@ impl AudioPipe {
                 let mut apps: Vec<AppCapture> = Vec::new();
                 let mut failed: Vec<u32> = Vec::new();
                 let mut fell_back = false;
-                let mut procs = Procs::new();
                 let mut last_scan: Option<Instant> = None;
 
                 let started = Instant::now();
@@ -292,10 +294,9 @@ impl AudioPipe {
                     // Every few seconds, pick up apps that started or stopped.
                     if !per_app.is_empty() && last_scan.is_none_or(|t| t.elapsed() >= RESCAN) {
                         last_scan = Some(Instant::now());
-                        procs.refresh();
                         let mut live: Vec<u32> = Vec::new();
                         for (exe, vol) in &per_app {
-                            for pid in procs.root_pids(exe) {
+                            for pid in procs::shared(|p| p.root_pids(exe)) {
                                 live.push(pid);
                                 if apps.iter().any(|a| a.pid == pid) || failed.contains(&pid) {
                                     continue;

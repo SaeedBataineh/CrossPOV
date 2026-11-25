@@ -383,7 +383,7 @@ fn download(ytdlp: &Path, _ffmpeg: &Path, args: Vec<String>) -> Result<(), Downl
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .no_window()
+        .background()
         .output()
         .map_err(|e| DownloadError::Other(format!("couldn't run yt-dlp: {e}")))?;
     if out.status.success() {
@@ -1066,7 +1066,7 @@ impl StreamerWorker {
                         .args(ffmpeg::thumbnail_args(&clip, &thumb))
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
-                        .no_window()
+                        .background()
                         .status();
                     let meta = ClipMeta {
                         duration_sec: Some(to - from),
@@ -1083,7 +1083,7 @@ impl StreamerWorker {
                         *a = *a * 0.6 + took * 0.4;
                         *a
                     };
-                    let info = clips::list(&root).into_iter().find(|c| c.path == clip.to_string_lossy());
+                    let info = clips::info(&root, &clip, clips::ClipKind::Theirs);
                     let mut st = lock();
                     let pl = &mut st.players[i];
                     pl.done.push(w.key());
