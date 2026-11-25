@@ -71,6 +71,149 @@ def frame_at(playlist: str, seconds: float, ffmpeg: str) -> Image.Image | None:
     return Image.open(io.BytesIO(out.stdout)).convert("RGB").resize((W, H))
 
 
+def _band_box() -> tuple[int, int, int, int]:
+    return (int(hud.BAND[0] * W), int(hud.BAND[1] * H), int(hud.BAND[2] * W), int(hud.BAND[3] * H))
+
+
+def read_band(band: Image.Image) -> tuple[int, int] | None:
+    """The score in a scoreboard strip (what VodFrames hands out)."""
+    got = hud.read_scores(band)
+    if not got or got[2] < hud.MIN_CONFIDENCE:
+        return None
+    return int(got[0]), int(got[1])
+
+
+# ---------- fast frames ----------
+
+FPS = 2  # scoreboard strips kept per second of video: plenty to pin a score change to a second
+
+
+@dataclass
+class Segment:
+    start: float
+    duration: float
+    url: str
+
+
+def parse_playlist(text: str, base: str) -> tuple[list[Segment], str | None]:
+    """The chunks of an HLS media playlist with their start times, and the init chunk (fMP4) if any."""
+    from urllib.parse import urljoin
+
+    segs: list[Segment] = []
+    init = None
+    t, dur = 0.0, None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#EXTINF:"):
+            try:
+                dur = float(line[8:].split(",")[0])
+            except ValueError:
+                dur = None
+        elif line.startswith("#EXT-X-MAP:") and 'URI="' in line:
+            init = urljoin(base, line.split('URI="', 1)[1].split('"', 1)[0])
+        elif line and not line.startswith("#") and dur is not None:
+            segs.append(Segment(t, dur, urljoin(base, line)))
+            t += dur
+            dur = None
+    return segs, init
+
+
+class VodFrames:
+    """Scoreboard strips from one VOD, fast: the chunk list is read once, and
+    each 10-second chunk is downloaded and decoded once (by one FFmpeg run,
+    cropped to the scoreboard inside FFmpeg), keeping a strip every half
+    second. Nearby moments then cost nothing. Thread-safe; if anything about
+    the playlist is unexpected it falls back to one FFmpeg run per frame."""
+
+    def __init__(self, playlist: str, ffmpeg: str, session=None):
+        import threading
+
+        import requests
+
+        self.playlist, self.ffmpeg = playlist, ffmpeg
+        self.session = session or requests.Session()
+        self.lock = threading.Lock()
+        self.chunks: dict[int, object] = {}  # index -> list of strips, or an Event while loading
+        self.segments: list[Segment] = []
+        self.init: bytes | None = None
+        try:
+            r = self.session.get(playlist, timeout=20)
+            if r.ok:
+                self.segments, init_url = parse_playlist(r.text, playlist)
+                if init_url:
+                    ir = self.session.get(init_url, timeout=20)
+                    self.init = ir.content if ir.ok else None
+                    if self.init is None:
+                        self.segments = []
+        except Exception:
+            self.segments = []
+
+    def grab(self, _playlist: str, seconds: float, _ffmpeg: str = "") -> Image.Image | None:
+        """Same shape as frame_at, but returns just the scoreboard strip."""
+        if not self.segments:
+            img = frame_at(self.playlist, seconds, self.ffmpeg)
+            return img.crop(_band_box()) if img is not None else None
+        i = self._index(seconds)
+        if i is None:
+            return None
+        strips = self._chunk(i)
+        if not strips:
+            return None
+        k = int((seconds - self.segments[i].start) * FPS)
+        return strips[max(0, min(k, len(strips) - 1))]
+
+    def _index(self, seconds: float) -> int | None:
+        import bisect
+
+        if seconds < 0:
+            return None
+        i = bisect.bisect_right([s.start for s in self.segments], seconds) - 1
+        if i < 0 or seconds >= self.segments[i].start + self.segments[i].duration:
+            return None
+        return i
+
+    def _chunk(self, i: int) -> list[Image.Image]:
+        import threading
+
+        with self.lock:
+            got = self.chunks.get(i)
+            if got is None:
+                self.chunks[i] = ev = threading.Event()
+                mine = True
+            else:
+                mine = False
+        if not mine:
+            if isinstance(got, threading.Event):
+                got.wait(90)
+                got = self.chunks.get(i)
+            return got if isinstance(got, list) else []
+        strips = self._decode(i)
+        with self.lock:
+            self.chunks[i] = strips
+        ev.set()
+        return strips
+
+    def _decode(self, i: int) -> list[Image.Image]:
+        x0, y0, x1, y1 = _band_box()
+        w, h = x1 - x0, y1 - y0
+        try:
+            r = self.session.get(self.segments[i].url, timeout=30)
+            if not r.ok or not r.content:
+                return []
+            data = (self.init or b"") + r.content
+            out = subprocess.run(
+                [self.ffmpeg, "-v", "error", "-i", "pipe:0",
+                 "-vf", f"fps={FPS}:round=down,scale={W}:{H},crop={w}:{h}:{x0}:{y0}",
+                 "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                input=data, capture_output=True, timeout=60,
+            )
+        except Exception:
+            return []
+        size = w * h * 3
+        raw = out.stdout
+        return [Image.frombytes("RGB", (w, h), raw[o:o + size]) for o in range(0, len(raw) - size + 1, size)]
+
+
 def read_frame(img: Image.Image) -> tuple[int, int] | None:
     x0, y0, x1, y1 = (int(hud.BAND[0] * W), int(hud.BAND[1] * H), int(hud.BAND[2] * W), int(hud.BAND[3] * H))
     got = hud.read_scores(img.crop((x0, y0, x1, y1)))
@@ -100,11 +243,18 @@ def verify(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str
         return Verdict(False, reason="match too short to check")
     best = Verdict(False, reason="scores in the VOD don't match")
     fits: list[Verdict] = []
+    from concurrent.futures import ThreadPoolExecutor
+
+    def score_at(t: float):
+        img = grab(playlist, t, ffmpeg)
+        return read(img) if img is not None else None
+
+    pool = ThreadPoolExecutor(max_workers=len(points))
     for delay in DELAYS:
         agreed = checked = 0
-        for game_ms, expected in points:
-            img = grab(playlist, offset_s + game_ms / 1000 + delay, ffmpeg)
-            got = read(img) if img is not None else None
+        # One delay's moments at once; the next delay only if still needed.
+        scores = list(pool.map(score_at, [offset_s + game_ms / 1000 + delay for game_ms, _ in points]))
+        for (_, expected), got in zip(points, scores):
             if got is None:
                 continue  # scoreboard hidden at that moment (menu, overlay): no evidence either way
             checked += 1
@@ -116,6 +266,7 @@ def verify(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str
         elif (agreed, checked) > (best.agreed, best.checked):
             # Kept even when nothing agreed: "4 read, 0 matched" means another game, not "couldn't read".
             best = Verdict(False, delay, checked, agreed, "only some scores matched" if agreed else "scores don't match")
+    pool.shutdown(wait=False)
     if fits:
         # A score holds for a whole round, so a range of delays fits: the true one is near its middle.
         mid = fits[len(fits) // 2]

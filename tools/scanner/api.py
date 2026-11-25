@@ -154,7 +154,7 @@ class Matcher:
 def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
     """verify_stream for real: find the streamer's VOD that covers the match and read it."""
     from poc import token
-    from verify import ffmpeg_path, measure_shift, playlist_url, verify
+    from verify import VodFrames, ffmpeg_path, measure_shift, playlist_url, read_band, verify
 
     ffmpeg = ffmpeg_path()
     session = requests.Session()
@@ -185,10 +185,12 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
         playlist = playlist_url(v["url"], ytdlp)
         if not playlist:
             return None
-        verdict = verify(playlist, offset, rounds, teams, team, ffmpeg)
+        frames = VodFrames(playlist, ffmpeg)  # shared by both steps: chunks already read are free
+        fast = {"grab": frames.grab, "read": read_band}
+        verdict = verify(playlist, offset, rounds, teams, team, ffmpeg, **fast)
         if not verdict.ok:
             return None
-        shift = measure_shift(playlist, offset, rounds, teams, team, list(events), ffmpeg) if events else None
+        shift = measure_shift(playlist, offset, rounds, teams, team, list(events), ffmpeg, **fast) if events else None
         return {
             "login": login,
             "userId": user_id,
@@ -213,10 +215,12 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
         playlist = playlist_url(v["url"], ytdlp)
         if not playlist:
             return {"verdict": "unknown", "reason": "VOD not readable"}
-        result = {"verdict": "unknown"} if mode == "shift" else judge(lambda side: verify(playlist, offset, rounds, teams, side, ffmpeg), teams, team)
+        frames = VodFrames(playlist, ffmpeg)
+        fast = {"grab": frames.grab, "read": read_band}
+        result = {"verdict": "unknown"} if mode == "shift" else judge(lambda side: verify(playlist, offset, rounds, teams, side, ffmpeg, **fast), teams, team)
         if result["verdict"] in ("match", "otherTeam", "unknown") and events:
             side = team if result["verdict"] != "otherTeam" else (teams[1] if team == teams[0] else teams[0])
-            shift = measure_shift(playlist, offset, rounds, teams, side, list(events), ffmpeg)
+            shift = measure_shift(playlist, offset, rounds, teams, side, list(events), ffmpeg, **fast)
             if shift is not None:
                 result["shiftSec"] = shift
                 if mode == "shift":

@@ -109,3 +109,64 @@ class ShiftBudgetTest(unittest.TestCase):
         events = [(55_000 + i * 100_000 + 80_000, i) for i in range(len(ROUNDS))]
         self.assertIsNone(measure_shift("pl", OFFSET, ROUNDS, TEAMS, "Blue", events, "ff", grab=grab, read=read, max_rounds=3))
         self.assertLessEqual(len(calls), 3 * 32, "stops after max_rounds, not every round")
+
+
+class FastFramesTest(unittest.TestCase):
+    def test_reads_the_chunk_list(self):
+        from verify import parse_playlist
+
+        text = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10.000,\n0.ts\n#EXTINF:10.000,\n1-muted.ts\n#EXTINF:4.5,\nhttps://cdn.example/2.ts\n#EXT-X-ENDLIST\n"
+        segs, init = parse_playlist(text, "https://vod.example/abc/720p/index-dvr.m3u8")
+        self.assertIsNone(init)
+        self.assertEqual([s.start for s in segs], [0.0, 10.0, 20.0])
+        self.assertEqual(segs[1].url, "https://vod.example/abc/720p/1-muted.ts")
+        self.assertEqual(segs[2].url, "https://cdn.example/2.ts")
+        _, init = parse_playlist('#EXT-X-MAP:URI="init.mp4"\n#EXTINF:2,\n0.mp4\n', "https://v.example/a/i.m3u8")
+        self.assertEqual(init, "https://v.example/a/init.mp4")
+
+    def test_strips_come_from_the_right_second_and_each_chunk_is_read_once(self):
+        """A real little HLS stream whose brightness rises with time, served over HTTP."""
+        import functools
+        import shutil
+        import subprocess
+        import tempfile
+        import threading
+        from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+        from PIL import ImageStat
+
+        from verify import VodFrames
+
+        ff = shutil.which("ffmpeg")
+        if not ff:
+            self.skipTest("no ffmpeg")
+        d = tempfile.mkdtemp()
+        subprocess.run(
+            [ff, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=24,format=yuv420p,geq=lum='40+T*8':cb=128:cr=128",
+             "-c:v", "libx264", "-g", "30", "-pix_fmt", "yuv420p", "-f", "hls", "-hls_time", "6", "-hls_list_size", "0",
+             f"{d}/index.m3u8"], check=True)
+        asked: list[str] = []
+
+        class Handler(SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                asked.append(self.path)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=d))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            frames = VodFrames(f"http://127.0.0.1:{server.server_port}/index.m3u8", ff)
+            self.assertGreaterEqual(len(frames.segments), 4)
+            for t in [1.0, 3.2, 7.5, 13.0, 20.6]:
+                strip = frames.grab("ignored", t)
+                self.assertEqual(strip.size, (512, 61))
+                lum = ImageStat.Stat(strip.convert("L")).mean[0]
+                self.assertAlmostEqual(lum, (24 + t * 8) * 255 / 219, delta=5, msg=f"t={t}")  # within about half a second
+            self.assertIsNone(frames.grab("ignored", 999))
+            before = len(asked)
+            for t in [7.0, 7.6, 8.1, 11.9]:  # all inside chunks already read
+                frames.grab("ignored", t)
+            self.assertEqual(len(asked), before, "no chunk downloaded twice")
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(d, ignore_errors=True)
