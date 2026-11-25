@@ -88,7 +88,7 @@ function Scoreboard({ match, me, live }: { match: MatchSummary; me?: MatchPlayer
                 {players.map((p) => {
                   const l = live.get(p.puuid);
                   return (
-                    <tr key={p.puuid}>
+                    <tr key={p.puuid} className={p.puuid === me?.puuid ? "you-row" : undefined}>
                       <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span><span className="muted small" style={{ display: "block" }}>{p.agent}{p.puuid === me?.puuid ? " · you" : ""}</span></td>
                       <td>{l && <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>}</td>
                       <td className="num" style={{ textAlign: "right" }}>{p.kills} / {p.deaths} / {p.assists}</td>
@@ -133,7 +133,6 @@ function MatchView({
   actions?: ReactNode;
   children?: ReactNode;
 }) {
-  const [showBoard, setShowBoard] = useState(false);
   const me = findMe(match, riotId);
   const r = result(match, me);
   const checked = Boolean(streamers?.checkedMs) || Array.isArray(web);
@@ -194,15 +193,10 @@ function MatchView({
           )}
           <div><span>Streamer fights</span><b>{fights.length}</b></div>
         </div>
-        <div className="hero-actions">
-          {actions}
-          <button type="button" className="btn quiet" aria-expanded={showBoard} onClick={() => setShowBoard(!showBoard)}>{showBoard ? "Hide scoreboard" : "Scoreboard"}</button>
-        </div>
+        {actions && <div className="hero-actions">{actions}</div>}
       </div>
 
       <Rounds match={match} me={me} fightRounds={fightRounds} />
-
-      {showBoard && <Scoreboard match={match} me={me} live={live} />}
 
       {(fights.length > 0 || (checked && liveList.length > 0)) && (
         <section className="stack" style={{ gap: 14 }} aria-label="Your fights with streamers">
@@ -249,6 +243,11 @@ function MatchView({
           </div>
         )}
         {children}
+      </section>
+
+      <section className="stack" style={{ gap: 14 }} aria-label="Players">
+        <h2 className="section-title">Players</h2>
+        <Scoreboard match={match} me={me} live={live} />
       </section>
 
       {!me && <p className="muted">Your Riot ID isn't in this match, so your fights can't be shown.</p>}

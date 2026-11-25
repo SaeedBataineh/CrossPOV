@@ -209,6 +209,8 @@ a { color: var(--twitch-text); }
 .streamer-card .bar { margin-top: 4px; }
 .avatar { width: 44px; height: 44px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; background: var(--twitch-dim); color: var(--twitch-text); font-size: 14px; font-weight: 700; }
 .streamer-link { color: var(--twitch-text); text-decoration: none; }
+.you-row td { background: #ffffff0a; }
+.you-row td:first-child { box-shadow: inset 3px 0 0 var(--twitch); }
 .teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rounds { display: grid; grid-template-columns: repeat(auto-fit, minmax(28px, 1fr)); gap: 4px; }
