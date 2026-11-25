@@ -108,6 +108,8 @@ pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Resu
 pub enum Moment {
     KilledYou,
     YouKilled,
+    /// You and the streamer killed each other within seconds (one clip).
+    Trade,
     Round,
 }
 
@@ -116,6 +118,7 @@ impl Moment {
         match self {
             Moment::KilledYou => "They killed you",
             Moment::YouKilled => "You killed them",
+            Moment::Trade => "Traded kills",
             Moment::Round => "Round you both played",
         }
     }
@@ -123,6 +126,7 @@ impl Moment {
         match self {
             Moment::KilledYou => "killed-you",
             Moment::YouKilled => "you-killed",
+            Moment::Trade => "trade",
             Moment::Round => "round",
         }
     }
@@ -170,6 +174,11 @@ pub fn fight_windows(m: &MatchSummary, me: &str, them: &str, s: &Settings) -> Ve
         }
         return out;
     }
+    // One clip per fight: `before` seconds, the fight, `after` seconds. Only
+    // the same exchange (a trade within TRADE_GAP, same round) shares a clip;
+    // fights further apart get their own clips even if those overlap, so every
+    // clip has the fight where the settings put it.
+    let mut last_kill_at: Option<f64> = None;
     for k in &m.kills {
         let moment = if k.killer == them && k.victim == me && s.clip_killed_you {
             Moment::KilledYou
@@ -179,14 +188,22 @@ pub fn fight_windows(m: &MatchSummary, me: &str, them: &str, s: &Settings) -> Ve
             continue;
         };
         let t = k.at_ms as f64 / 1000.0;
-        let w = Window { start: (t - before).max(0.0), end: t + after, round: k.round, moment };
-        match out.last_mut() {
-            Some(prev) if w.start <= prev.end => prev.end = prev.end.max(w.end),
-            _ => out.push(w),
+        match (out.last_mut(), last_kill_at) {
+            (Some(prev), Some(last)) if prev.round == k.round && t - last <= TRADE_GAP => {
+                prev.end = t + after;
+                if prev.moment != moment {
+                    prev.moment = Moment::Trade;
+                }
+            }
+            _ => out.push(Window { start: (t - before).max(0.0), end: t + after, round: k.round, moment }),
         }
+        last_kill_at = Some(t);
     }
     out
 }
+
+/// Kills between you and the streamer this close together are one exchange.
+const TRADE_GAP: f64 = 10.0;
 
 // ---------- yt-dlp ----------
 
@@ -416,7 +433,9 @@ impl LinkStore {
     pub fn save(&self, puuid: &str, login: &str, label: &str) {
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut links = self.all();
-        links.retain(|l| l.puuid != puuid);
+        // One link per player and one player per channel: relinking a channel
+        // to someone else (e.g. the wrong player was picked) replaces it.
+        links.retain(|l| l.puuid != puuid && l.login != login);
         links.push(Link { puuid: puuid.into(), login: login.into(), label: label.into(), added_ms: now_ms(), seen: 0 });
         self.write(&links);
     }
@@ -586,7 +605,8 @@ impl StreamerWorker {
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.store.get(&m.id);
         let me = me_player.map(|p| p.puuid.clone());
-        state.players.retain(|p| p.puuid != player.puuid);
+        // Replace whatever this player or this channel had before in this match.
+        state.players.retain(|p| p.puuid != player.puuid && p.channel.login != login);
         merge_hits(&mut state, vec![hit], &m, me.as_deref(), &s);
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == player.puuid) {
             p.manual = true;
@@ -795,13 +815,34 @@ mod tests {
     }
 
     #[test]
-    fn default_padding_gives_a_full_two_minute_clip() {
+    fn every_fight_gets_its_own_clip_with_the_chosen_padding() {
+        // Kill at 30 s and death at 150 s, 60 s each side: two clips, each
+        // centred on its fight, never one long clip of everything between.
         let w = fight_windows(&sample(), "me", "st", &Settings::default());
-        // Kill at 30 s (60 s before is clamped at the match start) and death
-        // at 150 s: with a minute each side the two clips touch, so they
-        // become one clip from 0:00 to 3:30 instead of two overlapping ones.
-        assert_eq!(w.len(), 1);
-        assert_eq!((w[0].start, w[0].end), (0.0, 210.0));
+        assert_eq!(w.len(), 2);
+        assert_eq!((w[0].start, w[0].end, w[0].moment), (0.0, 90.0, Moment::YouKilled), "30 s before the kill is all the match has");
+        assert_eq!((w[1].start, w[1].end, w[1].moment), (90.0, 210.0, Moment::KilledYou));
+        // Two fights 50 s apart in one round overlap but stay separate clips.
+        let mut m = sample();
+        m.kills.push(kill(1, 200_000, "me", "st"));
+        m.kills.sort_by_key(|k| k.at_ms);
+        let s = Settings { seconds_before: 30, seconds_after: 30, ..Settings::default() };
+        let w = fight_windows(&m, "me", "st", &s);
+        assert_eq!(w.len(), 3);
+        for win in &w[1..] {
+            assert_eq!(win.end - win.start, 60.0, "exactly before + after");
+        }
+        assert_eq!((w[2].start, w[2].end), (170.0, 230.0));
+    }
+
+    #[test]
+    fn padding_settings_are_used() {
+        for (before, after) in [(15, 15), (60, 60), (120, 30), (0, 120)] {
+            let s = Settings { seconds_before: before, seconds_after: after, ..Settings::default() };
+            let w = fight_windows(&sample(), "me", "st", &s);
+            let death = w.iter().find(|w| w.moment == Moment::KilledYou).unwrap();
+            assert_eq!((death.start, death.end), (150.0 - f64::from(before), 150.0 + f64::from(after)));
+        }
     }
 
     fn kill(round: u32, at: u64, killer: &str, victim: &str) -> MatchKill {
@@ -870,12 +911,13 @@ mod tests {
     }
 
     #[test]
-    fn merges_overlapping_moments() {
+    fn a_trade_is_one_clip() {
         let mut m = sample();
         m.kills.push(kill(0, 36_000, "st", "me"));
         m.kills.sort_by_key(|k| k.at_ms);
         let w = fight_windows(&m, "me", "st", &five_sec());
-        assert_eq!((w[0].start, w[0].end), (25.0, 41.0), "kill at 30s and death at 36s become one clip");
+        assert_eq!((w[0].start, w[0].end, w[0].moment), (25.0, 41.0, Moment::Trade), "kill at 30s and death at 36s: one clip");
+        assert_eq!(w.len(), 2);
     }
 
     #[test]
@@ -915,6 +957,9 @@ mod tests {
         store.save("p1", "renamed", "Enemy · Raze");
         let all = store.all();
         assert_eq!(all.len(), 2, "one link per player");
+        store.save("p3", "renamed", "Enemy · Jett");
+        assert!(store.all().iter().all(|l| l.puuid != "p1"), "one player per channel: relinking moves it");
+        store.save("p1", "renamed", "Enemy · Raze");
         assert_eq!(all.iter().find(|l| l.puuid == "p1").unwrap().login, "renamed");
         store.mark_seen("p2");
         assert_eq!(store.all().iter().find(|l| l.puuid == "p2").unwrap().seen, 1);

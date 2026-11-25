@@ -232,7 +232,8 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
     <Panel title="Missed a streamer?" color="var(--warn)">
       <form className="pad stack" onSubmit={(e) => void submit(e)}>
         <span className="muted small">
-          Pick the player and paste their channel. CrossPOV checks they were live during this match, then clips your fights from their VOD.
+          Pick the player and paste their channel. CrossPOV checks they were live during this match, then clips your fights with
+          <b> that player</b> from their VOD, so make sure you pick the right one (linking the channel again to someone else replaces it).
           It also remembers the link <b>on this PC only</b> and checks that channel when you meet the same player again, even on a renamed account.
           The server checks one match at a time and keeps nothing; links are never shared with other players.
         </span>
