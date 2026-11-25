@@ -366,48 +366,125 @@ const RELEASES = "https://github.com/SaeedBataineh/CrossPOV/releases/latest";
 /** Where release files live; only files from here are ever handed out. */
 const RELEASE_FILES = "https://github.com/SaeedBataineh/CrossPOV/releases/";
 
+/** A release's files: https://github.com/.../releases/download/<tag>/<name>. */
+const RELEASE_DOWNLOAD = `${RELEASE_FILES}download/`;
+/** Files crosspov.com hands out by path: a version's files, or the tools. Neither ever changes once published. */
+const FILE_PATH = /^\/files\/(v\d+\.\d+\.\d+|tools)\/([\w.-]+\.exe)$/;
+const FILE_TTL = 365 * 24 * 3600;
+const UPDATE_TTL = 120;
+
 /**
- * Short, permanent download links for the website:
+ * Short, permanent download links for the website, and the app's updates:
  *   /download            -> the newest single CrossPOV.exe
  *   /download/installer  -> the newest installer (its file name has the version in it)
+ *   /files/<tag>/<name>  -> a release file (updates, tools), kept at Cloudflare near each user
+ *   /update/latest.json  -> the update feed, pointing at /files/ instead of GitHub
  */
-export async function downloadRedirect(pathname: string, env: Env, ctx?: ExecutionContext): Promise<Response | null> {
+export async function downloadRedirect(pathname: string, env: Env, ctx?: ExecutionContext, range?: string | null): Promise<Response | null> {
   const path = pathname.replace(/\/+$/, "");
-  if (path === "/download") return serveFile(`${RELEASES}/download/CrossPOV.exe`, "CrossPOV.exe");
+  if (path === "/update/latest.json") return updateFeed(env, ctx);
+  const f = FILE_PATH.exec(path);
+  if (f) return serveFile(`${RELEASE_DOWNLOAD}${f[1]}/${f[2]}`, f[2], ctx, range);
+  if (path === "/download") {
+    // The newest version's own file never changes, so Cloudflare can keep it.
+    const latest = await latestRelease(env, ctx);
+    if (latest) {
+      const res = await serveFile(`${RELEASE_DOWNLOAD}v${latest.version}/CrossPOV.exe`, "CrossPOV.exe", ctx, range);
+      if (res.ok) return res;
+    }
+    return serveFile(`${RELEASES}/download/CrossPOV.exe`, "CrossPOV.exe", ctx, range);
+  }
   if (path !== "/download/installer") return null;
   try {
     const url = await cachedData("installer-url", LATEST_TTL_S, ctx, async () => {
       const res = await fetch(env.LATEST_JSON_URL ?? LATEST_JSON, { headers: { accept: "application/json" } });
       const body = (await res.json()) as { platforms?: Record<string, { url?: string }> };
       const u = body.platforms?.["windows-x86_64"]?.url;
-      if (!u || !u.startsWith(`${RELEASE_FILES}download/`)) throw new Error("no installer");
+      if (!u || !u.startsWith(RELEASE_DOWNLOAD)) throw new Error("no installer");
       return u;
     });
-    return serveFile(url, decodeURIComponent(url.split("/").pop() ?? "CrossPOV-setup.exe"));
+    return serveFile(url, decodeURIComponent(url.split("/").pop() ?? "CrossPOV-setup.exe"), ctx, range);
   } catch {
     return unavailable();
   }
 }
 
 /**
+ * The update feed with its file links moved to crosspov.com/files/. The
+ * signatures inside are untouched: the app still only installs files signed
+ * by us, wherever they came from. Fails (so apps fall back to GitHub) rather
+ * than serve something half-right.
+ */
+async function updateFeed(env: Env, ctx?: ExecutionContext): Promise<Response> {
+  try {
+    const body = await cachedData("update-feed", UPDATE_TTL, ctx, async () => {
+      const res = await fetch(env.LATEST_JSON_URL ?? LATEST_JSON, { headers: { accept: "application/json" } });
+      if (!res.ok) throw new Error(`release feed ${res.status}`);
+      const feed = rewriteFeed(await res.json());
+      if (!feed) throw new Error("release feed unreadable");
+      return feed;
+    });
+    return json(body, 200, UPDATE_TTL);
+  } catch {
+    return unavailable();
+  }
+}
+
+/** Points each platform's file at crosspov.com/files/; null if any link isn't one of our release files. */
+export function rewriteFeed(feed: unknown): unknown {
+  const f = feed as { version?: unknown; platforms?: Record<string, { url?: unknown; signature?: unknown }> };
+  if (!parseLatest(f) || !f.platforms || typeof f.platforms !== "object") return null;
+  const platforms: Record<string, unknown> = {};
+  for (const [name, p] of Object.entries(f.platforms)) {
+    const url = typeof p?.url === "string" ? p.url : "";
+    const rest = url.startsWith(RELEASE_DOWNLOAD) ? url.slice(RELEASE_DOWNLOAD.length) : "";
+    if (!FILE_PATH.test(`/files/${rest}`) || typeof p.signature !== "string") return null;
+    platforms[name] = { ...p, url: `https://crosspov.com/files/${rest}` };
+  }
+  return { ...f, platforms };
+}
+
+/**
  * Hands out a release file from crosspov.com itself, so the download link
  * (and the browser's downloads list) shows crosspov.com rather than where
- * the file is hosted. Cloudflare keeps a copy for a few minutes.
+ * the file is hosted. A version's files never change, so Cloudflare keeps
+ * them for a year near each user, and resumes broken downloads (Range).
+ * "latest" links change with each release and are never kept.
  */
-async function serveFile(url: string, filename: string): Promise<Response> {
+async function serveFile(url: string, filename: string, ctx?: ExecutionContext, range?: string | null): Promise<Response> {
   if (!url.startsWith(RELEASE_FILES) || !/^[\w.-]+\.exe$/.test(filename)) return unavailable();
+  const fixed = url.startsWith(RELEASE_DOWNLOAD);
+  const cache = fixed && typeof caches !== "undefined" ? caches.default : undefined;
+  const key = `https://cache.crosspov.internal/files/${url.slice(RELEASE_DOWNLOAD.length)}`;
   try {
-    const res = await fetch(url, { redirect: "follow", cf: { cacheTtl: 300, cacheEverything: true } } as RequestInit);
-    if (!res.ok || !res.body) return unavailable();
+    let res = cache ? await cache.match(new Request(key, { headers: range ? { range } : {} })) : undefined;
+    if (!res) {
+      // No cf cache options here: GitHub answers with a redirect to a link
+      // that expires, which must never be kept.
+      const got = await fetch(url, { redirect: "follow" });
+      if (!got.ok || !got.body) return unavailable();
+      res = got;
+      if (cache && ctx) {
+        const [mine, keep] = got.body.tee();
+        const stored = new Headers({ "content-type": "application/octet-stream", "cache-control": `public, max-age=${FILE_TTL}` });
+        const length = got.headers.get("content-length");
+        if (length) stored.set("content-length", length);
+        ctx.waitUntil(cache.put(key, new Response(keep, { status: 200, headers: stored })).catch(() => {}));
+        res = new Response(mine, got);
+      }
+    }
     const headers = new Headers({
       "content-type": "application/vnd.microsoft.portable-executable",
       "content-disposition": `attachment; filename="${filename}"`,
-      "cache-control": "public, max-age=300",
+      "cache-control": fixed ? "public, max-age=86400" : "public, max-age=300",
       "x-content-type-options": "nosniff",
     });
-    const length = res.headers.get("content-length");
-    if (length) headers.set("content-length", length);
-    return new Response(res.body, { status: 200, headers });
+    for (const h of ["content-length", "content-range"]) {
+      const v = res.headers.get(h);
+      if (v) headers.set(h, v);
+    }
+    if (fixed) headers.set("accept-ranges", "bytes");
+    return new Response(res.body, { status: res.status === 206 ? 206 : 200, headers });
   } catch {
     return unavailable();
   }
@@ -460,7 +537,7 @@ export default {
     const www = wwwRedirect(url);
     if (www) return Response.redirect(www, 301);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
-    const dl = await downloadRedirect(url.pathname, env, ctx);
+    const dl = await downloadRedirect(url.pathname, env, ctx, request.headers.get("range"));
     if (dl) return dl;
     // Everything else is the demo website. "//riot.txt" (as Riot's verifier asks for) serves "/riot.txt".
     if (env.ASSETS) {

@@ -239,7 +239,7 @@ test("the same match asked for twice at once is fetched once", async () => {
   }
 });
 
-import { downloadRedirect } from "../src/index.ts";
+import { downloadRedirect, rewriteFeed } from "../src/index.ts";
 
 test("downloads come from crosspov.com itself, never a link to where they're hosted", async () => {
   assert.equal(await downloadRedirect("/demo", {}), null);
@@ -257,7 +257,7 @@ test("downloads come from crosspov.com itself, never a link to where they're hos
     assert.equal(exe.headers.get("location"), null, "no redirect to GitHub");
     assert.equal(exe.headers.get("content-disposition"), 'attachment; filename="CrossPOV.exe"');
     assert.equal(await exe.text(), "MZ fake exe");
-    assert.equal(asked[0], "https://github.com/SaeedBataineh/CrossPOV/releases/latest/download/CrossPOV.exe");
+    assert.ok(asked.includes("https://github.com/SaeedBataineh/CrossPOV/releases/download/v9.9.9/CrossPOV.exe"), "the newest version's own file, which can be kept");
     const inst = (await downloadRedirect("/download/installer/", {}))!;
     assert.equal(inst.headers.get("content-disposition"), 'attachment; filename="CrossPOV_9.9.9_x64-setup.exe"');
   } finally {
@@ -389,4 +389,44 @@ test("rounds that ended by elimination are sent with the time they were decided"
   };
   assert.deepEqual(eliminations(m, [0, 1, 2]), [{ decidedMs: 41_000, round: 0 }, { decidedMs: 252_000, round: 2 }]);
   assert.equal(scannerMatch(m), null, "fewer than 4 rounds: nothing sent");
+});
+
+test("release files and the update feed are served from crosspov.com", async () => {
+  const realFetch = globalThis.fetch;
+  const asked: string[] = [];
+  const gh = "https://github.com/SaeedBataineh/CrossPOV/releases/download/";
+  const feed = {
+    version: "1.2.3",
+    pub_date: "2026-11-24T20:41:51Z",
+    platforms: {
+      "windows-x86_64": { url: `${gh}v1.2.3/CrossPOV_1.2.3_x64-setup.exe`, signature: "sig1" },
+      "windows-x86_64-single": { url: `${gh}v1.2.3/CrossPOV.exe`, signature: "sig2" },
+    },
+  };
+  globalThis.fetch = (async (u: RequestInfo | URL) => {
+    asked.push(String(u));
+    if (String(u).endsWith("latest.json")) return Response.json(feed);
+    return new Response("MZ tool", { headers: { "content-length": "7" } });
+  }) as typeof fetch;
+  try {
+    const tool = (await downloadRedirect("/files/tools/ffmpeg-0123456789abcdef.exe", {}))!;
+    assert.equal(tool.status, 200);
+    assert.equal(await tool.text(), "MZ tool");
+    assert.equal(asked.at(-1), `${gh}tools/ffmpeg-0123456789abcdef.exe`);
+    for (const bad of ["/files/tools/../x.exe", "/files/latest/CrossPOV.exe", "/files/v1.2.3/notes.txt", "/files/main/x.exe"]) {
+      assert.equal(await downloadRedirect(bad, {}), null, bad);
+    }
+    const res = (await downloadRedirect("/update/latest.json", {}))!;
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as typeof feed;
+    assert.equal(body.platforms["windows-x86_64-single"].url, "https://crosspov.com/files/v1.2.3/CrossPOV.exe");
+    assert.equal(body.platforms["windows-x86_64-single"].signature, "sig2", "signatures are untouched");
+    assert.equal(body.version, "1.2.3");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // Anything unexpected: no feed at all, so apps use GitHub's.
+  assert.equal(rewriteFeed({ ...feed, platforms: { x: { url: "https://evil.example/x.exe", signature: "s" } } }), null);
+  assert.equal(rewriteFeed({ ...feed, platforms: { x: { url: `${gh}v1.2.3/CrossPOV.exe` } } }), null);
+  assert.equal(rewriteFeed({ platforms: {} }), null);
 });

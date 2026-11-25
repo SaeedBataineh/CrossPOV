@@ -22,6 +22,10 @@ use sha2::{Digest, Sha256};
 
 /// Where the tools are downloaded from: `<BASE_URL>/<stem>-<first 16 of hash>.exe`.
 pub const BASE_URL: &str = "https://github.com/SaeedBataineh/CrossPOV/releases/download/tools";
+/// The same files through crosspov.com, which keeps a copy near each user
+/// (usually much faster than GitHub). Every file is checked against its
+/// hash, so where it came from doesn't matter; GitHub is the backup.
+pub const MIRROR_URL: &str = "https://crosspov.com/files/tools";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tool {
@@ -144,7 +148,11 @@ pub type Progress<'a> = &'a mut dyn FnMut(u64, u64);
 /// Then removes other versions of the tools.
 pub fn download(progress: Progress) -> Result<(), String> {
     let root = root().ok_or("tools folder not set")?;
-    download_in(TOOLS, root, BASE_URL, &agent(), progress)
+    let agent = agent();
+    download_in(TOOLS, root, MIRROR_URL, &agent, progress).or_else(|e| {
+        eprintln!("tools from crosspov.com failed ({e}), trying GitHub");
+        download_in(TOOLS, root, BASE_URL, &agent, progress)
+    })
 }
 
 fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent, progress: Progress) -> Result<(), String> {

@@ -5,7 +5,7 @@ name: Health check
 # file's schedule, i.e. the repository owner). Checks:
 #   - crosspov.com answers and has its match-data and Twitch settings,
 #   - the VPS scanner answers and has read a stream in the last 30 minutes,
-#   - the download and the version page work.
+#   - the download, the version page and the update feed work.
 on:
   schedule:
     - cron: "7,37 * * * *"
@@ -52,4 +52,6 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -r 0-1023 https://crosspov.com/download)
           [ "$code" = "200" ] || [ "$code" = "206" ] || problem "the download at crosspov.com/download answered $code"
           curl -s --max-time 30 https://crosspov.com/api/version | grep -q '"version"' || problem "crosspov.com/api/version did not answer"
+          # Apps update through this (GitHub is their backup).
+          curl -s --max-time 30 https://crosspov.com/update/latest.json | grep -q 'https://crosspov.com/files/' || problem "crosspov.com/update/latest.json is not working (apps fall back to GitHub)"
           exit $fail

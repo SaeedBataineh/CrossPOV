@@ -58,6 +58,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwNEZCNjNFNDczMEYzOTAKUldTUTh6QkhQclpQa0twTFI0N3N2VFIrZkpjSk41dmdZNnhwR0lvcEw5UU45TkVqUDI5MFFVRUIK",
       "endpoints": [
+        "https://crosspov.com/update/latest.json",
         "https://github.com/SaeedBataineh/CrossPOV/releases/latest/download/latest.json"
       ],
       "windows": {
