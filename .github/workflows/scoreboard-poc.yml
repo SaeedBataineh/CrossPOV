@@ -13,6 +13,9 @@ on:
       limit:
         description: "How many streams to read (most-watched first)"
         default: "600"
+      unread:
+        description: "How many unread previews to save for a look"
+        default: "150"
   push:
     paths:
       - "tools/scoreboard_poc/**"
@@ -44,7 +47,7 @@ jobs:
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-        run: python tools/scoreboard_poc/poc.py --limit "${{ github.event.inputs.limit || '600' }}" --out poc-out
+        run: python tools/scoreboard_poc/poc.py --limit "${{ github.event.inputs.limit || '600' }}" --out poc-out --unread "${{ github.event.inputs.unread || '150' }}"
 
       - uses: actions/upload-artifact@v4
         if: always()

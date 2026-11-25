@@ -146,11 +146,12 @@ class Reading:
         return self.score_left is not None and self.score_right is not None
 
 
-def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None]:
+def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None, bytes | None]:
+    """(reading, JPEG of the HUD band, small JPEG of the whole frame when no score was read)."""
     s, data = args
     r = Reading(login=s["user_login"], language=s.get("language", ""), viewers=s.get("viewer_count", 0))
     if not data:
-        return r, None
+        return r, None, None
     r.ok_image = True
     img = Image.open(io.BytesIO(data)).convert("RGB").resize((W, H))
     strip = crop(img, BAND)
@@ -174,7 +175,12 @@ def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None]:
     band = crop(img, BAND)
     buf = io.BytesIO()
     band.save(buf, "JPEG", quality=80)
-    return r, buf.getvalue()
+    whole = None
+    if not r.readable:  # kept so unread previews can be looked at (--unread)
+        small = io.BytesIO()
+        img.resize((640, 360)).save(small, "JPEG", quality=75)
+        whole = small.getvalue()
+    return r, buf.getvalue(), whole
 
 
 def contact_sheet(rows: list[tuple[Reading, bytes]], path: str) -> None:
@@ -203,6 +209,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=1500)
     ap.add_argument("--out", default="poc-out")
     ap.add_argument("--sample", type=int, default=80)
+    ap.add_argument("--unread", type=int, default=0, help="also save this many random previews with no score read")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -229,13 +236,16 @@ def main() -> int:
     results = []
     with ProcessPoolExecutor() as pool:
         for i, res in enumerate(pool.map(read_one, zip(streams, images), chunksize=8), 1):
-            results.append(res)
+            if res[2] is None or args.unread:
+                results.append(res)
+            else:
+                results.append((res[0], res[1], None))
             if i % 100 == 0 or i == len(streams):
                 rate = i / max(0.001, time.time() - t2)
-                print(f"  read {i}/{len(streams)} ({rate:.1f}/s), readable so far: {sum(r.readable for r, _ in results)}", flush=True)
+                print(f"  read {i}/{len(streams)} ({rate:.1f}/s), readable so far: {sum(r[0].readable for r in results)}", flush=True)
     t_ocr = time.time() - t2
 
-    readings = [r for r, _ in results]
+    readings = [r for r, _, _ in results]
     have = [r for r in readings if r.ok_image]
     readable = [r for r in have if r.readable]
     with_timer = [r for r in readable if r.timer]
@@ -253,8 +263,19 @@ def main() -> int:
     import random
 
     random.seed(7)
-    sample = random.sample([x for x in results if x[1]], min(args.sample, len([x for x in results if x[1]])))
+    with_band = [(r, band) for r, band, _ in results if band]
+    sample = random.sample(with_band, min(args.sample, len(with_band)))
     contact_sheet(sample, os.path.join(args.out, "sample.html"))
+    if args.unread:
+        unread = [(r, whole) for r, _, whole in results if whole]
+        os.makedirs(os.path.join(args.out, "unread"), exist_ok=True)
+        index = []
+        for i, (r, whole) in enumerate(random.sample(unread, min(args.unread, len(unread)))):
+            with open(os.path.join(args.out, "unread", f"{i:03d}.jpg"), "wb") as f:
+                f.write(whole)
+            index.append({"file": f"{i:03d}.jpg", "raw": r.raw, "viewers": r.viewers})
+        with open(os.path.join(args.out, "unread", "index.json"), "w") as f:
+            json.dump(index, f, indent=1)
 
     summary = {
         "live_valorant_streams": total_live,

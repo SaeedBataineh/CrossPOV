@@ -65,6 +65,33 @@ def _max_filter(a: np.ndarray, k: int, axis: int) -> np.ndarray:
     return out
 
 
+_KERNELS: dict[tuple[str, int, int], np.ndarray] = {}
+
+
+def _kernel(digit: str, H: int, W: int) -> np.ndarray:
+    """FFT of a template padded to the strip size. Every strip has the same few sizes, so it's computed once."""
+    key = (digit, H, W)
+    k = _KERNELS.get(key)
+    if k is None:
+        t = TEMPLATES[digit]
+        th, tw = t.shape
+        kernel = np.zeros((H, W))
+        kernel[:th, :tw] = t[::-1, ::-1]
+        k = _KERNELS[key] = np.fft.rfft2(kernel)
+    return k
+
+
+def _local_peaks(a: np.ndarray, r: int = 2) -> np.ndarray:
+    """True where a is the largest value within r pixels."""
+    padded = np.pad(a, r, constant_values=-1)
+    h, w = a.shape
+    neighbours = np.full(a.shape, -np.inf)
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            np.maximum(neighbours, padded[r + dy : r + dy + h, r + dx : r + dx + w], out=neighbours)
+    return a >= neighbours
+
+
 def detect(w: np.ndarray, thr: float = 0.4) -> list[tuple[float, int, int, int, str]]:
     """Places a digit template matches: (match score, x0, y0, x1, digit).
 
@@ -76,29 +103,31 @@ def detect(w: np.ndarray, thr: float = 0.4) -> list[tuple[float, int, int, int, 
     ii2[1:, 1:] = (w * w).cumsum(0).cumsum(1)
     spectrum = np.fft.rfft2(w)
     hits = []
+    stats: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}  # per template size
     for digit, t in TEMPLATES.items():
         th, tw = t.shape
         if th > H or tw > W:
             continue
         n = th * tw
-        kernel = np.zeros((H, W))
-        kernel[:th, :tw] = t[::-1, ::-1]
-        corr = np.fft.irfft2(spectrum * np.fft.rfft2(kernel), s=(H, W))[th - 1 :, tw - 1 :]
-        mean = _box_sums(ii, th, tw) / n
-        sd = np.sqrt(np.maximum(_box_sums(ii2, th, tw) / n - mean * mean, 0)) + 1e-6
+        if (th, tw) not in stats:
+            mean = _box_sums(ii, th, tw) / n
+            sd = np.sqrt(np.maximum(_box_sums(ii2, th, tw) / n - mean * mean, 0)) + 1e-6
+            core = _max_filter(_max_filter(w[MARGIN:, MARGIN:], th - 2 * MARGIN, 0), tw - 2 * MARGIN, 1)
+            # The digit must be brighter than its surroundings (white text), not just the right shape.
+            bright = core[: mean.shape[0], : mean.shape[1]] - mean > 18
+            stats[(th, tw)] = (mean, sd, bright)
+        mean, sd, bright = stats[(th, tw)]
+        corr = np.fft.irfft2(spectrum * _kernel(digit, H, W), s=(H, W))[th - 1 :, tw - 1 :]
         ncc = corr / (n * sd)  # templates are zero-mean, unit-variance
-        # The digit must be brighter than its surroundings (white text), not just the right shape.
-        core = _max_filter(_max_filter(w[MARGIN:, MARGIN:], th - 2 * MARGIN, 0), tw - 2 * MARGIN, 1)
-        ok = (ncc >= thr) & (core[: ncc.shape[0], : ncc.shape[1]] - mean > 18)
-        # Only local peaks, so one digit gives one hit.
-        padded = np.pad(ncc, 2, constant_values=-1)
-        neighbours = np.max(
-            np.stack([padded[2 + dy : 2 + dy + ncc.shape[0], 2 + dx : 2 + dx + ncc.shape[1]] for dy in range(-2, 3) for dx in range(-2, 3)]),
-            axis=0,
-        )
-        ok &= ncc >= neighbours
-        for y, x in zip(*np.nonzero(ok)):
-            hits.append((float(ncc[y, x]), int(x) + MARGIN, int(y) + MARGIN, int(x) + tw - MARGIN, digit))
+        ys, xs = np.nonzero((ncc >= thr) & bright)
+        if len(ys) > 300:  # busy strip: one pass over the whole image is cheaper
+            peak = _local_peaks(ncc)
+            keep_at = peak[ys, xs]
+        else:  # usually a handful of places: check just their neighbourhoods
+            keep_at = [ncc[y, x] >= ncc[max(0, y - 2) : y + 3, max(0, x - 2) : x + 3].max() for y, x in zip(ys, xs)]
+        for y, x, k in zip(ys, xs, keep_at):  # only local peaks, so one digit gives one hit
+            if k:
+                hits.append((float(ncc[y, x]), int(x) + MARGIN, int(y) + MARGIN, int(x) + tw - MARGIN, digit))
     hits.sort(reverse=True)
     keep: list[tuple[float, int, int, int, str]] = []
     for d in hits:  # best first; drop weaker hits overlapping a better one
