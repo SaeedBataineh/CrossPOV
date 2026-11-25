@@ -188,18 +188,15 @@ fn remove_old(tools: &[Tool], root: &Path) {
 
 /// Like the app's other HTTPS clients (Windows' own TLS), with time for a slow connection.
 fn agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder()
-        .provider(ureq::tls::TlsProvider::NativeTls)
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .build();
-    ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_body(Some(Duration::from_secs(60)))
-        .http_status_as_error(false)
-        .user_agent(crate::USER_AGENT)
-        .build()
-        .into()
+    crate::net::agent(
+        ureq::Agent::config_builder()
+            .tls_config(crate::net::tls())
+            .timeout_connect(Some(Duration::from_secs(20)))
+            .timeout_recv_body(Some(Duration::from_secs(60)))
+            .http_status_as_error(false)
+            .user_agent(crate::USER_AGENT)
+            .build(),
+    )
 }
 
 #[cfg(test)]

@@ -153,21 +153,17 @@ pub fn test_agent() -> ureq::Agent {
 }
 
 fn agent() -> ureq::Agent {
-    // Windows' own TLS and its own list of trusted certificate authorities, like a
-    // browser. (ureq's default, Mozilla's list, can reject valid chains that
-    // Windows builds to a different root.)
-    let tls = ureq::tls::TlsConfig::builder()
-        .provider(ureq::tls::TlsProvider::NativeTls)
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .build();
-    ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_global(Some(Duration::from_secs(30)))
-        .http_status_as_error(false)
-        // The server uses this to turn away out-of-date versions.
-        .user_agent(crate::USER_AGENT)
-        .build()
-        .into()
+    // Windows' own TLS and certificate store, like a browser; if the PC's DNS
+    // fails, addresses are looked up over HTTPS instead (net.rs).
+    crate::net::agent(
+        ureq::Agent::config_builder()
+            .tls_config(crate::net::tls())
+            .timeout_global(Some(Duration::from_secs(30)))
+            .http_status_as_error(false)
+            // The server uses this to turn away out-of-date versions.
+            .user_agent(crate::USER_AGENT)
+            .build(),
+    )
 }
 
 /// Asks the server which players in a match were streaming.

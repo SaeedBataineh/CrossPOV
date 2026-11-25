@@ -10,6 +10,7 @@ mod clips;
 mod fastvod;
 mod ffmpeg;
 mod matches;
+mod net;
 mod procs;
 mod recorder;
 mod settings;

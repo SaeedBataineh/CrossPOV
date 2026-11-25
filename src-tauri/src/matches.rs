@@ -115,22 +115,17 @@ pub fn split_riot_id(riot_id: &str) -> Option<(String, String)> {
 /// Asks the server for the user's latest match.
 pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSummary, String> {
     let (name, tag) = split_riot_id(riot_id).ok_or("Enter your Riot ID as Name#TAG in Settings.")?;
-    // Native TLS: Windows' own SChannel (no C compiler needed, uses the system certificate store).
-    // Windows' own TLS and its own list of trusted certificate authorities, like a
-    // browser. (ureq's default, Mozilla's list, can reject valid chains that
-    // Windows builds to a different root.)
-    let tls = ureq::tls::TlsConfig::builder()
-        .provider(ureq::tls::TlsProvider::NativeTls)
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .timeout_global(Some(Duration::from_secs(20)))
-        .http_status_as_error(false)
-        // The server uses this to turn away out-of-date versions.
-        .user_agent(crate::USER_AGENT)
-        .build()
-        .into();
+    // Windows' own TLS and certificate store; if the PC's DNS can't find the
+    // server, the address is looked up over HTTPS instead (net.rs).
+    let agent = crate::net::agent(
+        ureq::Agent::config_builder()
+            .tls_config(crate::net::tls())
+            .timeout_global(Some(Duration::from_secs(20)))
+            .http_status_as_error(false)
+            // The server uses this to turn away out-of-date versions.
+            .user_agent(crate::USER_AGENT)
+            .build(),
+    );
     let url = format!("{}/api/latest-match", server.trim_end_matches('/'));
     let mut res = agent
         .get(&url)
