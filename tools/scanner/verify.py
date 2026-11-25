@@ -131,7 +131,7 @@ MAX_SHIFT_S = 240  # stream delay plus agent select and loading
 
 
 def measure_shift(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str, str], team: str,
-                  events: list[tuple[int, int]], ffmpeg: str, grab=frame_at, read=read_frame, want: int = 3) -> float | None:
+                  events: list[tuple[int, int]], ffmpeg: str, grab=frame_at, read=read_frame, want: int = 5) -> float | None:
     """How many seconds later than `offset + match time` things happen in this VOD.
 
     The match's start time is roughly when agent select began, and every
@@ -140,7 +140,7 @@ def measure_shift(playlist: str, offset_s: float, rounds: list[Round], teams: tu
     position) of rounds that ended by elimination: the HUD score changes at
     exactly that moment. Each is found by stepping through the VOD until the
     score changes, then halving the gap to about a second. The median of a
-    few agreeing rounds is returned, or None if the score couldn't be read."""
+    few rounds is returned (one odd round can't skew it), or None if the score couldn't be read."""
     other = teams[1] if team == teams[0] else teams[0]
     timeline = score_timeline(rounds, teams)
     found: list[float] = []
