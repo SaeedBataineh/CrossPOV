@@ -282,8 +282,10 @@ impl Recorder {
                 encoder = VideoEncoder::Cpu;
             }
             let compat = inner.fallback >= 1;
+            crate::trail(&format!("recording: starting ({})", encoder.label()));
             match self.start(ffmpeg_path, &settings, encoder, compat, source, key) {
                 Ok(running) => {
+                    crate::trail("recording: started");
                     inner.status.state = RecState::Recording;
                     inner.status.encoder = Some(format!("{}{}", encoder.label(), if compat { " (compatibility mode)" } else { "" }));
                     inner.status.message = None;
@@ -296,6 +298,7 @@ impl Recorder {
                 }
             }
         } else if !want && inner.status.state == RecState::Recording {
+            crate::trail("recording: stopped (game closed)");
             inner.status.state = RecState::Waiting;
             inner.status.encoder = None;
         }

@@ -174,7 +174,10 @@ impl Drop for AppCapture {
 #[cfg(windows)]
 fn start_app(pid: u32, src: &Shared, stop: &Arc<AtomicBool>) -> Result<(), String> {
     let sink = src.clone();
-    crate::win_audio::start_app_capture(pid, move |samples| push_stereo_48k(samples, &sink), stop.clone()).map(|_| ())
+    crate::trail(&format!("app audio: starting capture of process {pid}"));
+    let r = crate::win_audio::start_app_capture(pid, move |samples| push_stereo_48k(samples, &sink), stop.clone()).map(|_| ());
+    crate::trail(&format!("app audio: process {pid}: {}", match &r { Ok(()) => "capturing".to_string(), Err(e) => format!("failed ({e})") }));
+    r
 }
 
 #[cfg(not(windows))]

@@ -947,6 +947,7 @@ impl StreamerWorker {
                     continue;
                 }
                 let clip_started = std::time::Instant::now();
+                crate::trail(&format!("streamer clip: {} round {}", p.channel.login, w.round + 1));
                 // Agent select and their broadcast delay put each moment this much later in the VOD.
                 let shift = vod.offset_sec + late;
                 let (from, to) = (shift + w.start, shift + w.end);

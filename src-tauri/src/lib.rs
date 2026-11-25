@@ -292,6 +292,9 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     if let Some(c) = recent_crashes() {
         let _ = writeln!(out, "\n[Crashes]\n{c}");
     }
+    if let Some(t) = recent_trail() {
+        let _ = writeln!(out, "\n[Recent activity]\n{t}");
+    }
     let _ = writeln!(
         out,
         "\n[Settings] {} fps, {:?}, quality {:?}, encoder {:?}, {:?}, buffer {} s, hotkey {}, clips {}",
@@ -486,6 +489,27 @@ pub(crate) fn keep_running(task: impl Fn()) {
     }
 }
 
+/// A short trail of what the app is doing (app.log, last 200 lines), written
+/// before anything that talks to Windows directly. If Windows ever closes the
+/// app outright (no crash.log), the last lines show what it was doing.
+pub(crate) fn trail(event: &str) {
+    let Some(path) = crash_log_path().map(|p| p.with_file_name("app.log")) else { return };
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+    let old = std::fs::read_to_string(&path).unwrap_or_default();
+    let lines: Vec<&str> = old.lines().collect();
+    let mut out: String = lines[lines.len().saturating_sub(199)..].iter().map(|l| format!("{l}\n")).collect();
+    let when = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
+    out.push_str(&format!("{when} {event}\n"));
+    let _ = std::fs::write(&path, out);
+}
+
+/// The last lines of the trail, for Copy diagnostics.
+pub(crate) fn recent_trail() -> Option<String> {
+    let text = std::fs::read_to_string(crash_log_path()?.with_file_name("app.log")).ok()?;
+    let tail: Vec<&str> = text.lines().rev().take(25).collect();
+    (!tail.is_empty()).then(|| tail.into_iter().rev().collect::<Vec<_>>().join("\n"))
+}
+
 /// Where crashes are written (%LOCALAPPDATA%\app.crosspov.desktop\crash.log).
 fn crash_log_path() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("app.crosspov.desktop").join("crash.log"))
@@ -520,6 +544,7 @@ fn log_crashes() {
 
 pub fn run() {
     log_crashes();
+    trail(&format!("started v{}", env!("CARGO_PKG_VERSION")));
     // Single-exe update: the old copy started us and is closing; wait for it
     // so the one-instance check doesn't hand control back to it.
     updater::finish_self_update();

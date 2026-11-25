@@ -176,6 +176,7 @@ impl Updates {
 
     async fn install(&self, app: &AppHandle, update: Update) {
         let version = update.version.clone();
+        crate::trail(&format!("update: installing {version}"));
         crate::show_main_window(app);
         self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded: 0, total: None });
         let mut downloaded = 0u64;
