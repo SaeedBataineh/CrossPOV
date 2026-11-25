@@ -16,7 +16,7 @@ export const resultColor = (letter?: string) => (letter === "W" ? "var(--win)" :
 
 /** Text and colour class for one streamer's progress. */
 export function streamerLabel(s: StreamerPlayer): { text: string; tone: "good" | "warn" | "purple" | "bad" | "muted" } {
-  if (s.checking) return { text: "checking it was this match…", tone: "purple" };
+  if (s.checking) return { text: s.manual ? "checking it was this match…" : "lining up their VOD…", tone: "purple" };
   if (s.status === "failed" && s.message?.includes("different game")) return { text: "was in a different game", tone: "bad" };
   if (s.status === "failed" && s.message?.includes("other team")) return { text: "wrong player picked", tone: "bad" };
   switch (s.status) {

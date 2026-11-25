@@ -277,7 +277,7 @@ test("recent matches lists ids from HenrikDev's stored matches", async () => {
   assert.match(r.calls[0].url, /\/valorant\/v1\/stored-matches\/eu\/A\/B\?size=10$/);
 });
 
-import { scannerMatch, scannerStreams, scannerVerify, sign } from "../src/scanner.ts";
+import { eliminations, scannerMatch, scannerStreams, scannerVerify, sign } from "../src/scanner.ts";
 
 test("scanner requests are signed exactly like the VPS checks them", async () => {
   // Value computed by tools/scanner/api.py signature() for the same inputs.
@@ -337,8 +337,12 @@ test("a hand-linked channel is checked against its VOD's scoreboard", async () =
     assert.deepEqual([JSON.parse(sentBody).login, JSON.parse(sentBody).team], ["wtfslump", "Blue"]);
     answer({ status: "done", verdict: "different", checked: 4, agreed: 0 });
     assert.deepEqual(await scannerVerify(env, full, "wtfslump", "Blue"), { verdict: "different", delaySec: null });
-    answer({ status: "done", verdict: "match", delaySec: 30 });
-    assert.deepEqual(await scannerVerify(env, full, "x_streamer", "Blue"), { verdict: "match", delaySec: 30 });
+    answer({ status: "done", verdict: "match", shiftSec: 74 });
+    assert.deepEqual(await scannerVerify(env, full, "x_streamer", "Blue"), { verdict: "match", delaySec: 74 });
+    await scannerVerify(env, full, "x_streamer", "Blue", "shift");
+    assert.equal(JSON.parse(sentBody).mode, "shift");
+    answer({ status: "done", verdict: "match", shiftSec: 9999 });
+    assert.equal((await scannerVerify(env, full, "x_streamer", "Blue")).delaySec, null, "silly shifts are ignored");
     answer({ status: "done", verdict: "something new" });
     assert.equal((await scannerVerify(env, full, "x_streamer", "Blue")).verdict, "unknown");
     globalThis.fetch = (async () => { throw new Error("down"); }) as typeof fetch;
@@ -346,4 +350,26 @@ test("a hand-linked channel is checked against its VOD's scoreboard", async () =
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("rounds that ended by elimination are sent with the time they were decided", () => {
+  const players = ["a1", "a2", "b1", "b2"].map((p) => ({ puuid: p, name: p, tag: "x", team: p[0] === "a" ? "A" : "B", agent: "Jett", kills: 0, deaths: 0, assists: 0 }));
+  const kill = (round: number, atMs: number, killer: string, victim: string) => ({ round, atMs, inRoundMs: 0, killer, victim, weapon: null });
+  const m = {
+    id: "m", map: "Summit", mode: "Competitive", region: "na", startedAt: "2026-11-24T15:25:04Z", lengthMs: 600_000,
+    teams: [{ id: "A", won: true, roundsWon: 2 }, { id: "B", won: false, roundsWon: 1 }],
+    players,
+    rounds: [
+      { index: 0, winner: "A", startMs: 0 },
+      { index: 1, winner: "B", startMs: 100_000 },
+      { index: 2, winner: "A", startMs: 200_000 },
+    ],
+    kills: [
+      kill(0, 30_000, "a1", "b1"), kill(0, 41_000, "a2", "b2"), // round 1: both of B dead at 41 s
+      kill(1, 130_000, "b1", "a1"), // round 2: only one of A died (spike): not an elimination
+      kill(2, 230_000, "b1", "a1"), kill(2, 240_000, "a2", "b1"), kill(2, 252_000, "a2", "b2"),
+    ],
+  };
+  assert.deepEqual(eliminations(m, [0, 1, 2]), [{ decidedMs: 41_000, round: 0 }, { decidedMs: 252_000, round: 2 }]);
+  assert.equal(scannerMatch(m), null, "fewer than 4 rounds: nothing sent");
 });

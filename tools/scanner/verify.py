@@ -122,3 +122,61 @@ def verify(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str
         mid.delay_s = (fits[0].delay_s + fits[-1].delay_s) // 2
         return mid
     return best
+
+
+# ---------- exact shift ----------
+
+SHIFT_STEP_S = 8
+MAX_SHIFT_S = 240  # stream delay plus agent select and loading
+
+
+def measure_shift(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str, str], team: str,
+                  events: list[tuple[int, int]], ffmpeg: str, grab=frame_at, read=read_frame, want: int = 3) -> float | None:
+    """How many seconds later than `offset + match time` things happen in this VOD.
+
+    The match's start time is roughly when agent select began, and every
+    streamer has their own broadcast delay, so a VOD runs 1-2 minutes "late"
+    and by a different amount per streamer. `events` are (match ms, round
+    position) of rounds that ended by elimination: the HUD score changes at
+    exactly that moment. Each is found by stepping through the VOD until the
+    score changes, then halving the gap to about a second. The median of a
+    few agreeing rounds is returned, or None if the score couldn't be read."""
+    other = teams[1] if team == teams[0] else teams[0]
+    timeline = score_timeline(rounds, teams)
+    found: list[float] = []
+    for decided_ms, pos in events:
+        if pos >= len(timeline):
+            continue
+        _, before, after = timeline[pos]
+        b, a = (before[team], before[other]), (after[team], after[other])
+        base = offset_s + decided_ms / 1000
+        lo = hi = None
+        t = base - 4
+        while t <= base + MAX_SHIFT_S:
+            img = grab(playlist, t, ffmpeg)
+            got = read(img) if img is not None else None
+            if got == b:
+                lo = t
+            elif got == a:
+                hi = t
+                break
+            t += SHIFT_STEP_S
+        if lo is None or hi is None:
+            continue  # score hidden, or it changed before we looked: can't pin it down
+        while hi - lo > 1.0:
+            mid = (lo + hi) / 2
+            img = grab(playlist, mid, ffmpeg)
+            got = read(img) if img is not None else None
+            if got == b:
+                lo = mid
+            elif got == a:
+                hi = mid
+            else:
+                break
+        found.append(hi - base)
+        if len(found) >= want:
+            break
+    if not found:
+        return None
+    found.sort()
+    return round(found[len(found) // 2], 1)

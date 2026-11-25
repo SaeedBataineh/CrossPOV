@@ -34,7 +34,7 @@ class ApiTest(unittest.TestCase):
         self.store.add([(r.login, "uid-" + r.login, r.taken_ms, r.uncertain_ms, r.left, r.right, None, 1.5) for r in rows])
         self.verified = []
 
-        def fake_verify(login, user_id, start, rounds, teams, team):
+        def fake_verify(login, user_id, start, rounds, teams, team, events=()):
             self.verified.append(login)
             return {"login": login, "userId": user_id, "team": team, "delaySec": 15} if login == "streamer" else None
 
@@ -92,8 +92,8 @@ class ApiTest(unittest.TestCase):
     def test_verify_request_runs_in_the_background(self):
         calls = []
 
-        def examine(login, start, rounds, teams, team):
-            calls.append((login, team))
+        def examine(login, start, rounds, teams, team, events=(), mode="check"):
+            calls.append((login, team) if mode == "check" else (login, team, mode, list(events)))
             return {"verdict": "different", "checked": 4, "agreed": 0}
 
         m = Matcher(self.store, lambda *a: None, examine)
@@ -111,6 +111,13 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.verify_request({**MATCH, "login": "someone", "team": "Green"})
         self.assertEqual(Matcher(self.store, lambda *a: None).verify_request(body)["verdict"], "unknown", "no VOD reader: never a wrong no")
+        # Found by name: only the shift is measured, with the rounds that ended by elimination.
+        shift = {**body, "mode": "shift", "events": [{"decidedMs": 130620, "round": 0}]}
+        for _ in range(100):
+            if m.verify_request(shift)["status"] == "done":
+                break
+            time.sleep(0.02)
+        self.assertEqual(calls[-1], ("wtfslump", "Blue", "shift", [(130620, 0)]))
 
     def test_twitch_durations(self):
         self.assertEqual(_duration_s("1h2m3s"), 3723)

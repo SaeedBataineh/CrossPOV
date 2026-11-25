@@ -201,8 +201,18 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
   const scan = await scannerStreams(env, match);
   const known = new Set(all.streamers.map((s) => s.channel.login.toLowerCase()));
   const suggested = scan.streams.filter((s) => !known.has(s.login.toLowerCase()));
-  const pending = scan.status === "pending";
-  return json({ ...all, streamers: all.streamers.filter((s) => s.puuid !== me), suggested, scanner: scan.status }, 200, pending ? 0 : ttl);
+  // Each streamer's VOD runs late by agent select plus their stream delay
+  // (1-2 minutes): the scanner measures it from when rounds ended, so clips
+  // are cut at the right second. "pending" until it has (a minute or two).
+  const shown = all.streamers.filter((s) => s.puuid !== me);
+  const measured = await Promise.all(
+    shown.map(async (s) => {
+      const team = match.players.find((p) => p.puuid === s.puuid)?.team;
+      return s.vod && team ? { ...s, verify: await scannerVerify(env, match, s.channel.login, team, "shift") } : s;
+    }),
+  );
+  const pending = scan.status === "pending" || measured.some((s) => "verify" in s && s.verify?.verdict === "pending");
+  return json({ ...all, streamers: measured, suggested, scanner: scan.status }, 200, pending ? 0 : ttl);
 }
 
 async function channel(region: string, id: string, url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {

@@ -75,6 +75,9 @@ pub struct StreamerHit {
     pub channel: Channel,
     pub vod: Option<Vod>,
     pub live_game: Option<String>,
+    /// How far their VOD is shifted from the match clock, measured by the scanner.
+    #[serde(default)]
+    pub verify: Option<VerifyInfo>,
 }
 
 #[derive(Deserialize)]
@@ -92,7 +95,7 @@ struct StreamersResponse {
 }
 
 /// The scoreboard scanner's verdict on a channel linked by hand.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyInfo {
     /// "match", "otherTeam", "different", "pending", "unknown" or "off".
@@ -596,7 +599,7 @@ fn apply_verify(p: &mut PlayerState, v: &VerifyInfo) {
     } else if p.message.as_deref() == Some("Checking their VOD shows this match…") {
         p.message = None;
     }
-    if let Some(d) = v.delay_sec.filter(|_| v.verdict == "match") {
+    if let Some(d) = v.delay_sec.filter(|_| matches!(v.verdict.as_str(), "match" | "unknown")) {
         p.delay_sec = d.clamp(0.0, 300.0);
     }
 }
@@ -615,9 +618,13 @@ pub fn player_label(player: &crate::matches::MatchPlayer, me: Option<&crate::mat
 pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchSummary, me: Option<&str>, s: &Settings) {
     for hit in hits {
         let fights = me.map(|me| fight_windows(m, me, &hit.puuid, s).len() as u32).unwrap_or(0);
+        let shift = hit.verify.clone();
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == hit.puuid) {
             p.vod = hit.vod.or(p.vod.take());
             p.fights = fights;
+            if let Some(v) = &shift {
+                apply_shift(p, v);
+            }
         } else {
             state.players.push(PlayerState {
                 puuid: hit.puuid,
@@ -634,9 +641,29 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 delay_sec: 0.0,
                 checking: false,
             });
+            if let (Some(v), Some(p)) = (&shift, state.players.last_mut()) {
+                apply_shift(p, v);
+            }
         }
     }
 }
+
+/// A streamer found by name: wait for the scanner's measured shift, then use it.
+/// (Their verdict is never used to reject them: their name already matched.)
+fn apply_shift(p: &mut PlayerState, v: &VerifyInfo) {
+    if p.manual {
+        return; // linked by hand: apply_verify handles these
+    }
+    p.checking = v.pending();
+    if let Some(d) = v.delay_sec {
+        p.delay_sec = d.clamp(0.0, 300.0);
+    }
+}
+
+/// Used when a VOD's shift couldn't be measured (scanner down, scoreboard
+/// hidden): the match clock starts about at agent select, so VODs run this
+/// much late plus the streamer's own delay. Measured: 74 and 87 s.
+const FALLBACK_SHIFT_S: f64 = 75.0;
 
 // ---------- worker ----------
 
@@ -894,8 +921,9 @@ impl StreamerWorker {
                 if p.done.contains(&w.key()) {
                     continue;
                 }
-                // Their broadcast delay puts each moment that much later in the VOD.
-                let shift = vod.offset_sec + p.delay_sec;
+                // Agent select and their broadcast delay put each moment this much later in the VOD.
+                let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
+                let shift = vod.offset_sec + late;
                 let (from, to) = (shift + w.start, shift + w.end);
                 if from < 0.0 {
                     continue; // Moment happened before their stream began.
@@ -1277,13 +1305,23 @@ mod tests {
             channel: Channel { id: "9".into(), login: "streamer".into(), display_name: "Streamer".into() },
             vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
             live_game: Some("VALORANT".into()),
+            verify: None,
         };
         merge_hits(&mut state, vec![hit.clone()], &m, Some("me"), &five_sec());
         assert_eq!(state.players.len(), 1);
         assert_eq!(state.players[0].fights, 2);
         assert_eq!(state.players[0].status, StreamerStatus::Working);
         // A later answer updates, never duplicates.
-        merge_hits(&mut state, vec![hit], &m, Some("me"), &five_sec());
+        merge_hits(&mut state, vec![hit.clone()], &m, Some("me"), &five_sec());
         assert_eq!(state.players.len(), 1);
+        // The scanner still measuring their VOD's shift: hold the downloads...
+        let pending = StreamerHit { verify: Some(VerifyInfo { verdict: "pending".into(), delay_sec: None }), ..hit.clone() };
+        merge_hits(&mut state, vec![pending], &m, Some("me"), &five_sec());
+        assert!(state.players[0].checking);
+        // ...then cut with it.
+        let measured = StreamerHit { verify: Some(VerifyInfo { verdict: "match".into(), delay_sec: Some(74.0) }), ..hit };
+        merge_hits(&mut state, vec![measured], &m, Some("me"), &five_sec());
+        assert!(!state.players[0].checking);
+        assert_eq!(state.players[0].delay_sec, 74.0);
     }
 }

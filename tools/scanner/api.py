@@ -5,11 +5,13 @@ POST /match   body: {"id", "startedAt" (ms), "lengthMs", "teams": [a, b],
                      "rounds": [{"startMs", "winner"}]}
               -> {"status": "pending"} while it checks, then
                  {"status": "done", "streams": [{login, userId, team, delaySec, vod...}]}
-POST /verify  body: the match as for /match plus {"login", "team"}: was this
-              channel's stream in this match? (A channel the user linked by hand.)
+POST /verify  body: the match as for /match (with "events": rounds that ended
+              by elimination, [{"decidedMs", "round"}]) plus {"login", "team",
+              "mode"}. mode "check" (a channel the user linked by hand): was this
+              stream in this match? mode "shift" (found by name): only measure it.
               -> {"status": "pending"} while it reads their VOD, then
                  {"status": "done", "verdict": "match" | "otherTeam" | "different" | "unknown",
-                  "delaySec"?, "checked", "agreed"}
+                  "shiftSec"?: how much later than the match clock things happen in their VOD}
 GET  /health  -> reading counts (also signed)
 
 Requests must be signed: header X-CrossPOV-Time (unix seconds) and
@@ -59,6 +61,11 @@ def check_signature(key: bytes, headers, method: str, path: str, body: bytes, no
     return hmac.compare_digest(signature(key, ts, method, path, body), sig)
 
 
+def parse_events(body: dict) -> list[tuple[int, int]]:
+    """(match ms, round position) of rounds that ended by elimination."""
+    return [(int(e["decidedMs"]), int(e["round"])) for e in (body.get("events") or [])[:40]]
+
+
 def parse_match(body: dict) -> tuple[str, int, int, tuple[str, str], list[Round]]:
     mid = str(body["id"])[:64]
     start = int(body["startedAt"])
@@ -83,42 +90,45 @@ class Matcher:
 
     def request(self, match: dict) -> dict:
         mid, start, length, teams, rounds = parse_match(match)
+        events = parse_events(match)
         with self.lock:
             now = time.time()
             self.results = {k: v for k, v in self.results.items() if now - v[0] < RESULT_TTL_S}
             if mid in self.results:
                 return self.results[mid][1]
             self.results[mid] = (now, {"status": "pending"})
-        self.pool.submit(self._run, mid, start, length, teams, rounds)
+        self.pool.submit(self._run, mid, start, length, teams, rounds, events)
         return {"status": "pending"}
 
     def verify_request(self, body: dict) -> dict:
-        """Is `login`'s stream this match, on `team`? Answered in the background like /match."""
+        """Is `login`'s stream this match (mode "check"), and how far is it shifted? Answered in the background like /match."""
         mid, start, length, teams, rounds = parse_match(body)
+        events = parse_events(body)
         login = str(body.get("login", "")).lower()
         team = str(body.get("team", ""))
+        mode = "shift" if body.get("mode") == "shift" else "check"
         if not (3 <= len(login) <= 25 and login.replace("_", "").isalnum()) or team not in teams:
             raise ValueError("bad login or team")
         if self.examine is None:
             return {"status": "done", "verdict": "unknown", "reason": "no VOD reader"}
-        key = f"verify:{mid}:{login}:{team}"
+        key = f"verify:{mode}:{mid}:{login}:{team}"
         with self.lock:
             now = time.time()
             if key in self.results:
                 return self.results[key][1]
             self.results[key] = (now, {"status": "pending"})
-        self.pool.submit(self._run_verify, key, login, start, rounds, teams, team)
+        self.pool.submit(self._run_verify, key, login, start, rounds, teams, team, events, mode)
         return {"status": "pending"}
 
-    def _run_verify(self, key, login, start, rounds, teams, team):
+    def _run_verify(self, key, login, start, rounds, teams, team, events, mode):
         try:
-            result = {"status": "done", **self.examine(login, start, rounds, teams, team)}
+            result = {"status": "done", **self.examine(login, start, rounds, teams, team, events, mode)}
         except Exception as e:  # unknown, never a wrong "no"
             result = {"status": "done", "verdict": "unknown", "reason": str(e)[:200]}
         with self.lock:
             self.results[key] = (time.time(), result)
 
-    def _run(self, mid, start, length, teams, rounds):
+    def _run(self, mid, start, length, teams, rounds, events=()):
         try:
             rows = self.store.between(start - 60_000, start + length + PREVIEW_AGE_MS + MAX_DELAY_MS)
             readings = [Reading(r[0], r[2], r[4], r[5], r[3]) for r in rows]
@@ -126,7 +136,7 @@ class Matcher:
             candidates = match_streams(readings, start, length, rounds, teams)[:MAX_CANDIDATES]
             streams = []
             for c in candidates:
-                found = self.verify_stream(c.login, user_ids.get(c.login, ""), start, rounds, teams, c.team)
+                found = self.verify_stream(c.login, user_ids.get(c.login, ""), start, rounds, teams, c.team, events)
                 if found:
                     streams.append(found)
             result = {"status": "done", "streams": streams, "candidates": len(candidates)}
@@ -139,7 +149,7 @@ class Matcher:
 def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
     """verify_stream for real: find the streamer's VOD that covers the match and read it."""
     from poc import token
-    from verify import ffmpeg_path, playlist_url, verify
+    from verify import ffmpeg_path, measure_shift, playlist_url, verify
 
     ffmpeg = ffmpeg_path()
     session = requests.Session()
@@ -161,7 +171,7 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
                 return v, offset
         return None
 
-    def check(login, user_id, start, rounds, teams, team):
+    def check(login, user_id, start, rounds, teams, team, events=()):
         auth()
         found = vod_for(user_id, start)
         if not found:
@@ -173,18 +183,19 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
         verdict = verify(playlist, offset, rounds, teams, team, ffmpeg)
         if not verdict.ok:
             return None
+        shift = measure_shift(playlist, offset, rounds, teams, team, list(events), ffmpeg) if events else None
         return {
             "login": login,
             "userId": user_id,
             "displayName": v.get("user_name") or login,
             "team": team,
-            "delaySec": verdict.delay_s,
+            "delaySec": shift if shift is not None else verdict.delay_s,
             "vod": {"id": v["id"], "url": v["url"], "offsetSec": round(offset)},
             "checked": verdict.checked,
         }
 
-    def examine(login, start, rounds, teams, team):
-        """For a channel linked by hand: does their VOD show this match's score at its moments?"""
+    def examine(login, start, rounds, teams, team, events=(), mode="check"):
+        """A channel linked by hand ("check"): does their VOD show this match? Always: how shifted is it?"""
         auth()
         r = session.get("https://api.twitch.tv/helix/users", params={"login": login}, timeout=20)
         users = r.json().get("data", []) if r.ok else []
@@ -197,7 +208,15 @@ def twitch_vod_checker(client_id: str, secret: str, ytdlp: str):
         playlist = playlist_url(v["url"], ytdlp)
         if not playlist:
             return {"verdict": "unknown", "reason": "VOD not readable"}
-        return judge(lambda side: verify(playlist, offset, rounds, teams, side, ffmpeg), teams, team)
+        result = {"verdict": "unknown"} if mode == "shift" else judge(lambda side: verify(playlist, offset, rounds, teams, side, ffmpeg), teams, team)
+        if result["verdict"] in ("match", "otherTeam", "unknown") and events:
+            side = team if result["verdict"] != "otherTeam" else (teams[1] if team == teams[0] else teams[0])
+            shift = measure_shift(playlist, offset, rounds, teams, side, list(events), ffmpeg)
+            if shift is not None:
+                result["shiftSec"] = shift
+                if mode == "shift":
+                    result["verdict"] = "match"  # the score changed exactly when this match's rounds ended
+        return result
 
     return check, examine
 

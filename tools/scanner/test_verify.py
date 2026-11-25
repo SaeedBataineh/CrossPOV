@@ -1,7 +1,7 @@
 import unittest
 
 from matcher import Round, score_timeline
-from verify import check_points, verify
+from verify import check_points, measure_shift, verify
 
 TEAMS = ("Blue", "Red")
 WINNERS = ["Blue", "Red", "Red", "Blue", "Blue", "Blue", "Red", "Blue", "Blue", "Red", "Blue", "Blue"]
@@ -62,3 +62,37 @@ class VerifyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShiftTest(unittest.TestCase):
+    """measure_shift on a fake VOD whose HUD runs `late` seconds behind the match clock."""
+
+    def vod(self, team, late, hidden=()):
+        other = "Red" if team == "Blue" else "Blue"
+        timeline = score_timeline(ROUNDS, TEAMS)
+        # Score changes the moment each round is decided (here: 80 s into the round).
+        ends = [start + 80_000 for start, _, _ in timeline]
+
+        def grab(_p, t, _f):
+            game_ms = (t - OFFSET - late) * 1000
+            if any(abs(game_ms - h) < 3_000 for h in hidden):
+                return None
+            done = sum(1 for e in ends if e <= game_ms)
+            if done == 0:
+                return (0, 0)
+            _, _, after = timeline[done - 1]
+            return (after[team], after[other])
+
+        return grab, [(e, i) for i, e in enumerate(ends)]
+
+    def test_finds_the_shift_to_about_a_second(self):
+        for late in (0.0, 37.5, 74.0, 131.0):
+            grab, events = self.vod("Red", late)
+            got = measure_shift("pl", OFFSET, ROUNDS, TEAMS, "Red", events[2:6], "ff", grab=grab, read=read)
+            self.assertIsNotNone(got)
+            self.assertLess(abs(got - late), 1.5, f"late {late}: got {got}")
+
+    def test_hidden_scoreboard_gives_none_not_a_guess(self):
+        grab, events = self.vod("Blue", 60, hidden=[e for e, _ in self.vod("Blue", 60)[1]])
+        self.assertIsNone(measure_shift("pl", OFFSET, ROUNDS, TEAMS, "Blue", [(e, i) for e, i in events][:1], "ff",
+                                        grab=lambda *a: None, read=read))

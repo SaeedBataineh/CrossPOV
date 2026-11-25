@@ -53,13 +53,44 @@ async function call(env: ScannerEnv, method: string, path: string, body = "", ti
   return res.json();
 }
 
-/** The match as the scanner needs it: score timeline only, no player data. */
-export function scannerMatch(m: MatchSummary): { id: string; startedAt: number; lengthMs: number; teams: string[]; rounds: { startMs: number; winner: string | null }[] } | null {
+/**
+ * The match as the scanner needs it: the score timeline only, no player data.
+ * `events`: rounds that ended with the whole losing team dead, and when. The
+ * HUD score changes at exactly that moment, so the scanner can measure how far
+ * a streamer's VOD is shifted from the match clock (agent select, stream delay).
+ */
+export function scannerMatch(m: MatchSummary): {
+  id: string;
+  startedAt: number;
+  lengthMs: number;
+  teams: string[];
+  rounds: { startMs: number; winner: string | null }[];
+  events: { decidedMs: number; round: number }[];
+} | null {
   const startedAt = Date.parse(m.startedAt);
   const teams = m.teams.map((t) => t.id).slice(0, 2);
-  const rounds = m.rounds.filter((r) => r.startMs != null).map((r) => ({ startMs: r.startMs as number, winner: r.winner }));
+  const timed = m.rounds.filter((r) => r.startMs != null);
+  const rounds = timed.map((r) => ({ startMs: r.startMs as number, winner: r.winner }));
   if (Number.isNaN(startedAt) || teams.length !== 2 || rounds.length < 4) return null; // deathmatch etc.: no round score to match
-  return { id: m.id, startedAt, lengthMs: m.lengthMs, teams, rounds };
+  return { id: m.id, startedAt, lengthMs: m.lengthMs, teams, rounds, events: eliminations(m, timed.map((r) => r.index)) };
+}
+
+/** (time, position in `order`) of rounds the winners decided by killing the whole other team. */
+export function eliminations(m: MatchSummary, order: number[]): { decidedMs: number; round: number }[] {
+  const teamOf = new Map(m.players.map((p) => [p.puuid, p.team]));
+  const size = (team: string) => m.players.filter((p) => p.team === team).length;
+  const out: { decidedMs: number; round: number }[] = [];
+  m.rounds.forEach((r) => {
+    const pos = order.indexOf(r.index);
+    if (pos < 0 || !r.winner) return;
+    const loser = m.teams.find((t) => t.id !== r.winner)?.id;
+    if (!loser) return;
+    const deaths = m.kills.filter((k) => k.round === r.index && teamOf.get(k.victim) === loser);
+    if (new Set(deaths.map((k) => k.victim)).size >= size(loser) && deaths.length) {
+      out.push({ decidedMs: Math.max(...deaths.map((k) => k.atMs)), round: pos });
+    }
+  });
+  return out.slice(0, 40);
 }
 
 export async function scannerStreams(env: ScannerEnv, m: MatchSummary): Promise<ScannerResult> {
@@ -88,19 +119,25 @@ export type VerifyVerdict = "pending" | "match" | "otherTeam" | "different" | "u
 
 export interface VerifyResult {
   verdict: VerifyVerdict;
+  /** How many seconds later than the match clock things happen in their VOD (measured), else null. */
   delaySec?: number | null;
 }
 
-/** For a channel linked by hand: does their VOD show this match's score, from `team`'s side? */
-export async function scannerVerify(env: ScannerEnv, m: MatchSummary, login: string, team: string): Promise<VerifyResult> {
+/**
+ * mode "check" (a channel linked by hand): does their VOD show this match's
+ * score, from `team`'s side, and how shifted is it? mode "shift" (found by
+ * name, so surely in the match): only measure the shift.
+ */
+export async function scannerVerify(env: ScannerEnv, m: MatchSummary, login: string, team: string, mode: "check" | "shift" = "check"): Promise<VerifyResult> {
   if (!env.SCANNER_URL || !env.SCANNER_KEY) return { verdict: "off" };
   const body = scannerMatch(m);
   if (!body) return { verdict: "unknown" }; // deathmatch etc.: no round score to read
   try {
-    const r = (await call(env, "POST", "/verify", JSON.stringify({ ...body, login, team }))) as { status?: string; verdict?: string; delaySec?: number | null };
+    const r = (await call(env, "POST", "/verify", JSON.stringify({ ...body, login, team, mode }))) as { status?: string; verdict?: string; shiftSec?: number | null };
     if (r.status !== "done") return { verdict: "pending" };
     const verdict = (["match", "otherTeam", "different", "unknown"] as const).find((v) => v === r.verdict) ?? "unknown";
-    return { verdict, delaySec: typeof r.delaySec === "number" ? r.delaySec : null };
+    const shift = typeof r.shiftSec === "number" && r.shiftSec >= 0 && r.shiftSec <= 300 ? r.shiftSec : null;
+    return { verdict, delaySec: shift };
   } catch {
     return { verdict: "unknown" }; // scanner down: don't block the link
   }
