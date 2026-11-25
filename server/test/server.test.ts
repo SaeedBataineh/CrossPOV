@@ -266,3 +266,13 @@ test("version endpoint reports the newest release", async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(r.body, { version: "0.4.2", releasedAt: "2026-11-24T20:41:51.000Z" });
 });
+
+test("recent matches lists ids from HenrikDev's stored matches", async () => {
+  resetHenrikPause();
+  const r = await call("/api/recent-matches?region=eu&name=A&tag=B", () =>
+    Response.json({ status: 200, data: [{ meta: { id: MATCH_ID, map: { name: "Ascent" }, mode: "Competitive", started_at: "2026-11-24T19:00:00.000Z" } }, { meta: { id: "bad" } }] }),
+  );
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.matches, [{ id: MATCH_ID, map: "Ascent", mode: "Competitive", startedAt: "2026-11-24T19:00:00.000Z" }]);
+  assert.match(r.calls[0].url, /\/valorant\/v1\/stored-matches\/eu\/A\/B\?size=10$/);
+});

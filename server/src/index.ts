@@ -2,6 +2,7 @@
 //
 // GET /api/health
 // GET /api/version         newest app release, for the website
+// GET /api/recent-matches?region=eu&name=<name>&tag=<tag>   last 10 match ids
 // GET /api/latest-match?region=eu&name=<name>&tag=<tag>
 // GET /api/match/<region>/<matchId>
 // GET /api/match/<region>/<matchId>/streamers?me=<puuid>
@@ -126,6 +127,25 @@ async function cachedData<T>(key: string, ttl: number, ctx: ExecutionContext | u
   })();
   inFlight.set(key, job);
   return job;
+}
+
+/** Recent match ids for a Riot ID (a light list; full matches load one by one via /api/match). */
+async function recentMatches(url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  const region = (url.searchParams.get("region") ?? "").toLowerCase();
+  const name = (url.searchParams.get("name") ?? "").trim();
+  const tag = (url.searchParams.get("tag") ?? "").trim().replace(/^#/, "");
+  if (!REGIONS.has(region)) throw new HttpError(400, "Region must be one of: na, eu, ap, kr, br, latam.");
+  if (!validRiotId(name, tag)) throw new HttpError(400, "Enter a Riot ID like Name#TAG.");
+  const key = `recent/${region}/${encodeURIComponent(name.toLowerCase())}/${encodeURIComponent(tag.toLowerCase())}`;
+  const body = await cachedData(key, LATEST_TTL, ctx, async () => {
+    const path = `/valorant/v1/stored-matches/${region}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10`;
+    const res = (await henrik(env, path)) as { data?: { meta?: { id?: string; map?: { name?: string }; mode?: string; started_at?: string } }[] };
+    const matches = (res.data ?? [])
+      .map((d) => ({ id: d.meta?.id ?? "", map: d.meta?.map?.name ?? "", mode: d.meta?.mode ?? "", startedAt: d.meta?.started_at ?? "" }))
+      .filter((m) => MATCH_ID.test(m.id));
+    return { matches };
+  });
+  return json(body, 200, LATEST_TTL);
 }
 
 async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -256,6 +276,7 @@ export async function handleApi(request: Request, env: Env, ctx?: ExecutionConte
       return json({ version: latest.version, releasedAt: new Date(latest.publishedMs).toISOString() }, 200, 300);
     }
     if (url.pathname === "/api/latest-match") return await latestMatch(url, env, ctx);
+    if (url.pathname === "/api/recent-matches") return await recentMatches(url, env, ctx);
     const c = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/channel$/);
     if (c) return await channel(c[1], c[2], url, env, ctx);
     const s = url.pathname.match(/^\/api\/match\/([a-z]+)\/([^/]+)\/streamers$/);
