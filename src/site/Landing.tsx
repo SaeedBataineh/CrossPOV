@@ -188,10 +188,7 @@ export default function Landing() {
             Windows shows this for new apps it hasn&rsquo;t seen many downloads of yet. CrossPOV never touches the game or
             the Riot client; it only records your screen, like OBS.
           </div>
-          <p className="muted small">
-            Needs Windows 10 or 11 (64-bit). All versions are on{" "}
-            <a href="https://github.com/SaeedBataineh/CrossPOV/releases" target="_blank" rel="noreferrer">GitHub</a>.
-          </p>
+          <p className="muted small">Needs Windows 10 or 11 (64-bit).</p>
         </section>
       </main>
 
