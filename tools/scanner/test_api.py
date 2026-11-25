@@ -119,6 +119,29 @@ class ApiTest(unittest.TestCase):
             time.sleep(0.02)
         self.assertEqual(calls[-1], ("wtfslump", "Blue", "shift", [(130620, 0)]))
 
+    def test_streamer_accounts_over_http(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(KEY, self.matcher, self.store))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+
+        def post(path, payload, sign=True):
+            body = json.dumps(payload).encode()
+            req = urllib.request.Request(base + path, data=body, headers=signed("POST", path, body) if sign else {}, method="POST")
+            return json.load(urllib.request.urlopen(req))
+
+        try:
+            self.assertEqual(post("/links/save", {"links": [{"puuid": "p-main", "login": "NaturE", "kind": "main", "source": "name"},
+                                                             {"puuid": "p-smurf", "login": "nature", "kind": "smurf", "source": "submitted"}]})["saved"], 2)
+            found = post("/links/lookup", {"puuids": ["p-main", "p-smurf", "someone-else"]})["links"]
+            self.assertEqual(sorted((l["puuid"], l["login"], l["kind"]) for l in found), [("p-main", "nature", "main"), ("p-smurf", "nature", "smurf")])
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                post("/links/lookup", {"puuids": ["p-main"]}, sign=False)
+            self.assertEqual(e.exception.code, 401, "only the CrossPOV server may ask")
+            self.store.opt_out("nature")
+            self.assertEqual(post("/links/lookup", {"puuids": ["p-main", "p-smurf"]})["links"], [], "a removed streamer is gone")
+        finally:
+            server.shutdown()
+
     def test_twitch_durations(self):
         self.assertEqual(_duration_s("1h2m3s"), 3723)
         self.assertEqual(_duration_s("45m"), 2700)

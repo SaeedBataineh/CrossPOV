@@ -142,3 +142,37 @@ export async function scannerVerify(env: ScannerEnv, m: MatchSummary, login: str
     return { verdict: "unknown" }; // scanner down: don't block the link
   }
 }
+
+// ---- Streamer accounts: Riot account -> Twitch channel, kept on the VPS ----
+
+export interface KnownLink {
+  puuid: string;
+  login: string;
+  userId?: string;
+  kind: "main" | "smurf";
+}
+
+/** Saved Twitch channels of these players (mains and smurfs). Empty if the VPS isn't set up or answers slowly. */
+export async function scannerLinks(env: ScannerEnv, puuids: string[]): Promise<Map<string, KnownLink>> {
+  const out = new Map<string, KnownLink>();
+  if (!env.SCANNER_URL || !env.SCANNER_KEY || !puuids.length) return out;
+  try {
+    const r = (await call(env, "POST", "/links/lookup", JSON.stringify({ puuids: puuids.slice(0, 20) }), 4000)) as { links?: KnownLink[] };
+    for (const l of r.links ?? []) {
+      if (typeof l.puuid === "string" && typeof l.login === "string" && /^[a-z0-9_]{3,25}$/.test(l.login)) out.set(l.puuid, l);
+    }
+  } catch {
+    // The VPS being down never stops streamer checks; name matching still works.
+  }
+  return out;
+}
+
+/** Saves links the server has checked (live under that name, or a VOD whose scoreboard showed the match). */
+export async function scannerSaveLinks(env: ScannerEnv, links: (KnownLink & { source: string })[]): Promise<void> {
+  if (!env.SCANNER_URL || !env.SCANNER_KEY || !links.length) return;
+  try {
+    await call(env, "POST", "/links/save", JSON.stringify({ links: links.slice(0, 20) }), 4000);
+  } catch {
+    // Best effort: the link is found again next time.
+  }
+}

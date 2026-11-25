@@ -1,0 +1,50 @@
+name: Remove a streamer
+
+# When a streamer asks not to be kept: deletes every Riot account saved for
+# their Twitch channel (mains and smurfs) from the database on the VPS, and
+# makes sure it's never saved again. Run by hand: Actions -> Remove a
+# streamer -> Run workflow, and type their Twitch channel name.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Their Twitch channel name (e.g. nature)"
+        required: true
+
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the channel name
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          login=$(printf '%s' "$CHANNEL" | tr 'A-Z' 'a-z' | sed 's#^https\?://##; s#^www\.##; s#^twitch\.tv/##; s#/.*##')
+          if ! printf '%s' "$login" | grep -Eq '^[a-z0-9_]{3,25}$'; then
+            echo "::error::'$CHANNEL' isn't a Twitch channel name"
+            exit 1
+          fi
+          echo "LOGIN=$login" >> "$GITHUB_ENV"
+
+      - name: Set up SSH
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          body=$(printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | grep -v -- '-----')
+          { echo "-----BEGIN OPENSSH PRIVATE KEY-----"; printf '%s\n' "$body" | tr -d ' ' ; echo "-----END OPENSSH PRIVATE KEY-----"; } > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host vps\n  HostName %s\n  User crosspov\n  IdentityFile ~/.ssh/deploy\n  IdentitiesOnly yes\n' "$HOST" > ~/.ssh/config
+
+      - name: Remove them
+        run: ssh vps "cd /opt/crosspov && CROSSPOV_DB=/opt/crosspov/readings.db ./venv/bin/python scanner/links_admin.py remove '$LOGIN'"

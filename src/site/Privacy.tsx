@@ -3,7 +3,7 @@ import "./site.css";
 
 /** Where people can reach the developer. Shown on the page only when set. */
 const CONTACT = "contact@crosspov.com";
-const UPDATED = "24 November 2026";
+const UPDATED = "25 November 2026";
 
 export default function Privacy() {
   return (
@@ -46,6 +46,20 @@ export default function Privacy() {
           address to deliver requests; CrossPOV uses it only for short-term rate limiting and does not store it.
         </p>
 
+        <h2>Streamers&rsquo; accounts</h2>
+        <p>
+          To find streamers who play on other accounts, CrossPOV keeps a private list of which VALORANT accounts belong to which
+          Twitch channels. An account is added only after a check: its name matches a channel that was live during the match, or
+          the scoreboard in the channel&rsquo;s public VOD showed that exact match. The list holds the account&rsquo;s Riot player
+          id, the Twitch channel, and when it was confirmed. It is kept on CrossPOV&rsquo;s own server, is never published,
+          listed or searchable, and is only used to check the players of a match a user has played. A streamer who doesn&rsquo;t
+          want their accounts kept can ask to be removed; their entries are deleted and never added again.
+        </p>
+        <p>
+          The scoreboard scanner also reads the score shown on public VALORANT streams on Twitch and keeps those readings for
+          6 hours.
+        </p>
+
         <h2>Data from other services</h2>
         <ul>
           <li>
@@ -69,7 +83,7 @@ export default function Privacy() {
         <ul>
           <li>Turn off automatic streamer clips, or remove your Riot ID, in Settings.</li>
           <li>Delete clips from the app or your clip folder; uninstalling removes the app&rsquo;s data folder.</li>
-          {CONTACT && <li>Questions or removal requests: <a href={`mailto:${CONTACT}`}>{CONTACT}</a></li>}
+          {CONTACT && <li>Questions or removal requests (including streamers asking to have their accounts removed): <a href={`mailto:${CONTACT}`}>{CONTACT}</a></li>}
         </ul>
 
         <p className="muted small">

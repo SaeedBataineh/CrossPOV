@@ -58,6 +58,11 @@ export function loginCandidates(riotName: string): string[] {
   return out;
 }
 
+/** A player's account is a streamer's main when its Riot name is (a form of) the channel name. */
+export function isMainAccount(riotName: string, login: string): boolean {
+  return loginCandidates(riotName).includes(login.toLowerCase());
+}
+
 /** "3h2m1s" -> 10921 */
 export function parseTwitchDuration(d: string): number {
   const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(d.trim());
@@ -134,13 +139,19 @@ export function vodCovers(v: { startMs: number; durationSec: number }, matchStar
  * Players in `match` (except `excludePuuid`, the requester) who were
  * streaming on Twitch when it started.
  */
-export async function findStreamers(env: TwitchEnv, match: MatchSummary, excludePuuid?: string): Promise<StreamerResult[]> {
+export async function findStreamers(env: TwitchEnv, match: MatchSummary, excludePuuid?: string, known?: Map<string, string>): Promise<StreamerResult[]> {
   if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET) throw new TwitchError("Server is missing its Twitch credentials.");
   const matchStart = Date.parse(match.startedAt);
   if (Number.isNaN(matchStart)) return [];
 
   // 1. Which candidate logins exist? One call for everyone (max 100 logins).
+  // A channel already saved for a player (their main or a smurf) goes first.
   const byLogin = new Map<string, MatchPlayer>();
+  for (const p of match.players) {
+    if (p.puuid === excludePuuid) continue;
+    const saved = known?.get(p.puuid);
+    if (saved && !byLogin.has(saved)) byLogin.set(saved, p);
+  }
   for (const p of match.players) {
     if (p.puuid === excludePuuid) continue;
     for (const login of loginCandidates(p.name)) if (!byLogin.has(login)) byLogin.set(login, p);

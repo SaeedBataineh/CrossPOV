@@ -12,6 +12,10 @@ POST /verify  body: the match as for /match (with "events": rounds that ended
               -> {"status": "pending"} while it reads their VOD, then
                  {"status": "done", "verdict": "match" | "otherTeam" | "different" | "unknown",
                   "shiftSec"?: how much later than the match clock things happen in their VOD}
+POST /links/lookup  {"puuids": [...]} -> {"links": [{puuid, login, userId, kind}]}:
+              known Twitch channels of these players (mains and smurfs).
+POST /links/save    {"links": [{puuid, login, userId, kind, source}]}: saves
+              links the server has checked. Kept permanently.
 GET  /health  -> reading counts (also signed)
 
 Requests must be signed: header X-CrossPOV-Time (unix seconds) and
@@ -294,12 +298,16 @@ def make_handler(key: bytes, matcher: Matcher, store: Store):
             body = self.rfile.read(length)
             if not self._authed(body):
                 return
-            if self.path not in ("/match", "/verify"):
+            if self.path not in ("/match", "/verify", "/links/lookup", "/links/save"):
                 return self._send(404, {"error": "not found"})
             try:
                 data = json.loads(body)
+                if self.path == "/links/lookup":
+                    return self._send(200, {"links": store.links_for(list(data.get("puuids") or []))})
+                if self.path == "/links/save":
+                    return self._send(200, {"saved": store.save_links(list(data.get("links") or []))})
                 self._send(200, matcher.request(data) if self.path == "/match" else matcher.verify_request(data))
-            except (ValueError, KeyError, TypeError) as e:
+            except (ValueError, KeyError, TypeError, AttributeError) as e:
                 self._send(400, {"error": f"bad request: {e}"[:200]})
 
         def log_message(self, fmt, *args):  # one short line per request

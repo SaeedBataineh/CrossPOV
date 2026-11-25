@@ -12,9 +12,9 @@
 // upstream once, which keeps us inside the free rate limit.
 
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
-import { scannerHealth, scannerStreams, scannerVerify, type ScannerEnv } from "./scanner.ts";
+import { scannerHealth, scannerLinks, scannerSaveLinks, scannerStreams, scannerVerify, type ScannerEnv } from "./scanner.ts";
 import { clientVersion, LATEST_JSON, outdated, parseLatest, type Latest } from "./appVersion.ts";
-import { checkChannel, findStreamers, TwitchError, type TwitchEnv } from "./twitch.ts";
+import { checkChannel, findStreamers, isMainAccount, TwitchError, type TwitchEnv } from "./twitch.ts";
 
 export interface Env extends TwitchEnv, ScannerEnv {
   HENRIK_API_KEY?: string;
@@ -190,7 +190,20 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
   const ttl = ageMs > 6 * 3_600_000 ? 6 * 3600 : STREAMERS_TTL;
   const all = await cachedData(`streamers/${id.toLowerCase()}`, ttl, ctx, async () => {
     try {
-      return { matchId: match.id, checkedAt: new Date().toISOString(), streamers: await findStreamers(env, match) };
+      // Channels saved earlier for these players (mains and smurfs) are checked first.
+      const known = await scannerLinks(env, match.players.map((p) => p.puuid));
+      const found = await findStreamers(env, match, undefined, new Map([...known].map(([puuid, l]) => [puuid, l.login])));
+      // Remember who streams on which account (checked: live under that name, or saved before).
+      const save = scannerSaveLinks(env, found.map((s) => ({
+        puuid: s.puuid,
+        login: s.channel.login.toLowerCase(),
+        userId: s.channel.id,
+        kind: isMainAccount(s.name, s.channel.login) || known.get(s.puuid)?.kind === "main" ? "main" : "smurf",
+        source: known.has(s.puuid) ? "saved" : "name",
+      })));
+      if (ctx) ctx.waitUntil(save);
+      else await save;
+      return { matchId: match.id, checkedAt: new Date().toISOString(), streamers: found };
     } catch (err) {
       if (err instanceof TwitchError) throw new HttpError(503, err.message);
       throw err;
@@ -228,6 +241,19 @@ async function channel(region: string, id: string, url: URL, env: Env, ctx?: Exe
     // otherwise give clips of a different game). Takes a minute: "pending".
     const team = match.players.find((p) => p.puuid === puuid)?.team;
     const verify = found.length && team ? await scannerVerify(env, match, login, team) : { verdict: "unknown" as const };
+    // Their VOD showed this match: remember this account is theirs (a smurf unless the name matches).
+    const player = match.players.find((p) => p.puuid === puuid);
+    if (verify.verdict === "match" && found[0] && player) {
+      const save = scannerSaveLinks(env, [{
+        puuid,
+        login: found[0].channel.login.toLowerCase(),
+        userId: found[0].channel.id,
+        kind: isMainAccount(player.name, found[0].channel.login) ? "main" : "smurf",
+        source: "submitted",
+      }]);
+      if (ctx) ctx.waitUntil(save);
+      else await save;
+    }
     return json({ matchId: match.id, checkedAt: new Date().toISOString(), streamers: found, verify });
   } catch (err) {
     if (err instanceof TwitchError) throw new HttpError(err.message.startsWith("There's no") ? 404 : 503, err.message);

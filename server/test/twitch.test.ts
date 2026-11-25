@@ -1,6 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { findStreamers, loginCandidates, parseTwitchDuration, resetTwitchToken, vodCovers } from "../src/twitch.ts";
+import { findStreamers, isMainAccount, loginCandidates, parseTwitchDuration, resetTwitchToken, vodCovers } from "../src/twitch.ts";
 import type { MatchSummary } from "../src/match.ts";
 
 const START = "2026-11-24T19:00:00.000Z";
@@ -142,4 +142,38 @@ test("checks a channel the user names for a player", async () => {
   } finally {
     globalThis.fetch = real;
   }
+});
+
+test("a smurf saved before is found though its name matches nothing", async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const reply = (data: unknown) => Response.json({ data });
+    if (url.host === "id.test") return Response.json({ access_token: "tok", expires_in: 3600 });
+    if (url.pathname === "/helix/users") {
+      const logins = url.searchParams.getAll("login");
+      return reply([{ id: "9", login: "nature", display_name: "NaturE" }].filter((u) => logins.includes(u.login)));
+    }
+    if (url.pathname === "/helix/streams") return reply([]);
+    if (url.pathname === "/helix/videos") {
+      if (url.searchParams.get("user_id") === "9")
+        return reply([{ id: "v9", url: "https://www.twitch.tv/videos/v9", created_at: new Date(startMs - 3_600_000).toISOString(), duration: "3h", type: "archive", stream_id: "z" }]);
+      return reply([]);
+    }
+    throw new Error("unexpected " + url);
+  }) as typeof fetch;
+  try {
+    // "random guy" (p2) is NaturE's smurf, saved earlier.
+    const found = await findStreamers(ENV, MATCH, "me", new Map([["p2", "nature"]]));
+    assert.deepEqual(found.map((f) => [f.puuid, f.channel.login]), [["p2", "nature"]]);
+    assert.equal(found[0].vod?.offsetSec, 3600);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("a main account is one whose name is the channel", () => {
+  assert.ok(isMainAccount("TTV Salt_Boran", "salt_boran"));
+  assert.ok(isMainAccount("NaturE", "nature"));
+  assert.ok(!isMainAccount("random guy", "nature"), "a smurf");
 });
