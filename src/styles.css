@@ -143,7 +143,8 @@ a { color: var(--twitch-text); }
 .soft-box { padding: 16px; border-radius: 12px; background: var(--panel); }
 
 /* ---------- Gallery ---------- */
-.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 28px 20px; }
+/* At most three clips per row; fewer when the window is narrow. */
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(230px, calc((100% - 40px) / 3)), 1fr)); gap: 28px 20px; }
 .gcard { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .gthumb { position: relative; aspect-ratio: 16 / 9; width: 100%; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: #1a1a22; display: flex; align-items: center; justify-content: center; }
 .gthumb.theirs { background: #1d1830; }
