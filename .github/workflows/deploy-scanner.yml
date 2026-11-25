@@ -34,7 +34,7 @@ jobs:
       - name: Test the scanner code
         run: |
           pip install -q numpy pillow requests
-          cd tools/scanner && python -m unittest -v test_matcher test_verify test_api
+          cd tools/scanner && python -m unittest -v test_matcher test_verify test_api test_scanner
 
       - name: Check secrets
         env:
@@ -70,7 +70,7 @@ jobs:
           SKEY: ${{ secrets.SCANNER_KEY }}
         run: |
           ssh vps 'mkdir -p /opt/crosspov/scanner /opt/crosspov/scoreboard_poc'
-          scp tools/scanner/*.py tools/scanner/run.sh vps:/opt/crosspov/scanner/
+          scp $(ls tools/scanner/*.py | grep -v "/test_") tools/scanner/run.sh vps:/opt/crosspov/scanner/
           scp tools/scoreboard_poc/poc.py tools/scoreboard_poc/hud.py tools/scoreboard_poc/digits.npz vps:/opt/crosspov/scoreboard_poc/
           ssh vps 'mv /opt/crosspov/scanner/run.sh /opt/crosspov/run.sh && chmod +x /opt/crosspov/run.sh'
           # Secrets travel over SSH stdin into a file only the crosspov user can read.

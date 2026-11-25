@@ -9,8 +9,14 @@ score sooner or later.
 A reading's game time is only known roughly: Twitch preview images can be a
 few minutes old and streamers often run a broadcast delay. So each reading is
 checked against every score the match had during a window of time, and a
-stream needs several agreeing readings, more than one distinct score, and no
-contradicting reading before it counts.
+stream needs several agreeing readings and more than one distinct score.
+
+About 2% of readings are wrong (a misread digit), so one contradicting
+reading doesn't rule out a stream that otherwise fits well; it costs an extra
+agreeing reading and an extra distinct score instead. A reading whose time
+window reaches past the end of the match may already show the streamer's next
+game, so it can agree but never contradict. Every stream found here is still checked in its VOD
+before it is suggested (verify.py), which removes wrong ones.
 """
 
 from __future__ import annotations
@@ -23,6 +29,8 @@ MAX_DELAY_MS = 90_000
 
 MIN_AGREE = 3
 MIN_DISTINCT = 2
+# Contradicting readings forgiven; each one forgiven needs one more agreeing reading and distinct score.
+MAX_ODD = 1
 
 
 @dataclass(frozen=True)
@@ -48,6 +56,10 @@ class Hit:
     agree: int
     distinct: int
     disagree: int
+
+
+def fits(agree: int, distinct: int, disagree: int) -> bool:
+    return disagree <= MAX_ODD and agree >= MIN_AGREE + disagree and distinct >= MIN_DISTINCT + disagree
 
 
 def score_timeline(rounds: list[Round], teams: tuple[str, str]) -> list[tuple[int, dict[str, int], dict[str, int]]]:
@@ -104,13 +116,13 @@ def match_streams(readings: list[Reading], start_ms: int, length_ms: int, rounds
                 if (r.left, r.right) in possible:
                     agree += 1
                     distinct.add((r.left, r.right))
-                else:
-                    disagree += 1
-            if agree >= MIN_AGREE and len(distinct) >= MIN_DISTINCT and disagree == 0:
+                elif t1 <= length_ms:
+                    disagree += 1  # not after the match ended, so it really is a different score
+            if fits(agree, len(distinct), disagree):
                 hits.append(Hit(login, team, agree, len(distinct), disagree))
     # A stream fits one side at most; keep its stronger side.
     best: dict[str, Hit] = {}
     for h in hits:
         if h.login not in best or h.agree > best[h.login].agree:
             best[h.login] = h
-    return sorted(best.values(), key=lambda h: (-h.agree, h.login))
+    return sorted(best.values(), key=lambda h: (h.disagree, -h.agree, h.login))

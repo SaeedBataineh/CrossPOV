@@ -38,10 +38,24 @@ class MatcherTest(unittest.TestCase):
         rs = [Reading("other", START + ROUNDS[i].start_ms + 40_000, s[0], s[1], 30_000) for i, s in ((2, (0, 2)), (5, (1, 4)), (8, (6, 2)))]
         self.assertEqual(match_streams(rs, START, LENGTH, ROUNDS, TEAMS), [])
 
-    def test_one_contradiction_rules_a_stream_out(self):
-        rs = [reading("mixed", i, "Blue") for i in (2, 5, 8)]
-        rs.append(Reading("mixed", START + ROUNDS[10].start_ms + 40_000, 0, 9, 30_000))
+    def test_one_misread_is_forgiven_with_an_extra_agreeing_reading(self):
+        odd = Reading("mixed", START + ROUNDS[10].start_ms + 40_000, 0, 9, 30_000)
+        rs = [reading("mixed", i, "Blue") for i in (2, 5, 8)] + [odd]
+        self.assertEqual(match_streams(rs, START, LENGTH, ROUNDS, TEAMS), [], "3 agreeing + 1 odd isn't enough")
+        rs.append(reading("mixed", 12, "Blue"))
+        hits = match_streams(rs, START, LENGTH, ROUNDS, TEAMS)
+        self.assertEqual([(h.login, h.agree, h.disagree) for h in hits], [("mixed", 4, 1)])
+
+    def test_two_contradictions_rule_a_stream_out(self):
+        rs = [reading("mixed", i, "Blue") for i in (1, 2, 5, 8, 11, 12)]
+        rs += [Reading("mixed", START + ROUNDS[i].start_ms + 40_000, 0, 9, 30_000) for i in (4, 10)]
         self.assertEqual(match_streams(rs, START, LENGTH, ROUNDS, TEAMS), [])
+
+    def test_next_game_right_after_the_match_doesnt_count_against(self):
+        # Captured just after the match: the window covers the last round, but the HUD shows their next game.
+        rs = [reading("s", i) for i in (2, 5, 8)]
+        rs.append(Reading("s", START + LENGTH + 60_000, 0, 0, 5 * 60_000))
+        self.assertEqual([(h.login, h.disagree) for h in match_streams(rs, START, LENGTH, ROUNDS, TEAMS)], [("s", 0)])
 
     def test_needs_several_different_scores(self):
         # Three readings of the same early 0-0 could be any game.

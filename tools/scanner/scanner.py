@@ -10,12 +10,13 @@ Env: TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET; CROSSPOV_DB (default readings.db)
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import sys
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from email.utils import parsedate_to_datetime
 
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
@@ -32,7 +33,11 @@ from poc import helix, live_valorant_streams, token  # noqa: E402
 from store import Store  # noqa: E402
 
 W, H = 1280, 720
-SWEEP_EVERY_S = 240
+# A sweep starts every 2.5 minutes. Pictures that haven't changed since the
+# last sweep are skipped (not read or stored twice), so sweeping more often
+# than Twitch refreshes previews only costs the download, and catches each
+# new picture sooner, which pins down when it was taken.
+SWEEP_EVERY_S = 150
 PREVIEW_CYCLE_MS = 5 * 60_000
 _local = threading.local()
 
@@ -61,23 +66,29 @@ def hud_strip(data: bytes) -> Image.Image:
     return img.crop((x0, y0, x1, y1))
 
 
-def fetch(stream: dict):
+def fetch(stream: dict, seen: dict[str, str]):
+    """(stream, HUD strip or None, taken_ms, uncertain_ms, picture id). The strip is None for a
+    failed download and for a picture already read last sweep."""
     session = getattr(_local, "session", None)
     if session is None:
         session = _local.session = requests.Session()
     url = stream["thumbnail_url"].replace("{width}", str(W)).replace("{height}", str(H))
+    login = stream["user_login"].lower()
     try:
         r = session.get(url, timeout=15)
         if not r.ok or len(r.content) < 2000:
-            return stream, None, 0, 0
+            return stream, None, 0, 0, None
+        picture = hashlib.blake2b(r.content, digest_size=12).hexdigest()
+        if seen.get(login) == picture:
+            return stream, None, 0, 0, picture
         taken, uncertain = capture_time(r.headers, int(time.time() * 1000))
-        return stream, hud_strip(r.content), taken, uncertain
+        return stream, hud_strip(r.content), taken, uncertain, picture
     except Exception:  # network trouble or a broken image: skip this stream
-        return stream, None, 0, 0
+        return stream, None, 0, 0, None
 
 
 def read(args):
-    stream, strip, taken, uncertain = args
+    stream, strip, taken, uncertain = args[:4]
     if strip is None:
         return None
     try:
@@ -90,14 +101,29 @@ def read(args):
     return (stream["user_login"].lower(), stream["user_id"], taken, uncertain, int(left), int(right), None, float(conf))
 
 
-def sweep(session: requests.Session, store: Store, pool: ProcessPoolExecutor) -> tuple[int, int]:
+def sweep(session: requests.Session, store: Store, pool: ProcessPoolExecutor, seen: dict[str, str]) -> dict:
+    """One pass over every live stream. Pictures are read as soon as they arrive, while others download."""
+    t0 = time.time()
     streams = live_valorant_streams(session)
+    t_list = time.time() - t0
+    reads, fresh = [], 0
     with ThreadPoolExecutor(max_workers=32) as downloads:
-        images = list(downloads.map(fetch, streams))
-    rows = [r for r in pool.map(read, images, chunksize=16) if r]
+        for done in as_completed([downloads.submit(fetch, s, seen) for s in streams]):
+            got = done.result()
+            stream, strip, picture = got[0], got[1], got[4]
+            if picture:
+                seen[stream["user_login"].lower()] = picture
+            if strip is not None:
+                fresh += 1
+                reads.append(pool.submit(read, got))
+    t_download = time.time() - t0 - t_list
+    rows = [r for r in (f.result() for f in reads) if r]
     store.add(rows)
     store.prune()
-    return len(streams), len(rows)
+    live = {s["user_login"].lower() for s in streams}
+    for login in [k for k in seen if k not in live]:
+        del seen[login]
+    return {"streams": len(streams), "new": fresh, "read": len(rows), "list_s": t_list, "download_s": t_download, "total_s": time.time() - t0}
 
 
 def main() -> int:
@@ -105,6 +131,7 @@ def main() -> int:
     store = Store(os.environ.get("CROSSPOV_DB", os.path.join(HERE, "readings.db")))
     session = requests.Session()
     token_at = 0.0
+    seen: dict[str, str] = {}  # login -> id of the picture read last
     with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as pool:
         while True:
             started = time.time()
@@ -112,8 +139,12 @@ def main() -> int:
                 if started - token_at > 12 * 3600:
                     session.headers.update({"Client-Id": cid, "Authorization": f"Bearer {token(cid, secret)}"})
                     token_at = started
-                n, read_ok = sweep(session, store, pool)
-                print(f"{time.strftime('%H:%M:%S')} sweep: {n} live streams, {read_ok} scores read, {time.time() - started:.0f}s", flush=True)
+                st = sweep(session, store, pool, seen)
+                print(
+                    f"{time.strftime('%H:%M:%S')} sweep: {st['streams']} live streams, {st['new']} new pictures, "
+                    f"{st['read']} scores read, {st['total_s']:.0f}s (list {st['list_s']:.0f}s, download {st['download_s']:.0f}s)",
+                    flush=True,
+                )
             except Exception as e:  # network trouble etc.: wait and try again
                 print(f"{time.strftime('%H:%M:%S')} sweep failed: {e}", flush=True)
                 token_at = 0

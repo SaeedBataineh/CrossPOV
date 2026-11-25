@@ -177,9 +177,7 @@ def read_one(args: tuple[dict, bytes | None]) -> tuple[Reading, bytes | None, by
     band.save(buf, "JPEG", quality=80)
     whole = None
     if not r.readable:  # kept so unread previews can be looked at (--unread)
-        small = io.BytesIO()
-        img.resize((640, 360)).save(small, "JPEG", quality=75)
-        whole = small.getvalue()
+        whole = data  # the original preview, exactly as the reader saw it
     return r, buf.getvalue(), whole
 
 
