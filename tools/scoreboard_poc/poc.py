@@ -34,7 +34,6 @@ import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 
-import pytesseract
 import requests
 from PIL import Image, ImageChops, ImageOps
 
@@ -120,6 +119,8 @@ def ocr(img: Image.Image, chars: str, psm: int = 7) -> str:
     if img.width < 8 or img.height < 8:
         return ""
     cfg = f"--psm {psm} -c tessedit_char_whitelist={chars}"
+    import pytesseract  # only the POC reads timers; the scanner imports this file without Tesseract
+
     try:
         return pytesseract.image_to_string(prepare(img), config=cfg, timeout=10).strip().replace(" ", "")
     except (pytesseract.TesseractError, RuntimeError):

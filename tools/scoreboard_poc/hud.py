@@ -17,6 +17,13 @@ exactly right, and no non-scoreboard misread. Templates built from half the
 previews and tested on the other half did somewhat worse (one half lacked a
 "3" to learn from), so expect roughly 80-85% on new streams until the
 templates are rebuilt from more previews.
+
+Live check (Nov 2026, 1367 streams): 69% read. Of 300 unread previews, ~90%
+show no scoreboard (menus, agent select, deathmatch, other games, overlays).
+The ~10% missed are mostly HUDs over a bright or pale background, where the
+digits match at only ~0.6. Extra "pale" templates, a saturation-aware
+brightness and a looser rule for a lone "1" were each tried; all added
+wrong or false readings (kill counts, menus read as scores), so none is used.
 """
 
 from __future__ import annotations
