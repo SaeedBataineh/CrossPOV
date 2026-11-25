@@ -71,7 +71,7 @@ a { color: var(--twitch-text); }
 
 /* ---------- Shell: everything in the left sidebar ---------- */
 .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100vh; }
-.sidebar { display: flex; flex-direction: column; gap: 4px; padding: 22px 14px 16px; background: #0b0b0e; border-right: 1px solid var(--line); min-height: 0; }
+.sidebar { display: flex; flex-direction: column; gap: 4px; padding: 22px 14px 16px; background: #0b0b0e; border-right: 1px solid var(--line); min-height: 0; overflow-y: auto; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 22px; font-weight: 700; font-size: 17px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 15px; text-decoration: none; text-align: left; }
