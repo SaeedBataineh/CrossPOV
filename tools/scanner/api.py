@@ -86,7 +86,8 @@ class Matcher:
         self.examine = examine  # (login, start, rounds, teams, team) -> {"verdict", ...}
         self.results: dict[str, tuple[float, dict]] = {}
         self.lock = threading.Lock()
-        self.pool = ThreadPoolExecutor(max_workers=2)
+        # Each job reads frames in parallel itself; a few jobs at once keeps streamers from queueing.
+        self.pool = ThreadPoolExecutor(max_workers=4)
 
     def request(self, match: dict) -> dict:
         mid, start, length, teams, rounds = parse_match(match)

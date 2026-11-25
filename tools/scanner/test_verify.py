@@ -96,3 +96,16 @@ class ShiftTest(unittest.TestCase):
         grab, events = self.vod("Blue", 60, hidden=[e for e, _ in self.vod("Blue", 60)[1]])
         self.assertIsNone(measure_shift("pl", OFFSET, ROUNDS, TEAMS, "Blue", [(e, i) for e, i in events][:1], "ff",
                                         grab=lambda *a: None, read=read))
+
+
+class ShiftBudgetTest(unittest.TestCase):
+    def test_an_unreadable_scoreboard_gives_up_quickly(self):
+        calls = []
+
+        def grab(_p, t, _f):
+            calls.append(t)
+            return None  # HUD always hidden
+
+        events = [(55_000 + i * 100_000 + 80_000, i) for i in range(len(ROUNDS))]
+        self.assertIsNone(measure_shift("pl", OFFSET, ROUNDS, TEAMS, "Blue", events, "ff", grab=grab, read=read, max_rounds=3))
+        self.assertLessEqual(len(calls), 3 * 32, "stops after max_rounds, not every round")

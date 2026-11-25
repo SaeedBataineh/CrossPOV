@@ -168,7 +168,8 @@ function MatchView({
     : "Nobody in this lobby was streaming.";
   const progressOf = (puuid: string) => {
     const st = streamers?.players.find((x) => x.puuid === puuid);
-    return st ? progress(st) : null;
+    // A bar only while clips are actually downloading.
+    return st && st.status === "working" && !st.checking ? progress(st) : null;
   };
 
   return (

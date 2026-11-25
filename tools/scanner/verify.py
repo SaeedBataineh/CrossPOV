@@ -131,51 +131,66 @@ MAX_SHIFT_S = 240  # stream delay plus agent select and loading
 
 
 def measure_shift(playlist: str, offset_s: float, rounds: list[Round], teams: tuple[str, str], team: str,
-                  events: list[tuple[int, int]], ffmpeg: str, grab=frame_at, read=read_frame, want: int = 5) -> float | None:
+                  events: list[tuple[int, int]], ffmpeg: str, grab=frame_at, read=read_frame, want: int = 5,
+                  budget_s: float = 150, max_rounds: int = 10, workers: int = 6) -> float | None:
     """How many seconds later than `offset + match time` things happen in this VOD.
 
     The match's start time is roughly when agent select began, and every
     streamer has their own broadcast delay, so a VOD runs 1-2 minutes "late"
     and by a different amount per streamer. `events` are (match ms, round
     position) of rounds that ended by elimination: the HUD score changes at
-    exactly that moment. Each is found by stepping through the VOD until the
-    score changes, then halving the gap to about a second. The median of a
-    few rounds is returned (one odd round can't skew it), or None if the score couldn't be read."""
+    exactly that moment. For each, frames across the possible range are read
+    in parallel to find where the score changes, then the gap is halved to
+    about a second. Once one round is found, the next only look near it.
+    Gives up after `budget_s` seconds or `max_rounds` rounds (an unreadable
+    scoreboard must not hold clips up), returning the median of the rounds
+    found (one odd round can't skew it), or None."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    deadline = time.monotonic() + budget_s
     other = teams[1] if team == teams[0] else teams[0]
     timeline = score_timeline(rounds, teams)
     found: list[float] = []
-    for decided_ms, pos in events:
-        if pos >= len(timeline):
-            continue
-        _, before, after = timeline[pos]
-        b, a = (before[team], before[other]), (after[team], after[other])
-        base = offset_s + decided_ms / 1000
-        lo = hi = None
-        t = base - 4
-        while t <= base + MAX_SHIFT_S:
-            img = grab(playlist, t, ffmpeg)
-            got = read(img) if img is not None else None
-            if got == b:
-                lo = t
-            elif got == a:
-                hi = t
+
+    def score_at(t: float):
+        img = grab(playlist, t, ffmpeg)
+        return read(img) if img is not None else None
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for decided_ms, pos in events[:max_rounds]:
+            if time.monotonic() > deadline or len(found) >= want:
                 break
-            t += SHIFT_STEP_S
-        if lo is None or hi is None:
-            continue  # score hidden, or it changed before we looked: can't pin it down
-        while hi - lo > 1.0:
-            mid = (lo + hi) / 2
-            img = grab(playlist, mid, ffmpeg)
-            got = read(img) if img is not None else None
-            if got == b:
-                lo = mid
-            elif got == a:
-                hi = mid
+            if pos >= len(timeline):
+                continue
+            _, before, after = timeline[pos]
+            b, a = (before[team], before[other]), (after[team], after[other])
+            base = offset_s + decided_ms / 1000
+            if found:  # streams don't drift: look near the shift already found
+                centre = sorted(found)[len(found) // 2]
+                times = [base + centre + d for d in range(-16, 17, 4)]
             else:
-                break
-        found.append(hi - base)
-        if len(found) >= want:
-            break
+                times = [base + d for d in range(-4, MAX_SHIFT_S + 1, SHIFT_STEP_S)]
+            got = list(pool.map(score_at, times))
+            lo = hi = None
+            for t, g in zip(times, got):
+                if g == b:
+                    lo, hi = t, None
+                elif g == a and lo is not None:
+                    hi = t
+                    break
+            if lo is None or hi is None:
+                continue  # score hidden, or it changed outside the range: can't pin it down
+            while hi - lo > 1.0 and time.monotonic() < deadline:
+                mid = (lo + hi) / 2
+                g = score_at(mid)
+                if g == b:
+                    lo = mid
+                elif g == a:
+                    hi = mid
+                else:
+                    break
+            found.append(hi - base)
     if not found:
         return None
     found.sort()
