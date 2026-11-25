@@ -80,7 +80,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
     }
   }
 
-  const riotIdOk = draft.riotId.trim() === "" || /^[^#]+#[^#\s]+$/.test(draft.riotId.trim());
+  // Riot names and tags can contain spaces (e.g. "CLOUDEY#X 3"); only one "#" and something on each side.
+  const riotIdOk = draft.riotId.trim() === "" || /^[^#]*\S[^#]*#[^#]*\S[^#]*$/.test(draft.riotId.trim());
   const nothingToClip = draft.streamerAuto && !draft.clipKilledYou && !draft.clipYouKilled && !draft.clipWholeRound;
 
   return (

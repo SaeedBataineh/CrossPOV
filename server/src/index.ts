@@ -52,7 +52,8 @@ function json(body: unknown, status = 200, maxAge = 0): Response {
 
 /** Riot names are 3-16 characters, tags 3-5; we allow a little slack but no path tricks. */
 export function validRiotId(name: string, tag: string): boolean {
-  return /^[^/\\?#%]{1,32}$/u.test(name) && /^[\p{L}\p{N}]{1,8}$/u.test(tag);
+  // Tags can contain spaces ("X 3"), but not at either end.
+  return /^[^/\\?#%]{1,32}$/u.test(name) && /^[\p{L}\p{N}](?:[\p{L}\p{N} ]{0,6}[\p{L}\p{N}])?$/u.test(tag);
 }
 
 const MATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

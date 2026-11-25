@@ -62,6 +62,9 @@ test("validates Riot IDs", () => {
   assert.ok(!validRiotId("", "EUW"));
   assert.ok(!validRiotId("a/b", "EUW"));
   assert.ok(!validRiotId("name", "E-U"));
+  assert.ok(validRiotId("CLOUDEY", "X 3"), "tags can contain spaces");
+  assert.ok(!validRiotId("name", " X3"), "but not start or end with one");
+  assert.ok(!validRiotId("name", "X3 "));
 });
 
 /** Calls the API with a fake upstream; returns status, body and the upstream calls made. */
