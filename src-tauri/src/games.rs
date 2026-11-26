@@ -212,6 +212,15 @@ pub fn detect(s: &Settings) -> Option<Game> {
             pid: Some(front.pid),
         })
     });
+    // Note the game in the activity log when it changes (shows up in crash reports).
+    let before = current.as_ref().map(|g| g.exe.to_lowercase());
+    let now = found.as_ref().map(|g| g.exe.to_lowercase());
+    if before != now {
+        crate::trail(&match &found {
+            Some(g) => format!("game: {} ({}, {:?}, screen {})", g.name, g.exe, g.found, g.output_idx),
+            None => "game: none".to_string(),
+        });
+    }
     *current = found.clone();
     found
 }

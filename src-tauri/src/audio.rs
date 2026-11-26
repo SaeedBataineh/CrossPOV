@@ -174,11 +174,86 @@ impl Drop for AppCapture {
     }
 }
 
+/// Records one program's sound through a helper copy of CrossPOV
+/// (`--audio-helper <pid>`, see lib.rs). Windows' per-program capture has
+/// crashed the whole app on some PCs; in a separate process a crash only
+/// ends the helper, and the recording carries on.
 #[cfg(windows)]
 fn start_app(pid: u32, src: &Shared, stop: &Arc<AtomicBool>) -> Result<(), String> {
-    let sink = src.clone();
+    use crate::ffmpeg::NoWindow;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
     crate::trail(&format!("app audio: starting capture of process {pid}"));
-    let r = crate::win_audio::start_app_capture(pid, move |samples| push_stereo_48k(samples, &sink), stop.clone()).map(|_| ());
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut child = Command::new(exe)
+        .args(["--audio-helper", &pid.to_string()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .no_window()
+        .spawn()
+        .map_err(|e| format!("could not start audio helper: {e}"))?;
+    let mut out = child.stdout.take().ok_or("no audio helper output")?;
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (sink, reading) = (src.clone(), stop.clone());
+    thread::Builder::new()
+        .name(format!("app-audio-{pid}"))
+        .spawn(move || {
+            let mut mark = [0u8; 1];
+            let ok = out.read_exact(&mut mark).is_ok() && mark[0] == b'R';
+            let _ = ready_tx.send(ok);
+            if !ok {
+                return;
+            }
+            let mut buf = vec![0u8; 32 * 1024];
+            let mut carry: Vec<u8> = Vec::new();
+            let mut samples: Vec<f32> = Vec::new();
+            while !reading.load(Ordering::Relaxed) {
+                match out.read(&mut buf) {
+                    Ok(0) | Err(_) => break, // Helper ended (or crashed): this app goes quiet.
+                    Ok(n) => {
+                        carry.extend_from_slice(&buf[..n]);
+                        let whole = carry.len() / 4 * 4;
+                        samples.clear();
+                        samples.extend(carry[..whole].chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+                        carry.drain(..whole);
+                        push_stereo_48k(&samples, &sink);
+                    }
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    let r = match ready_rx.recv_timeout(Duration::from_secs(12)) {
+        Ok(true) => {
+            // Ends the helper when this app stops being recorded.
+            let watch = stop.clone();
+            thread::spawn(move || {
+                while !watch.load(Ordering::Relaxed) {
+                    if matches!(child.try_wait(), Ok(Some(_))) {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(250));
+                }
+                drop(child.stdin.take()); // Asks it to stop...
+                thread::sleep(Duration::from_millis(500));
+                let _ = child.kill(); // ...and makes sure.
+                let _ = child.wait();
+            });
+            Ok(())
+        }
+        _ => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let mut why = String::new();
+            if let Some(mut e) = child.stderr.take() {
+                let _ = e.read_to_string(&mut why);
+            }
+            let why = why.trim();
+            Err(if why.is_empty() { "audio capture did not start".to_string() } else { why.to_string() })
+        }
+    };
     crate::trail(&format!("app audio: process {pid}: {}", match &r { Ok(()) => "capturing".to_string(), Err(e) => format!("failed ({e})") }));
     r
 }

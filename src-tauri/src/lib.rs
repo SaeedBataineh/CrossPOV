@@ -638,6 +638,71 @@ fn log_crashes() {
     }));
 }
 
+/// The `--audio-helper` process: records program `pid`'s sound and writes
+/// it to stdout (a "R" byte once capture works, then 48 kHz stereo f32
+/// samples) until the main app closes its stdin. Capturing one program's
+/// sound goes deep into Windows; doing it here means a crash in there can
+/// only end this helper, never CrossPOV.
+pub fn audio_helper(pid: u32) -> i32 {
+    #[cfg(windows)]
+    {
+        use std::io::{Read, Write};
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let out = Arc::new(Mutex::new((std::io::stdout(), false)));
+        /// Writes the ready mark first, exactly once, whoever gets here first.
+        fn send(out: &Mutex<(std::io::Stdout, bool)>, bytes: &[u8]) -> bool {
+            let mut g = out.lock().unwrap_or_else(|e| e.into_inner());
+            if !g.1 {
+                g.1 = true;
+                if g.0.write_all(b"R").is_err() {
+                    return false;
+                }
+            }
+            g.0.write_all(bytes).and_then(|_| g.0.flush()).is_ok()
+        }
+        let (o, s) = (out.clone(), stop.clone());
+        let started = win_audio::start_app_capture(
+            pid,
+            move |samples| {
+                let bytes: Vec<u8> = samples.iter().flat_map(|v| v.to_le_bytes()).collect();
+                if !send(&o, &bytes) {
+                    s.store(true, Ordering::Relaxed); // The app went away.
+                }
+            },
+            stop.clone(),
+        );
+        let handle = match started {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
+        };
+        send(&out, &[]);
+        // Until the app closes our stdin (or goes away).
+        let mut sink = [0u8; 64];
+        while !stop.load(Ordering::Relaxed) {
+            match std::io::stdin().read(&mut sink) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        eprintln!("per-app audio needs Windows");
+        1
+    }
+}
+
 pub fn run() {
     log_crashes();
     trail(&format!("started v{}", env!("CARGO_PKG_VERSION")));
