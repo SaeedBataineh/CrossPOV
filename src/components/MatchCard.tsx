@@ -7,6 +7,7 @@ import { matchTimeAgo } from "../lib/useMatches";
 import { TwitchIcon } from "./Icons";
 import { Avatar, cardTitle, GalleryCard, PendingCard } from "./ui";
 import { MapThumb } from "./ValorantArt";
+import { PostMatchScoreboard, RoundTimeline } from "./PostMatch";
 
 /** What we know about one player being a streamer, from the app or the website demo. */
 interface Live {
@@ -30,59 +31,6 @@ function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefin
     return { login: ws.channel.login, agent: p.agent, name: ws.channel.displayName, avatar: ws.channel.avatar, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
   }
   return null;
-}
-
-/** Every round as a coloured block: won, lost, and the ones with a streamer fight marked. */
-function Rounds({ match, me, fightRounds }: { match: MatchSummary; me?: MatchPlayer; fightRounds: Set<number> }) {
-  if (!match.rounds.length) return null;
-  const myKills = me ? match.kills.filter((k) => k.killer === me.puuid) : [];
-  return (
-    <div className="rounds">
-      {match.rounds.map((round) => {
-        const kills = myKills.filter((k) => k.round === round.index).length;
-        const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "lost", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
-        return (
-          <div key={round.index} className={cls} title={`Round ${round.index + 1}${kills ? `: ${kills} kill${kills === 1 ? "" : "s"}` : ""}${fightRounds.has(round.index) ? " · fought a streamer" : ""}`}>
-            <span>{round.index + 1}</span>
-            {kills > 0 && <i>{kills}</i>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Both teams, shown on request. */
-function Scoreboard({ match, me, live }: { match: MatchSummary; me?: MatchPlayer; live: Map<string, Live | null> }) {
-  const teams = [...new Set(match.players.map((p) => p.team))].sort((a, b) => (a === me?.team ? -1 : b === me?.team ? 1 : 0));
-  return (
-    <div className="teams">
-      {teams.map((team) => {
-        const t = match.teams.find((x) => x.id === team);
-        const mine = team === me?.team;
-        const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills);
-        return (
-          <div key={team} className="soft-box" style={{ padding: "6px 4px" }}>
-            <table className="tbl">
-              <thead><tr><th colSpan={2}>{mine ? "Your team" : me ? "Enemy team" : `Team ${team}`}{t ? ` · ${t.roundsWon}` : ""}</th><th style={{ textAlign: "right" }}>K / D / A</th></tr></thead>
-              <tbody>
-                {players.map((p) => {
-                  const l = live.get(p.puuid);
-                  return (
-                    <tr key={p.puuid} className={p.puuid === me?.puuid ? "you-row" : undefined}>
-                      <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span><span className="muted small" style={{ display: "block" }}>{p.agent}{p.puuid === me?.puuid ? " · you" : ""}</span></td>
-                      <td>{l && <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>}</td>
-                      <td className="num" style={{ textAlign: "right" }}>{p.kills} / {p.deaths} / {p.assists}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 /** One fight (or trade) with a streamer: its clip when saved, otherwise where it's at. */
@@ -347,8 +295,9 @@ export function MatchCard({
             </div>
           )}
           {children}
-          <Rounds match={match} me={me} fightRounds={fightRounds} />
-          <Scoreboard match={match} me={me} live={live} />
+          <PostMatchScoreboard match={match} me={me} streamers={live}>
+            <RoundTimeline match={match} me={me} fightRounds={fightRounds} />
+          </PostMatchScoreboard>
           {!me && <p className="muted" style={{ margin: 0 }}>Your Riot ID isn't in this match, so your fights can't be shown.</p>}
           {actions}
         </div>

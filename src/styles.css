@@ -843,3 +843,56 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .toast { border-radius: 10px; background: #18181b; border: 1px solid var(--line-2); box-shadow: 0 16px 40px -14px rgba(0, 0, 0, 0.85); backdrop-filter: none; }
 .toast.good { border-color: rgba(63, 208, 127, 0.45); }
 .toast.bad { border-color: rgba(255, 92, 92, 0.5); }
+
+/* ---------- Post-match details, VALORANT style (components/PostMatch.tsx) ---------- */
+.vs-board { --ally: #4fd1b5; --enemy: #ff4655; --gold: #f2d36b; display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 12px; background: linear-gradient(180deg, #111a22 0%, #0d1218 100%); border: 1px solid #1c2731; font-family: "Barlow Condensed", var(--font); }
+.vs-head { display: flex; align-items: baseline; gap: 18px; }
+.vs-result { font-size: 40px; line-height: 1; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.vs-result.win { color: var(--ally); }
+.vs-result.loss { color: var(--enemy); }
+.vs-result.draw { color: #e8e8e8; }
+.vs-score { display: flex; align-items: baseline; gap: 8px; font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vs-score .ally { color: var(--ally); }
+.vs-score .enemy { color: var(--enemy); }
+.vs-score i { font-style: normal; color: #5b6670; }
+.vs-mode { margin-left: auto; font-size: 15px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8b98a5; }
+
+/* Round timeline: your wins on top, theirs below, a gap at halftime. */
+.vs-timeline { display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); overflow-x: auto; }
+.vs-tl-labels { display: grid; grid-template-rows: 26px 18px 26px; align-items: center; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.vs-tl-labels .ally { color: var(--ally); }
+.vs-tl-labels .enemy { color: var(--enemy); }
+.vs-tl-rounds { display: flex; gap: 3px; }
+.vs-round { display: grid; grid-template-rows: 26px 18px 26px; width: 30px; flex: none; }
+.vs-round.half { margin-left: 12px; }
+.vs-win { display: grid; place-items: center; border-radius: 3px; background: rgba(255, 255, 255, 0.04); }
+.vs-win.ally.on { background: rgba(79, 209, 181, 0.22); color: var(--ally); box-shadow: inset 0 -2px 0 var(--ally); }
+.vs-win.enemy.on { background: rgba(255, 70, 85, 0.2); color: var(--enemy); box-shadow: inset 0 2px 0 var(--enemy); }
+.vs-num { display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #8b98a5; font-variant-numeric: tabular-nums; }
+.vs-round.streamer .vs-num { color: #fff; background: rgba(145, 70, 255, 0.35); border-radius: 3px; }
+
+/* Scoreboard: one table, your team teal, theirs red, you gold. */
+.vs-table { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-variant-numeric: tabular-nums; }
+.vs-table th { padding: 0 10px 2px; font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8b98a5; text-align: center; }
+.vs-table th.vs-player { text-align: left; }
+.vs-table td { padding: 0 10px; height: 48px; font-size: 20px; font-weight: 700; color: #f2f2f2; text-align: center; }
+.vs-row td:first-child { border-radius: 4px 0 0 4px; }
+.vs-row td:last-child { border-radius: 0 4px 4px 0; }
+.vs-row.ally td { background: rgba(79, 209, 181, 0.13); }
+.vs-row.ally td:first-child { background: linear-gradient(90deg, rgba(79, 209, 181, 0.42), rgba(79, 209, 181, 0.13) 70%); }
+.vs-row.enemy td { background: rgba(255, 70, 85, 0.12); }
+.vs-row.enemy td:first-child { background: linear-gradient(90deg, rgba(255, 70, 85, 0.42), rgba(255, 70, 85, 0.12) 70%); }
+.vs-row.me td { background: rgba(242, 211, 107, 0.16); }
+.vs-row.me td:first-child { background: linear-gradient(90deg, rgba(242, 211, 107, 0.55), rgba(242, 211, 107, 0.16) 70%); }
+.vs-row.me .vs-name b { color: var(--gold); }
+.vs-table td.vs-player { display: flex; align-items: center; gap: 12px; height: 48px; padding-left: 0; text-align: left; }
+.vs-agent { width: 48px; height: 48px; flex: none; overflow: hidden; border-radius: 4px 0 0 4px; background: rgba(0, 0, 0, 0.35); }
+.vs-agent > * { width: 100%; height: 100%; border-radius: 0; }
+.vs-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.05; }
+.vs-name b { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-name small { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+.vs-live { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; margin-right: 6px; padding: 3px 8px; border-radius: 4px; background: rgba(145, 70, 255, 0.28); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
+.vs-live:hover { background: rgba(145, 70, 255, 0.45); }
+.vs-table td.up { color: #7ef0c6; }
+.vs-table td.down { color: #ff8a93; }
+@media (max-width: 1100px) { .vs-table th:nth-child(n+6), .vs-table td:nth-child(n+6) { display: none; } }
