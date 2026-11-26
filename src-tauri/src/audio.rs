@@ -244,8 +244,16 @@ fn start_app(pid: u32, src: &Shared, stop: &Arc<AtomicBool>) -> Result<(), Strin
             Ok(())
         }
         _ => {
-            // How it ended says why: a Windows error code if it crashed.
-            let exited = child.try_wait().ok().flatten();
+            // How it ended says why: a Windows error code if it crashed. Give
+            // Windows a moment to finish closing it so the code is there.
+            let mut exited = None;
+            for _ in 0..30 {
+                exited = child.try_wait().ok().flatten();
+                if exited.is_some() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
             let _ = child.kill();
             let status = exited.or_else(|| child.wait().ok());
             let mut why = String::new();

@@ -644,6 +644,7 @@ fn log_crashes() {
 /// sound goes deep into Windows; doing it here means a crash in there can
 /// only end this helper, never CrossPOV.
 pub fn audio_helper(pid: u32) -> i32 {
+    trail(&format!("app audio {pid}: helper running"));
     #[cfg(windows)]
     {
         use std::io::{Read, Write};

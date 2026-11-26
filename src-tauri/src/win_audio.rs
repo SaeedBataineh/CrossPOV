@@ -144,14 +144,21 @@ impl Drop for EventHandle {
 }
 
 fn capture_loop(pid: u32, on_audio: &mut dyn FnMut(&[f32]), stop: &AtomicBool, ready: &mpsc::SyncSender<Result<(), String>>) -> WinResult<()> {
-    let client = activate_process_loopback(pid)?;
+    // Each step goes in the activity log: if Windows crashes the capture,
+    // the last line says where.
+    let step = |s: &str| crate::trail(&format!("app audio {pid}: {s}"));
+    step("activating");
+    let client = activate_process_loopback(pid).inspect_err(|e| step(&format!("activate failed: {e}")))?;
+    step("activated");
     let format = float_stereo_48k();
     let flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
-    unsafe { client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, &format, None)? };
+    unsafe { client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2_000_000, 0, &format, None) }.inspect_err(|e| step(&format!("initialize failed: {e}")))?;
+    step("initialized");
     let event = EventHandle(unsafe { CreateEventW(None, false, false, PCWSTR::null())? });
     unsafe { client.SetEventHandle(event.0)? };
     let capture: IAudioCaptureClient = unsafe { client.GetService()? };
     unsafe { client.Start()? };
+    step("started");
     let _ = ready.send(Ok(()));
 
     let mut silence: Vec<f32> = Vec::new();
