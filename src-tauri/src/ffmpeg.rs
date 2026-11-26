@@ -225,6 +225,24 @@ pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32,
     Some((out_w, out_h))
 }
 
+/// The size to record the game's window at, made by Windows' window capture
+/// itself (a simple shader pass; no separate resize step that a driver can
+/// refuse). Stretched resolutions become 16:9 at the chosen height, like
+/// Medal; a window taller than the chosen resolution is shrunk to it. None:
+/// record the window at its own size.
+pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32, u32)> {
+    if let Some(size) = stretched_size(source, r) {
+        return Some(size);
+    }
+    let (w, h) = source?;
+    let th = target_height(r)?;
+    if h <= th || h == 0 {
+        return None;
+    }
+    let tw = (u64::from(w) * u64::from(th) / u64::from(h)) as u32;
+    Some((tw & !1, th & !1))
+}
+
 fn target_height(r: Resolution) -> Option<u32> {
     match r {
         Resolution::Native => None,
@@ -281,6 +299,10 @@ pub fn segment_count(buffer_seconds: u32) -> u32 {
     buffer_seconds.div_ceil(SEGMENT_SECONDS) + 4
 }
 
+fn on_gpu_window(plan: &RecordPlan) -> bool {
+    plan.source == VideoSource::Desktop && plan.window.is_some()
+}
+
 /// Builds the FFmpeg arguments for the replay buffer.
 pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
@@ -300,7 +322,13 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                 // Windows' window capture: only the game, even when other windows
                 // cover it. Frames come only when the game draws one, so `fps`
                 // (below) makes the steady frame rate the encoder expects.
-                Some(hwnd) => a.push(format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0")),
+                Some(hwnd) => {
+                    let mut src = format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0");
+                    if let Some((w, h)) = window_output_size(plan.source_size, s.resolution) {
+                        src.push_str(&format!(":width={w}:height={h}:resize_mode=scale:scale_mode=bicubic"));
+                    }
+                    a.push(src);
+                }
                 None => a.push(format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx)),
             }
         }
@@ -323,8 +351,11 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     // encoder without touching the CPU, resized on the GPU if needed. The CPU
     // path (copy out, convert, resize) is for Media Foundation, the test
     // pattern, and compatibility mode when a driver refuses the GPU path.
-    let stretch = stretched_size(plan.source_size, s.resolution).filter(|_| plan.source == VideoSource::Desktop);
-    let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h));
+    // Window capture comes out at the right size already (see above). The
+    // whole screen is shrunk here if needed; a stretched screen is recorded
+    // as it is (the GPU resize step refused to stretch on some PCs).
+    let window = on_gpu_window(plan);
+    let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h)).filter(|_| !window);
     let on_gpu = plan.source == VideoSource::Desktop;
     let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
     let mut vf: Vec<String> = Vec::new();
@@ -332,9 +363,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         vf.push(format!("fps={fps}"));
     }
     if gpu_path {
-        if let Some((w, h)) = stretch {
-            vf.push(format!("scale_d3d11=width={w}:height={h}:format=nv12"));
-        } else if let Some(h) = height {
+        if let Some(h) = height {
             vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
         }
     } else {
@@ -342,9 +371,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             vf.push("hwdownload".into());
             vf.push("format=bgra".into());
         }
-        if let Some((w, h)) = stretch {
-            vf.push(format!("scale={w}:{h}:flags=bicubic"));
-        } else if let Some(h) = height {
+        if let Some(h) = height {
             vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
         }
         vf.push("format=nv12".into());
@@ -593,10 +620,19 @@ mod tests {
         assert_eq!(stretched_size(Some((3440, 1440)), Resolution::P1440), None);
         assert_eq!(stretched_size(None, Resolution::P1440), None);
 
-        let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        // Recorded through window capture's own resize: stretched to 2560x1440.
+        let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
         let a = joined(&s, &p);
-        assert!(a.contains("scale_d3d11=width=2560:height=1440:format=nv12"), "{a}");
+        assert!(a.contains(":width=2560:height=1440:resize_mode=scale:scale_mode=bicubic"), "{a}");
+        assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
+        // A big window shrunk to the chosen height the same way.
+        assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1440), None);
+        // The whole screen, stretched: recorded as it is, never refused.
+        let screen = RecordPlan { source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let b = joined(&s, &screen);
+        assert!(!b.contains("scale"), "{b}");
     }
 
     #[test]

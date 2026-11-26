@@ -304,7 +304,9 @@ impl Recorder {
         if let Some(r) = inner.running.as_mut() {
             if let Ok(Some(code)) = r.child.try_wait() {
                 let log = fs::read_to_string(self.work_dir.join("ffmpeg.log")).unwrap_or_default();
-                let reason = log.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+                // FFmpeg's own errors (it only logs errors): the first few say why.
+                let lines: Vec<&str> = log.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+                let reason = lines.iter().take(4).chain(lines.last().filter(|_| lines.len() > 4)).copied().collect::<Vec<_>>().join(" | ");
                 died_early = Some((r.started.elapsed() < EARLY_EXIT, format!("Recorder stopped ({code}). {reason}"), r.plan.window.is_some()));
                 inner.running = None;
             }
@@ -351,7 +353,11 @@ impl Recorder {
                 "recording: {} {}{}",
                 if window.is_some() { "the game's window" } else { "the whole screen" },
                 size.map(|(w, h)| format!("{w}x{h}")).unwrap_or_else(|| "(size unknown)".into()),
-                ffmpeg::stretched_size(size, settings.resolution).map(|(w, h)| format!(", stretched to {w}x{h}")).unwrap_or_default()
+                if window.is_some() {
+                    ffmpeg::window_output_size(size, settings.resolution).map(|(w, h)| format!(", recorded at {w}x{h}")).unwrap_or_default()
+                } else {
+                    String::new()
+                }
             ));
             match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
                 Ok(running) => {
