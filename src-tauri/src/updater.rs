@@ -99,6 +99,19 @@ pub struct Updates {
     status: Arc<Mutex<UpdateStatus>>,
 }
 
+/// Set once the update check at launch has finished (or given up). The
+/// recorder waits for it, so a version that misbehaves while recording can
+/// always replace itself first.
+static LAUNCH_CHECK_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Waits (up to `max`) for the launch update check to finish.
+pub fn wait_for_launch_check(max: std::time::Duration) {
+    let until = std::time::Instant::now() + max;
+    while !LAUNCH_CHECK_DONE.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
 impl Updates {
     pub fn new() -> Self {
         Self { status: Arc::new(Mutex::new(UpdateStatus::Checking)) }
@@ -115,10 +128,18 @@ impl Updates {
 
     /// Starts the launch check and the background re-checks.
     pub fn spawn(&self, app: &AppHandle) {
+        /// Whatever happens below, recording may start once the launch check is over.
+        struct Done;
+        impl Drop for Done {
+            fn drop(&mut self) {
+                LAUNCH_CHECK_DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         let me = self.clone();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             // Launch: install right away, even if the game is open, so an old version never runs.
+            let done = Done;
             match me.find(&app).await {
                 Ok(Some(update)) => me.install(&app, update).await,
                 Ok(None) => me.set(&app, UpdateStatus::UpToDate { offline: false }),
@@ -127,6 +148,7 @@ impl Updates {
                     me.set(&app, UpdateStatus::UpToDate { offline: true });
                 }
             }
+            drop(done);
             loop {
                 tokio_sleep(RECHECK).await;
                 if let Ok(Some(update)) = me.find(&app).await {

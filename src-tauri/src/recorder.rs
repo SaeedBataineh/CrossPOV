@@ -252,6 +252,9 @@ impl Recorder {
         } else {
             VideoSource::TestPattern
         };
+        // Let the launch update check finish (or give up) first: a newer
+        // version then installs before anything is recorded.
+        crate::updater::wait_for_launch_check(Duration::from_secs(20));
         loop {
             let settings = self.lock().settings.clone();
             let game = games::detect(&settings).or_else(|| {
