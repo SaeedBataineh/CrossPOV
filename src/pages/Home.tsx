@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Clapperboard, RefreshCw, Swords, Target, Trophy } from "lucide-react";
+import { RefreshCw, Swords } from "lucide-react";
 import { MatchCard, type Show } from "../components/MatchCard";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
@@ -148,22 +148,44 @@ function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, we
   }
 
   return (
-    <form className="soft-row" onSubmit={(e) => void submit(e)}>
-      <span className="grow"><b>Try it with a real match.</b> <span className="muted">Enter any Riot ID to load its latest match and see who was live.</span></span>
-      <label className="field">
-        <span className="sr-only">Riot ID</span>
-        <input placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
-      </label>
-      <label className="field">
-        <span className="sr-only">Region</span>
-        <select value={region} onChange={(e) => setRegion(e.target.value)}>
-          {REGIONS.map((r) => (
-            <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
-          ))}
-        </select>
-      </label>
-      <button type="submit" className="btn primary" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
-      {error && <span className="small bad" role="alert" style={{ flexBasis: "100%" }}>{error}</span>}
+    <form className="flex flex-col gap-2" onSubmit={(e) => void submit(e)}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-line bg-panel py-1.5 pr-1.5 pl-4">
+        <span className="min-w-[11rem] flex-1 truncate text-sm text-quiet max-sm:basis-full">
+          <b className="font-medium text-ink">Try it with a real match.</b><span className="hidden xl:inline"> Enter any Riot ID to load its latest match and see who was live.</span>
+        </span>
+        <div className="flex h-8 max-sm:min-w-0 max-sm:flex-1">
+          <label className="flex w-[180px] max-sm:w-auto max-sm:min-w-0 max-sm:flex-1">
+            <span className="sr-only">Riot ID</span>
+            <input
+              placeholder="Name#TAG"
+              value={riotId}
+              onChange={(e) => setRiotId(e.target.value)}
+              spellCheck={false}
+              className="h-full w-full min-w-0 rounded-l-md border border-zinc-700 bg-canvas px-2.5 text-sm text-body outline-none placeholder:text-quiet hover:border-zinc-600 focus:border-zinc-400"
+            />
+          </label>
+          <label className="flex shrink-0">
+            <span className="sr-only">Region</span>
+            <select
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              className="h-full rounded-r-md border border-l-0 border-zinc-700 bg-canvas px-2 font-mono text-[13px] font-semibold text-body outline-none hover:border-zinc-600 focus:border-zinc-400"
+            >
+              {REGIONS.map((r) => (
+                <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={busy || !riotId.includes("#")}
+          className="h-8 shrink-0 rounded-md border border-ink bg-ink px-3.5 text-[13px] font-semibold text-canvas transition-colors duration-150 ease-out hover:bg-zinc-200 focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-panel focus-visible:outline-none disabled:opacity-45"
+        >
+          {busy ? "Loading…" : "Look up"}
+        </button>
+      </div>
+      {error && <span className="text-[13px] text-loss" role="alert">{error}</span>}
     </form>
   );
 }
@@ -248,7 +270,7 @@ export default function Home({
 
       {matches.length > 0 && <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} />}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line">
         <SegmentedControl label="Show" value={show} segments={tabs} onChange={setShow} hideZero />
         {isDesktop && (
           <button
@@ -256,9 +278,9 @@ export default function Home({
             onClick={() => void checkNow()}
             disabled={checking || !status?.configured}
             title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}
-            className="inline-flex h-9 items-center gap-2 rounded-full border-0 bg-white/[0.06] px-4 text-[13px] font-medium text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-1 ring-white/[0.07] transition-all hover:bg-white/[0.11] hover:text-white active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none disabled:opacity-50"
+            className="mb-1.5 inline-flex h-8 items-center gap-2 rounded-md border border-zinc-700 bg-transparent px-3 text-[13px] font-medium text-body transition-colors duration-150 ease-out hover:border-zinc-600 hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-ink focus-visible:outline-none disabled:opacity-45"
           >
-            <RefreshCw size={14} strokeWidth={2.2} aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
+            <RefreshCw size={14} strokeWidth={1.75} aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
             {checking ? "Checking…" : "Check for new matches"}
           </button>
         )}
@@ -272,7 +294,7 @@ export default function Home({
         />
       )}
       {all.length ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {all.map((m) =>
             m.id === looked?.match.id ? (
               <MatchCard key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
@@ -298,12 +320,12 @@ export default function Home({
           )}
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.08] bg-zinc-900/40 px-6 py-16 text-center">
-          <span className="mb-2 grid size-12 place-items-center rounded-2xl bg-gradient-to-b from-white/[0.10] to-white/[0.03] text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] ring-1 ring-white/[0.06]">
-            <Swords size={22} strokeWidth={1.8} aria-hidden />
+        <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-zinc-800 px-6 py-16 text-center">
+          <span className="mb-2 grid size-11 place-items-center rounded-md border border-zinc-800 bg-panel text-body">
+            <Swords size={20} strokeWidth={1.75} aria-hidden />
           </span>
-          <b className="text-[17px] font-semibold tracking-[-0.02em] text-white">{matches.length ? "Nothing matches" : "No matches yet"}</b>
-          <span className="max-w-sm text-[13.5px] text-zinc-400">
+          <b className="text-[18px] font-semibold tracking-[-0.02em] text-ink">{matches.length ? "Nothing matches" : "No matches yet"}</b>
+          <span className="max-w-sm text-sm text-quiet">
             {matches.length
               ? "Try another search or tab."
               : settings.riotId
@@ -318,22 +340,18 @@ export default function Home({
 
 // ---------- Summary strip ----------
 
-/** One glass tile: icon, a big number, and what it means. */
-function Tile({ icon, label, value, sub, accent }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; accent: string }) {
+/** One cell of the strip: a label, a big number, and what it's made of. */
+function Cell({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] border-t-white/10 bg-zinc-900/60 p-4 shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl">
-      <span aria-hidden className="pointer-events-none absolute -top-10 -right-10 size-28 rounded-full opacity-25 blur-2xl" style={{ background: accent }} />
-      <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
-        <span className="grid size-6 place-items-center rounded-lg bg-white/[0.06] ring-1 ring-white/[0.06]" style={{ color: accent }}>{icon}</span>
-        {label}
-      </div>
-      <div className="mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.03em] text-white tabular-nums">{value}</div>
-      {sub && <div className="mt-2 text-[12px] text-zinc-500 tabular-nums">{sub}</div>}
+    <div className="flex min-w-0 flex-col gap-2 bg-panel px-5 py-4">
+      <span className="text-[13px] text-quiet">{label}</span>
+      <span className="font-mono text-[26px] leading-none font-semibold tracking-[-0.02em] text-ink tabular-nums">{value}</span>
+      {sub && <span className="text-[13px] text-pretty text-quiet">{sub}</span>}
     </div>
   );
 }
 
-/** Recent form at a glance: win rate, K/D, saved clips, streamer matches. */
+/** Recent form at a glance: win rate, K/D, saved clips, streamer matches. One strip, hairlines between. */
 function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[]; riotId: string; clips: ClipInfo[]; streamers: Record<string, MatchStreamers> }) {
   const recent = matches.slice(0, 20);
   const played = recent.flatMap((m) => {
@@ -349,48 +367,30 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
   const theirs = clips.filter((c) => c.kind === "theirs").length;
   const withStreamers = matches.filter((m) => streamers[m.id]?.players.length).length;
   const met = new Set(Object.values(streamers).flatMap((s) => s.players.map((p) => p.channel.login))).size;
+  const num = (n: ReactNode) => <span className="font-mono font-semibold text-body tabular-nums">{n}</span>;
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      <Tile
-        icon={<Trophy size={13} strokeWidth={2.2} aria-hidden />}
+    // Hairlines between cells: a 1px gap over the line colour, so they stay right when the strip wraps to 2 × 2.
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line xl:grid-cols-4">
+      <Cell
         label="Win rate"
-        accent="#30D158"
-        value={rate == null ? "–" : <>{rate}<span className="text-[16px] text-zinc-500">%</span></>}
+        value={rate == null ? "–" : `${rate}%`}
         sub={
           played.length ? (
-            <span className="flex items-center gap-2">
-              <span>{wins}W · {losses}L</span>
-              <span className="flex gap-[3px]" aria-hidden>
+            <span className="flex items-center gap-2.5">
+              <span>{num(wins)}W · {num(losses)}L</span>
+              <span className="flex gap-[3px]" aria-label={`Last ${Math.min(10, played.length)} results`}>
                 {played.slice(0, 10).reverse().map((p, i) => (
-                  <i key={i} className={`h-2.5 w-1 rounded-full ${p.letter === "W" ? "bg-[#30D158]" : p.letter === "L" ? "bg-[#FF453A]" : "bg-zinc-600"}`} />
+                  <i key={i} className={`h-3 w-1.5 rounded-[1px] ${p.letter === "W" ? "bg-win" : p.letter === "L" ? "bg-loss" : "bg-zinc-600"}`} />
                 ))}
               </span>
             </span>
           ) : "Add your Riot ID to see it"
         }
       />
-      <Tile
-        icon={<Target size={13} strokeWidth={2.2} aria-hidden />}
-        label="K/D ratio"
-        accent="#64D2FF"
-        value={played.length ? (kills / Math.max(1, deaths)).toFixed(2) : "–"}
-        sub={played.length ? `${kills} kills · ${deaths} deaths` : undefined}
-      />
-      <Tile
-        icon={<Clapperboard size={13} strokeWidth={2.2} aria-hidden />}
-        label="Saved clips"
-        accent="#FF9F0A"
-        value={clips.length}
-        sub={`${clips.length - theirs} yours · ${theirs} from streamers`}
-      />
-      <Tile
-        icon={<Swords size={13} strokeWidth={2.2} aria-hidden />}
-        label="Streamer matches"
-        accent="#BF5AF2"
-        value={withStreamers}
-        sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}
-      />
+      <Cell label="K/D ratio" value={played.length ? (kills / Math.max(1, deaths)).toFixed(2) : "–"} sub={played.length ? <>{num(kills)} kills · {num(deaths)} deaths</> : undefined} />
+      <Cell label="Saved clips" value={clips.length} sub={<>{num(clips.length - theirs)} yours · {num(theirs)} from streamers</>} />
+      <Cell label="Streamer matches" value={withStreamers} sub={<>{num(met)} {met === 1 ? "streamer" : "streamers"} met</>} />
     </div>
   );
 }

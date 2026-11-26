@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
+import { motion } from "framer-motion";
+import { slide } from "../components/Motion";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
 import { diagnostics, isDesktop, knownGames, pickFolder, pickGameExe } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
@@ -126,7 +128,10 @@ export default function SettingsPage({ settings, onSaved }: { settings: S; onSav
     <section className="settings-layout" aria-label="Settings">
       <nav className="settings-nav" aria-label="Settings sections">
         {SECTIONS.map((t) => (
-          <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>
+            {tab === t.id && <motion.i layoutId="settings-active" layoutDependency={tab} transition={slide} className="nav-active" aria-hidden />}
+            <span>{t.label}</span>
+          </button>
         ))}
       </nav>
       <div className="settings-body">

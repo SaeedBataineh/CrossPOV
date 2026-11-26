@@ -10,13 +10,29 @@
 /* Tailwind only reads the files written with it. The older pages use class
    names such as "table" that are also Tailwind utilities, and the utility
    would win over their own rule. Add a file here when it starts using Tailwind. */
+@source "./App.tsx";
 @source "./components/Sidebar.tsx";
 @source "./components/TopBar.tsx";
 @source "./components/MatchCard.tsx";
 @source "./components/SegmentedControl.tsx";
 @source "./components/ValorantArt.tsx";
+@source "./components/Motion.tsx";
 @source "./pages/Home.tsx";
 
+/* One system: three surfaces, hairlines, two semantic colours, two radii. */
 @theme {
-  --font-sans: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Geist Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+  --color-canvas: #09090b;
+  --color-panel: #111113;
+  --color-hover: #18181b;
+  --color-avatar: #1e1e22;
+  --color-line: rgb(39 39 42 / 0.8);
+  --color-ink: #fafafa;
+  --color-body: #f4f4f5;
+  --color-quiet: #a1a1aa;
+  --color-win: #10b981;
+  --color-loss: #f43f5e;
+  --radius-sm: 4px;
+  --radius-md: 6px;
 }

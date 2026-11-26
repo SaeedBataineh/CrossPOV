@@ -12,7 +12,7 @@ export function result(m: MatchSummary, me?: MatchPlayer): { letter: "W" | "L" |
   return { letter: mine.won ? "W" : other.won ? "L" : "D", score: `${mine.roundsWon}–${other.roundsWon}` };
 }
 
-export const resultColor = (letter?: string) => (letter === "W" ? "var(--win)" : letter === "L" ? "var(--loss)" : "#555");
+export const resultColor = (letter?: string) => (letter === "W" ? "var(--win)" : letter === "L" ? "var(--loss)" : "var(--text)");
 
 /** Text and colour class for one streamer's progress. */
 /** "under a minute left", "about 3 min left", "about 1 h 20 min left". */

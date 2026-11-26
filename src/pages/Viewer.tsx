@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Trash2 } from "lucide-react";
 import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
-import { Avatar, cardMeta, cardTitle } from "../components/ui";
+import { Avatar, cardMeta, cardTitle, Nums } from "../components/ui";
 import { clipVideoSrc, copyForDiscord, deleteClip, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
 import { result, resultColor } from "../lib/matchInfo";
 import { findPairs, fightMarks, matchOf, pairsWith, vodLink } from "../lib/pairs";
@@ -218,7 +218,7 @@ export default function Viewer({
       <header className="viewer-head">
         <button type="button" className="back" onClick={onBack}>
           <ChevronLeft size={16} aria-hidden />
-          {match ? <>{match.map} {r && <b style={{ color: resultColor(r.letter) }}>{r.score}</b>}</> : "Back"}
+          {match ? <>{match.map} {r && <b className="num" style={{ color: resultColor(r.letter) }}>{r.score}</b>}</> : "Back"}
         </button>
         <span className="sep" aria-hidden="true">/</span>
         <h1 className="ellipsis">{clip.round != null ? `R${clip.round} · ` : ""}{cardTitle(clip)}</h1>
@@ -299,9 +299,9 @@ export default function Viewer({
         <aside className="viewer-side">
           {theirs && (
             <div className="side-box">
-              <p className="eyebrow">The other side</p>
+              <h2 className="side-title">The other side</h2>
               <div className="row" style={{ gap: 12 }}>
-                <Avatar name={theirs.streamer ?? "?"} avatar={st?.channel.avatar} size={40} />
+                <Avatar name={theirs.streamer ?? "?"} avatar={st?.channel.avatar} agent={streamerPlayer?.agent} size={40} />
                 <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                   <b className="ellipsis">{theirs.streamer ?? "Streamer"}</b>
                   <span className="muted small">
@@ -316,13 +316,13 @@ export default function Viewer({
 
           {more.length > 0 && (
             <div className="stack" style={{ gap: 4 }}>
-              <p className="eyebrow">More from this match</p>
+              <h2 className="side-title">More from this match</h2>
               {more.slice(0, 6).map((c) => (
                 <button key={c.path} type="button" className="mini-clip" onClick={() => onOpen(c)}>
                   <span className={c.kind === "theirs" ? "mini-thumb theirs" : "mini-thumb"} aria-hidden="true" />
                   <span className="stack" style={{ gap: 1, minWidth: 0 }}>
-                    <b className="ellipsis">{c.round != null ? `R${c.round} · ` : ""}{cardTitle(c)}</b>
-                    <span className="muted small ellipsis">{c.kind === "theirs" ? c.streamer : cardMeta(c)}</span>
+                    <b className="ellipsis"><Nums>{`${c.round != null ? `R${c.round} · ` : ""}${cardTitle(c)}`}</Nums></b>
+                    <span className="muted small ellipsis"><Nums>{(c.kind === "theirs" ? c.streamer : cardMeta(c)) ?? ""}</Nums></span>
                   </span>
                 </button>
               ))}

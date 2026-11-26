@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
 import { isDesktop, listAudioApps, listMicDevices } from "../lib/backend";
@@ -110,7 +111,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
                 volume={app.volume}
                 onVolume={(v) => setApp(i, { volume: v })}
                 track="T1"
-                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}>✕</button>}
+                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}><X size={14} strokeWidth={1.75} aria-hidden /></button>}
               />
             ))}
           <Channel

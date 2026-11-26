@@ -4,7 +4,7 @@ import { useState } from "react";
  * Real map and agent art from valorant-api.com's media CDN (Riot's own game
  * assets; allowed for fan projects under Riot's "Legal Jibber Jabber" policy).
  * Images load by UUID, so no API call is needed. Offline, or for a map or
- * agent added after this list, a drawn gradient with initials stands in.
+ * agent added after this list, a plain tile with initials stands in.
  */
 const CDN = "https://media.valorant-api.com";
 const key = (name: string) => name.toLowerCase().replace(/[^a-z]/g, "");
@@ -63,24 +63,16 @@ const MAPS: Record<string, string> = {
   sunset: "92584fbe-486a-b1b2-9faa-39b0f486b498",
 };
 
-/** A stable hue per name, for the drawn fallback. */
-function hue(name: string): number {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
+/** Whether there is real art for this agent (otherwise callers show their own fallback). */
+export const hasAgentArt = (agent?: string | null) => Boolean(agent && AGENTS[key(agent)]);
 
-/** The map's banner art, cropped to a 16:9 thumb, with the agent you played over its corner. */
+/** The map's banner art, cropped to a 16:9 thumb, with the agent you played beside its corner. */
 export function MapThumb({ map, agent }: { map: string; agent?: string }) {
   const id = MAPS[key(map)];
   const [failed, setFailed] = useState(false);
-  const h = hue(map);
   return (
     <div className="relative shrink-0">
-      <div
-        className="relative h-[60px] w-[104px] overflow-hidden rounded-xl ring-1 ring-white/10 ring-inset"
-        style={{ background: `linear-gradient(135deg, hsl(${h} 45% 28%), hsl(${(h + 40) % 360} 35% 12%))` }}
-      >
+      <div className="relative h-[56px] w-[100px] overflow-hidden rounded-md bg-hover ring-1 ring-zinc-800 ring-inset">
         {id && !failed ? (
           <img
             src={`${CDN}/maps/${id}/listviewicon.png`}
@@ -92,31 +84,24 @@ export function MapThumb({ map, agent }: { map: string; agent?: string }) {
             className="absolute inset-0 size-full object-cover"
           />
         ) : (
-          <span className="absolute inset-0 grid place-items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-white/70">{map}</span>
+          <span className="absolute inset-0 grid place-items-center text-[11px] font-semibold tracking-[0.12em] text-quiet uppercase">{map}</span>
         )}
-        {/* Specular sheen and a soft vignette so the art reads as glass, not a sticker. */}
-        <span aria-hidden className="absolute inset-0 bg-gradient-to-b from-white/[0.14] via-transparent to-black/45" />
       </div>
-      {agent && <AgentIcon agent={agent} className="absolute -right-2 -bottom-2 size-8 ring-[2.5px] ring-zinc-950" />}
+      {agent && <AgentIcon agent={agent} className="absolute -right-2 -bottom-2 size-8 ring-2 ring-panel" />}
     </div>
   );
 }
 
-/** The agent's round minimap portrait. */
+/** The agent's minimap portrait on a square tile. */
 export function AgentIcon({ agent, className = "size-6" }: { agent: string; className?: string }) {
   const id = AGENTS[key(agent)];
   const [failed, setFailed] = useState(false);
-  const h = hue(agent);
   return (
-    <span
-      title={agent}
-      className={`grid shrink-0 place-items-center overflow-hidden rounded-full shadow-lg shadow-black/40 ${className}`}
-      style={{ background: `radial-gradient(circle at 30% 25%, hsl(${h} 50% 45%), hsl(${h} 45% 18%))` }}
-    >
+    <span title={agent} className={`grid shrink-0 place-items-center overflow-hidden rounded-md bg-avatar ${className}`}>
       {id && !failed ? (
         <img src={`${CDN}/agents/${id}/minimapportrait.png`} alt={agent} loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} className="size-full object-cover" />
       ) : (
-        <span className="text-[10px] font-bold text-white/90">{agent.slice(0, 2).toUpperCase()}</span>
+        <span className="text-[11px] font-semibold text-body">{agent.slice(0, 2).toUpperCase()}</span>
       )}
     </span>
   );
