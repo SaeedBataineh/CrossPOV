@@ -223,6 +223,8 @@ pub struct RecordPlan {
     /// Height of the screen being recorded, if known. A screen no taller than
     /// the chosen resolution isn't resized at all.
     pub screen_height: Option<u32>,
+    /// Which screen to capture (0 = main), as Desktop Duplication counts them.
+    pub output_idx: u32,
 }
 
 impl RecordPlan {
@@ -252,7 +254,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             // draw_mouse=0: the in-game crosshair is part of the game image; the
             // Windows cursor would only show up on menus.
             push(&mut a, &["-f", "lavfi", "-thread_queue_size", "64", "-i"]);
-            a.push(format!("ddagrab=output_idx=0:framerate={fps}:draw_mouse=0"));
+            a.push(format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx));
         }
         VideoSource::TestPattern => {
             push(&mut a, &["-re", "-f", "lavfi", "-i"]);
@@ -401,7 +403,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0 }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -413,6 +415,8 @@ mod tests {
         let s = Settings { resolution: Resolution::Native, ..Settings::default() };
         let args = joined(&s, &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(args.contains("ddagrab=output_idx=0:framerate=60"));
+        let second = joined(&Settings::default(), &RecordPlan { output_idx: 1, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
+        assert!(second.contains("ddagrab=output_idx=1:"), "records the screen the game is on");
         assert!(!args.contains("hwdownload"), "{args}");
         assert!(args.contains("-map 0:v"));
         assert!(args.contains("-c:v h264_nvenc"));

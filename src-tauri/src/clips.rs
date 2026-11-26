@@ -48,6 +48,9 @@ pub struct ClipMeta {
     pub vod_url: Option<String>,
     #[serde(default)]
     pub vod_start_sec: Option<f64>,
+    /// Your clips: which game it was recorded in.
+    #[serde(default)]
+    pub game: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +72,7 @@ pub struct ClipInfo {
     pub match_start_sec: Option<f64>,
     pub vod_url: Option<String>,
     pub vod_start_sec: Option<f64>,
+    pub game: Option<String>,
 }
 
 fn is_video(p: &Path) -> bool {
@@ -149,6 +153,7 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
         match_start_sec: details.match_start_sec,
         vod_url: details.vod_url,
         vod_start_sec: details.vod_start_sec,
+        game: details.game,
     })
 }
 

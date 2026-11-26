@@ -210,11 +210,12 @@ struct Plan {
 }
 
 impl Plan {
-    fn from(s: &Settings) -> Self {
+    /// `game_exe`: the program whose sound is "game sound" (the game being recorded).
+    fn from(s: &Settings, game_exe: &str) -> Self {
         Self {
             mode: s.audio_mode,
-            game: s.game_audio.then(|| volume(s.game_volume)),
-            game_exe: procs::game_exe(),
+            game: s.game_audio.then(|| volume(s.game_volume)).filter(|_| !game_exe.is_empty()),
+            game_exe: game_exe.to_string(),
             apps: s.apps.iter().filter(|a| a.enabled).map(|a| (a.exe.clone(), volume(a.volume))).collect(),
             mic: s.microphone.then(|| (s.mic_device.clone(), volume(s.mic_volume))),
         }
@@ -240,10 +241,10 @@ pub struct AudioPipe {
 impl AudioPipe {
     /// Starts capture and the mixer, writing PCM to `sink` (FFmpeg's stdin)
     /// until stopped or until the sink closes.
-    pub fn start<W: Write + Send + 'static>(settings: &Settings, mut sink: W) -> Self {
+    pub fn start<W: Write + Send + 'static>(settings: &Settings, game_exe: &str, mut sink: W) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let warning = Arc::new(Mutex::new(None));
-        let plan = Plan::from(settings);
+        let plan = Plan::from(settings, game_exe);
         let (stop_flag, warn) = (stop.clone(), warning.clone());
 
         let thread = thread::Builder::new()
@@ -421,7 +422,7 @@ mod tests {
         }
         let count = Counter(Arc::new(Mutex::new(0)));
         let s = Settings { game_audio: false, microphone: false, ..Settings::default() };
-        let pipe = AudioPipe::start(&s, count.clone());
+        let pipe = AudioPipe::start(&s, "VALORANT-Win64-Shipping.exe", count.clone());
         thread::sleep(Duration::from_millis(500));
         drop(pipe);
         // 0.5 s * 48000 frames * 4 channels * 4 bytes = 384000, give or take a tick.

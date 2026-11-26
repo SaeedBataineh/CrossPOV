@@ -123,6 +123,8 @@ export function demoClips(): ClipInfo[] {
     clip("Clip_Round-3-ace", "mine", 150, 60, 191, { map: "Lotus" }),
     clip("Clip_Round-22-retake", "mine", 1500, 30, 94, { map: "Bind" }),
     clip("Clip_Op-flick", "mine", 1530, 60, 180, { map: "Bind" }),
+    clip("Clip_apex-third-party", "mine", 300, 60, 210, { map: null, game: "Apex Legends" }),
+    clip("Clip_cs2-clutch", "mine", 2900, 60, 175, { map: null, game: "Counter-Strike 2" }),
     clip("Clip_Haven-1v3", "mine", 1620, 60, 172, { map: "Haven" }),
   ];
 }

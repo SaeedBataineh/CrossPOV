@@ -77,7 +77,7 @@ export default function Landing() {
         <section className="cl-hero">
           <h1 className="cl-rise">Your play, and the streamer&rsquo;s view of it.</h1>
           <p className="cl-lead cl-rise d2">
-            Press F9 in VALORANT to save a clip. After the match, CrossPOV gets the same fight from anyone who was live.
+            Press F9 in any game to save a clip. In VALORANT, CrossPOV also gets the same fight from anyone who was live.
           </p>
           <div className="cl-actions cl-rise d3">
             <a href="/download" className="cl-btn cl-btn-primary">

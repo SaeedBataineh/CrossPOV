@@ -1099,6 +1099,7 @@ impl StreamerWorker {
                         match_start_sec: Some(w.start),
                         vod_url: Some(vod.url.clone()),
                         vod_start_sec: Some(from),
+                        game: Some("VALORANT".into()),
                     };
                     clips::write_meta(&root, &clip, &meta);
                     // Learn how long a clip takes here, for the next estimates.

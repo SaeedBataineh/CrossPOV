@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Rail, TopBar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
-import { isDesktop, loadSettings, type ClipInfo } from "./lib/backend";
+import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { same } from "./lib/riotId";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
@@ -87,6 +87,10 @@ export default function App() {
           searchLabel={search}
           title={title}
           onSaving={() => recorder.notify("Saving clip…", "info")}
+          onIgnore={(exe) => {
+            const next = { ...settings, ignoredGames: [...settings.ignoredGames, exe] };
+            saveSettings(next).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"));
+          }}
         />
         <main className="main" ref={mainRef}>
           {!isDesktop && (

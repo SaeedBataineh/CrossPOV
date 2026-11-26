@@ -175,9 +175,9 @@ export function cardTitle(c: ClipInfo): string {
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
 
-/** "Ascent · R14 · 35 min ago" */
+/** "Ascent · R14 · 35 min ago", or "Apex Legends · 35 min ago" for other games. */
 export function cardMeta(c: ClipInfo): string {
-  return [c.map, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
+  return [c.map ?? c.game, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
 }
 
 const FolderIcon = () => (

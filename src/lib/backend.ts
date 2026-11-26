@@ -52,6 +52,21 @@ export async function pickFolder(current: string): Promise<string | null> {
   return typeof picked === "string" ? picked : null;
 }
 
+/** Asks for a game's program (.exe) and returns its file name, e.g. "Game.exe". */
+export async function pickGameExe(): Promise<string | null> {
+  if (!isDesktop) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ multiple: false, filters: [{ name: "Games and programs", extensions: ["exe"] }] });
+  if (typeof picked !== "string") return null;
+  return picked.split(/[\\/]/).pop() ?? null;
+}
+
+/** Names of the games CrossPOV knows without being told. */
+export async function knownGames(): Promise<string[]> {
+  if (isDesktop) return tauriInvoke<string[]>("known_games");
+  return ["VALORANT", "Counter-Strike 2", "Fortnite", "Apex Legends", "League of Legends", "Overwatch 2", "Rainbow Six Siege", "Call of Duty", "Rocket League", "Minecraft"];
+}
+
 export async function openClipFolder(): Promise<void> {
   if (isDesktop) await tauriInvoke<void>("open_clip_folder");
 }
@@ -66,6 +81,8 @@ export interface RecorderStatus {
   message: string | null;
   audioWarning: string | null;
   hotkeyError: string | null;
+  /** The game being recorded, and how it was found. */
+  game?: { exe: string; name: string; found: "known" | "yours" | "fullscreen" } | null;
 }
 
 export interface ClipInfo {
@@ -81,6 +98,8 @@ export interface ClipInfo {
   round: number | null;
   moment: string | null;
   map: string | null;
+  /** Your clips (newer ones): the game it was recorded in. */
+  game?: string | null;
   /** Streamer clips only (newer clips): which match, and where the clip starts in the match and in their VOD, in seconds. */
   matchId?: string | null;
   matchStartSec?: number | null;

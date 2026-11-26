@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
 import { Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
-import { diagnostics, isDesktop, pickFolder } from "../lib/backend";
+import { diagnostics, isDesktop, knownGames, pickFolder, pickGameExe } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
 import { same, validRiotId } from "../lib/riotId";
 import { useDraft } from "../lib/useDraft";
@@ -49,8 +49,9 @@ function ProblemReport() {
   );
 }
 
-type Section = "recording" | "hotkey" | "streamers" | "audio" | "account";
+type Section = "games" | "recording" | "hotkey" | "streamers" | "audio" | "account";
 const SECTIONS: { id: Section; label: string }[] = [
+  { id: "games", label: "Games" },
   { id: "recording", label: "Recording" },
   { id: "hotkey", label: "Hotkey and replay" },
   { id: "streamers", label: "Streamer clips" },
@@ -60,7 +61,7 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
-  const [tab, setTab] = useState<Section>("recording");
+  const [tab, setTab] = useState<Section>("games");
   return (
     <section className="settings-layout" aria-label="Settings">
       <nav className="settings-nav" aria-label="Settings sections">
@@ -151,6 +152,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
         <h2>{SECTIONS.find((x) => x.id === section)?.label}</h2>
         <SaveState d={d} />
       </header>
+
+      {section === "games" && <Games draft={draft} set={set} />}
 
       {section === "recording" && (
         <>
@@ -249,6 +252,61 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           Reset all settings to defaults
         </button>
         </>
+      )}
+    </>
+  );
+}
+
+/** Which games are recorded: fullscreen apps, the built-in list, and yours. */
+function Games({ draft, set }: { draft: S; set: <K extends keyof S>(key: K, value: S[K]) => void }) {
+  const [known, setKnown] = useState<string[]>([]);
+  const [showKnown, setShowKnown] = useState(false);
+  useEffect(() => {
+    knownGames().then(setKnown, () => setKnown([]));
+  }, []);
+
+  async function add() {
+    const exe = await pickGameExe();
+    if (!exe || draft.customGames.some((g) => g.exe.toLowerCase() === exe.toLowerCase())) return;
+    const name = exe.replace(/\.exe$/i, "");
+    set("customGames", [...draft.customGames, { exe, name }]);
+    // Adding a game you'd told CrossPOV to skip means you want it after all.
+    set("ignoredGames", draft.ignoredGames.filter((e) => e.toLowerCase() !== exe.toLowerCase()));
+  }
+
+  return (
+    <>
+      <Panel title="What counts as a game">
+        <Row label="Fullscreen apps" help="anything running fullscreen or borderless fullscreen is recorded, except browsers, video players and launchers">
+          <Toggle label="Record fullscreen apps" checked={draft.recordFullscreen} onChange={(v) => set("recordFullscreen", v)} />
+        </Row>
+        <Row label="Games CrossPOV knows" help={`${known.length || "70+"} popular games, recorded even in a window`}>
+          <button type="button" className="b sm" onClick={() => setShowKnown((v) => !v)} aria-expanded={showKnown}>{showKnown ? "Hide list" : "Show list"}</button>
+        </Row>
+        {showKnown && <p className="note">{known.join(" · ")}</p>}
+        <p className="note">Streamer clips (their side of your fights) are for VALORANT only. Your own clips work in every game.</p>
+      </Panel>
+
+      <Panel title="Your games" right={<button type="button" className="b sm" onClick={() => void add()} disabled={!isDesktop}>Add a game</button>}>
+        {draft.customGames.length ? (
+          draft.customGames.map((g) => (
+            <Row key={g.exe} label={g.name} help={<span className="path">{g.exe}</span>}>
+              <button type="button" className="b sm" onClick={() => set("customGames", draft.customGames.filter((x) => x.exe !== g.exe))}>Remove</button>
+            </Row>
+          ))
+        ) : (
+          <p className="note">A game that isn't recorded? Add its program (.exe) and it's recorded whenever it's open, fullscreen or not.</p>
+        )}
+      </Panel>
+
+      {draft.ignoredGames.length > 0 && (
+        <Panel title="Never recorded">
+          {draft.ignoredGames.map((exe) => (
+            <Row key={exe} label={exe.replace(/\.exe$/i, "")} help={<span className="path">{exe}</span>}>
+              <button type="button" className="b sm" onClick={() => set("ignoredGames", draft.ignoredGames.filter((e) => e !== exe))}>Record it again</button>
+            </Row>
+          ))}
+        </Panel>
       )}
     </>
   );

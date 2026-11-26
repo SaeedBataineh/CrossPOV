@@ -9,6 +9,7 @@ mod audio;
 mod clips;
 mod fastvod;
 mod ffmpeg;
+mod games;
 mod matches;
 mod net;
 mod procs;
@@ -320,6 +321,15 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Setti
     state.streamers.update(settings.clone(), clip_folder(&app, &settings));
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();
     Ok(settings)
+}
+
+/// Names of the games CrossPOV knows without being told, for Settings.
+#[tauri::command]
+fn known_games() -> Vec<String> {
+    let mut names: Vec<String> = games::KNOWN_GAMES.iter().map(|(_, n)| n.to_string()).collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names.dedup();
+    names
 }
 
 #[tauri::command]
@@ -753,6 +763,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
+            known_games,
             default_clip_folder,
             open_clip_folder,
             recorder_status,

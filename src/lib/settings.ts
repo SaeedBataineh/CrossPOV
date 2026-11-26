@@ -22,6 +22,12 @@ export const REGIONS = [
   { value: "latam", label: "Latin America" },
 ] as const;
 
+/** A game you added: its program file name and what to call it. */
+export interface CustomGame {
+  exe: string;
+  name: string;
+}
+
 export interface Settings {
   // Account
   /** "Name#TAG", used only to look up your own matches. */
@@ -34,6 +40,12 @@ export interface Settings {
   quality: Quality;
   encoder: Encoder;
   format: Container;
+  // Which games to record
+  /** Any app running fullscreen counts as a game. */
+  recordFullscreen: boolean;
+  customGames: CustomGame[];
+  /** Programs never recorded (exe names). */
+  ignoredGames: string[];
   // Hotkey and replay buffer
   hotkey: string;
   bufferSeconds: number;
@@ -79,6 +91,9 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: "high",
   encoder: "auto",
   format: "mp4",
+  recordFullscreen: true,
+  customGames: [],
+  ignoredGames: [],
   hotkey: "F9",
   bufferSeconds: 60,
   clipSound: true,

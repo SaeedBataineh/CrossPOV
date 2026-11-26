@@ -9,6 +9,9 @@ type Tab = "all" | "theirs" | "mine";
 type Sort = "newest" | "longest" | "largest";
 const PAGE = 24;
 
+/** Which game a clip is from: streamer clips and clips with a map are VALORANT. Older clips may not know. */
+const gameOf = (c: ClipInfo) => (c.kind === "theirs" ? "VALORANT" : c.game ?? (c.map ? "VALORANT" : "Other"));
+
 const SORTS: Record<Sort, (a: ClipInfo, b: ClipInfo) => number> = {
   newest: (a, b) => b.createdMs - a.createdMs,
   longest: (a, b) => (b.durationSec ?? 0) - (a.durationSec ?? 0),
@@ -32,6 +35,8 @@ export default function Clips({
   const { clips, refreshClips, notify } = recorder;
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("newest");
+  const [game, setGame] = useState("all");
+  const games = useMemo(() => [...new Set(clips.map(gameOf))].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b))), [clips]);
   const [limit, setLimit] = useState(PAGE);
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
@@ -45,10 +50,15 @@ export default function Clips({
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return clips
-      .filter((c) => (tab === "all" || c.kind === tab) && (!q || [cardTitle(c), c.name, c.streamer, c.map, c.moment].filter(Boolean).join(" ").toLowerCase().includes(q)))
+      .filter(
+        (c) =>
+          (tab === "all" || c.kind === tab) &&
+          (game === "all" || gameOf(c) === game) &&
+          (!q || [cardTitle(c), c.name, c.streamer, c.map, c.moment, c.game].filter(Boolean).join(" ").toLowerCase().includes(q)),
+      )
       .sort(SORTS[sort]);
-  }, [clips, tab, query, sort]);
-  useEffect(() => setLimit(PAGE), [tab, query, sort]);
+  }, [clips, tab, query, sort, game]);
+  useEffect(() => setLimit(PAGE), [tab, query, sort, game]);
 
   const totalBytes = clips.reduce((n, c) => n + c.sizeBytes, 0);
   const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
@@ -73,7 +83,19 @@ export default function Clips({
             </button>
           ))}
         </div>
-        <label className="field">
+        <span className="row" style={{ gap: 8, marginBottom: 8 }}>
+        {games.length > 1 && (
+          <label className="field">
+            <span className="sr-only">Game</span>
+            <select value={game} onChange={(e) => setGame(e.target.value)}>
+              <option value="all">All games</option>
+              {games.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="field" style={{ marginBottom: 0 }}>
           <span className="sr-only">Sort</span>
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
             <option value="newest">Newest</option>
@@ -81,6 +103,7 @@ export default function Clips({
             <option value="largest">Largest</option>
           </select>
         </label>
+        </span>
       </div>
 
       {shown.length ? (

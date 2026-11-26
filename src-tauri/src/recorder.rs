@@ -16,7 +16,7 @@ use crate::{
     audio::AudioPipe,
     clips::{self, ClipInfo, ClipMeta, MY_CLIPS},
     ffmpeg::{self, NoWindow, RecordPlan, VideoEncoder, VideoSource, SEGMENT_SECONDS},
-    procs,
+    games::{self, Game},
     settings::{Container, Settings},
 };
 
@@ -49,11 +49,13 @@ pub struct RecorderStatus {
     pub message: Option<String>,
     pub audio_warning: Option<String>,
     pub hotkey_error: Option<String>,
+    /// The game being recorded (or about to be).
+    pub game: Option<Game>,
 }
 
 impl RecorderStatus {
     fn new(state: RecState) -> Self {
-        Self { state, encoder: None, message: None, audio_warning: None, hotkey_error: None }
+        Self { state, encoder: None, message: None, audio_warning: None, hotkey_error: None, game: None }
     }
 }
 
@@ -72,6 +74,8 @@ struct Running {
     plan: RecordPlan,
     started: Instant,
     key: String,
+    /// Shown on clips saved from this recording.
+    game: String,
 }
 
 impl Drop for Running {
@@ -249,16 +253,27 @@ impl Recorder {
             VideoSource::TestPattern
         };
         loop {
-            let want = always || procs::game_running();
-            self.tick(want, &path, detected, source);
-            thread::sleep(if want { POLL } else { POLL_IDLE });
+            let settings = self.lock().settings.clone();
+            let game = games::detect(&settings).or_else(|| {
+                always.then(Game::desktop)
+            });
+            let playing = game.is_some();
+            self.tick(game, &path, detected, source);
+            thread::sleep(if playing { POLL } else { POLL_IDLE });
         }
     }
 
-    fn tick(&self, want: bool, ffmpeg_path: &Path, detected: VideoEncoder, source: VideoSource) {
+    fn tick(&self, game: Option<Game>, ffmpeg_path: &Path, detected: VideoEncoder, source: VideoSource) {
         let mut inner = self.lock();
-        let want = want && !inner.halted;
-        let key = recording_key(&inner.settings);
+        let want = game.is_some() && !inner.halted;
+        // Another game, or the game moved to another screen: start afresh.
+        let key = format!(
+            "{}|{}|{}",
+            recording_key(&inner.settings),
+            game.as_ref().map_or("", |g| g.exe.as_str()).to_lowercase(),
+            game.as_ref().map_or(0, |g| g.output_idx)
+        );
+        inner.status.game = game.clone();
 
         // Stop if the game closed or recording settings changed.
         let stale = inner.running.as_ref().is_some_and(|r| r.key != key);
@@ -299,7 +314,8 @@ impl Recorder {
             }
             let compat = inner.fallback >= 1;
             crate::trail(&format!("recording: starting ({})", encoder.label()));
-            match self.start(ffmpeg_path, &settings, encoder, compat, source, key) {
+            let g = game.clone().unwrap_or_default();
+            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
                 Ok(running) => {
                     crate::trail("recording: started");
                     inner.status.state = RecState::Recording;
@@ -343,6 +359,7 @@ impl Recorder {
         compat: bool,
         source: VideoSource,
         key: String,
+        game: &Game,
     ) -> Result<Running, String> {
         let segment_dir = self.work_dir.join("buffer");
         let _ = fs::remove_dir_all(&segment_dir);
@@ -355,7 +372,8 @@ impl Recorder {
             compat,
             segment_dir,
             segment_count: ffmpeg::segment_count(settings.buffer_seconds),
-            screen_height: primary_screen_height(),
+            screen_height: game.screen_height.or_else(primary_screen_height),
+            output_idx: game.output_idx,
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)
@@ -366,19 +384,20 @@ impl Recorder {
             .no_window()
             .spawn()
             .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
-        let audio = child.stdin.take().map(|stdin| AudioPipe::start(settings, stdin));
-        Ok(Running { child, audio, plan, started: Instant::now(), key })
+        let audio = child.stdin.take().map(|stdin| AudioPipe::start(settings, &game.exe, stdin));
+        Ok(Running { child, audio, plan, started: Instant::now(), key, game: game.name.clone() })
     }
 
     /// Saves the last `buffer_seconds` as a clip. Waits for the segment being
     /// written right now to finish, so the clip includes the moment the
     /// hotkey was pressed.
     pub fn save_clip(&self, clip_root: &Path) -> Result<ClipInfo, String> {
-        let (plan, settings) = {
+        let (plan, settings, game) = {
             let inner = self.lock();
-            let r = inner.running.as_ref().ok_or("Not recording right now. Clips are saved while the game is open.")?;
-            (r.plan.clone(), inner.settings.clone())
+            let r = inner.running.as_ref().ok_or("Not recording right now. Clips are saved while a game is open.")?;
+            (r.plan.clone(), inner.settings.clone(), r.game.clone())
         };
+        let game = Some(game).filter(|g| !g.is_empty());
         let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
 
         let before = read_segment_list(&plan);
@@ -429,7 +448,7 @@ impl Recorder {
         }
         let _ = run_ffmpeg(&ffmpeg_path, &ffmpeg::thumbnail_args(&out, &thumb));
         let duration = (take.len() as u32 * SEGMENT_SECONDS) as f64;
-        clips::write_meta(clip_root, &out, &ClipMeta { duration_sec: Some(duration), ..ClipMeta::default() });
+        clips::write_meta(clip_root, &out, &ClipMeta { duration_sec: Some(duration), game: game.clone(), ..ClipMeta::default() });
         if settings.prune_oldest {
             clips::prune(clip_root, settings.storage_limit_gb);
         }
@@ -451,6 +470,7 @@ impl Recorder {
             match_start_sec: None,
             vod_url: None,
             vod_start_sec: None,
+            game,
         })
     }
 }
@@ -489,7 +509,7 @@ mod tests {
         *rec.ffmpeg.lock().unwrap() = Some((ff.clone(), VideoEncoder::Cpu));
         let key = recording_key(&settings);
         let running = rec
-            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key)
+            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default())
             .expect("start recording");
         rec.lock().running = Some(running);
 

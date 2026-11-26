@@ -86,6 +86,14 @@ const OLD_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
 pub const MAX_PADDING: u32 = 120;
 const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
 
+/// A game you added: its program file name, and what to call it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomGame {
+    pub exe: String,
+    pub name: String,
+}
+
 /// Missing fields (e.g. after an update adds a setting) fall back to defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -102,6 +110,13 @@ pub struct Settings {
     pub quality: Quality,
     pub encoder: Encoder,
     pub format: Container,
+    // Which games to record
+    /// Any app running fullscreen (or borderless fullscreen) counts as a game.
+    pub record_fullscreen: bool,
+    /// Games you added by hand (their .exe).
+    pub custom_games: Vec<CustomGame>,
+    /// Programs never to record, even if fullscreen or on the built-in list (exe names).
+    pub ignored_games: Vec<String>,
     // Hotkey and replay buffer
     pub hotkey: String,
     pub buffer_seconds: u32,
@@ -150,6 +165,9 @@ impl Default for Settings {
             quality: Quality::High,
             encoder: Encoder::Auto,
             format: Container::Mp4,
+            record_fullscreen: true,
+            custom_games: Vec::new(),
+            ignored_games: Vec::new(),
             hotkey: "F9".into(),
             buffer_seconds: 60,
             clip_sound: true,
@@ -208,6 +226,20 @@ impl Settings {
             self.hotkey = Settings::default().hotkey;
         }
         self.clip_folder = self.clip_folder.trim().to_string();
+        // Games: a plain "name.exe" each, no duplicates, a sane number.
+        let exe_ok = |e: &str| e.to_lowercase().ends_with(".exe") && !e.contains(['/', '\\']) && e.len() <= 120;
+        for g in &mut self.custom_games {
+            g.exe = g.exe.trim().to_string();
+            g.name = g.name.trim().chars().take(60).collect();
+            if g.name.is_empty() {
+                g.name = g.exe.trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        self.custom_games.retain(|g| exe_ok(&g.exe) && seen.insert(g.exe.to_lowercase()));
+        self.custom_games.truncate(100);
+        let mut seen = std::collections::HashSet::new();
+        self.ignored_games = self.ignored_games.iter().map(|e| e.trim().to_string()).filter(|e| exe_ok(e) && seen.insert(e.to_lowercase())).take(100).collect();
         self.game_volume = self.game_volume.min(200);
         self.mic_volume = self.mic_volume.min(200);
         for app in &mut self.apps {

@@ -229,7 +229,8 @@ async fn tokio_sleep(d: Duration) {
 }
 
 fn game_running() -> bool {
-    procs::game_running()
+    // VALORANT, or any other game being recorded: don't restart mid-game.
+    procs::game_running() || crate::games::last_seen().is_some()
 }
 
 /// Stops FFmpeg / yt-dlp copies started from the app's own folder (or, in

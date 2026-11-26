@@ -46,6 +46,7 @@ export function TopBar({
   onQuery,
   searchLabel,
   onSaving,
+  onIgnore,
   title,
 }: {
   settings: Settings;
@@ -55,6 +56,8 @@ export function TopBar({
   /** No search box when undefined. */
   searchLabel?: string;
   onSaving: () => void;
+  /** "Not a game?": stop recording this program for good. */
+  onIgnore: (exe: string) => void;
   /** Shown instead of the search box. */
   title?: ReactNode;
 }) {
@@ -65,8 +68,9 @@ export function TopBar({
     ? "Website demo"
     : recording ? "Recording"
     : bad ? "Recorder stopped"
-    : state === "waiting" ? "Waiting for VALORANT"
+    : state === "waiting" ? "Waiting for a game"
     : "Starting…";
+  const game = recording ? status?.game : null;
 
   return (
     <header className="topbar">
@@ -82,9 +86,21 @@ export function TopBar({
       <span className="spacer" />
       <div className="rec-status" title={status?.message ?? undefined} role="status">
         <span className={`dot ${recording ? "rec" : bad ? "bad" : "idle"}`} aria-hidden="true" />
-        <b>{line}</b>
+        <b>{line}{game?.name ? ` ${game.name}` : ""}</b>
         {isDesktop && <span className="muted">· press <kbd>{settings.hotkey}</kbd> to save the last {settings.bufferSeconds} s</span>}
       </div>
+      {game?.found === "fullscreen" && game.exe && (
+        <button
+          type="button"
+          className="btn quiet sm-btn"
+          title={`CrossPOV is recording ${game.exe} because it's fullscreen. Stop recording it?`}
+          onClick={() => {
+            if (window.confirm(`Stop recording ${game.name}? It won't be recorded again. You can undo this in Settings › Games.`)) onIgnore(game.exe);
+          }}
+        >
+          Not a game?
+        </button>
+      )}
       {recording && (
         <button
           type="button"
