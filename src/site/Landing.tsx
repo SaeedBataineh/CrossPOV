@@ -98,7 +98,10 @@ export default function Landing() {
           </ul>
           <div className="cl-shot cl-rise d3">
             <img
-              src="/app-matches.jpg"
+              src="/app-matches-1600.webp"
+              srcSet="/app-matches-1080.webp 1080w, /app-matches-1600.webp 1600w, /app-matches-2160.webp 2160w"
+              sizes="(max-width: 1100px) 100vw, 1080px"
+              fetchPriority="high"
               alt="The CrossPOV app: your matches, with clips from the streamers you played against"
               width="2720"
               height="1640"

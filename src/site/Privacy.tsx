@@ -1,4 +1,6 @@
 import { Logo } from "../components/Icons";
+import "@fontsource-variable/figtree";
+import "../styles.css";
 import "./site.css";
 
 /** Where people can reach the developer. Shown on the page only when set. */

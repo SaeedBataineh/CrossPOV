@@ -1,4 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import "@fontsource-variable/figtree";
+import "@fontsource-variable/jetbrains-mono";
+import "./styles.css";
 import { Rail, TopBar, type Page } from "./components/Shell";
 import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";

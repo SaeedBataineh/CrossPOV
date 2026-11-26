@@ -1,10 +1,10 @@
 import { lazy, StrictMode, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/figtree";
-import "@fontsource-variable/jetbrains-mono";
-import "./styles.css";
-import App from "./App";
 import { isDesktop, onWindowAwake } from "./lib/backend";
+
+// The app (and its styles and fonts) loads only where it's shown, so the
+// website's homepage doesn't download it.
+const App = lazy(() => import("./App"));
 
 // The desktop app always shows the app. The public website shows the
 // landing page at "/", the privacy policy at "/privacy", and the app itself
