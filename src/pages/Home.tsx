@@ -31,7 +31,7 @@ interface Live {
 function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefined, streamers?: MatchStreamers, web?: WebStreamer[] | "checking"): Live | null {
   const st = streamers?.players.find((s) => s.puuid === p.puuid);
   if (st) {
-    const l = streamerLabel(st);
+    const l = streamerLabel(st, Boolean(me && p.team === me.team));
     return { login: st.channel.login, name: st.channel.displayName, text: l.text, tone: l.tone };
   }
   const ws = Array.isArray(web) ? web.find((w) => w.puuid === p.puuid) : undefined;

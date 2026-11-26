@@ -22,7 +22,9 @@ export function timeLeft(sec: number): string {
   return min < 60 ? `about ${min} min left` : `about ${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""} left`;
 }
 
-export function streamerLabel(s: StreamerPlayer): { text: string; tone: "good" | "warn" | "purple" | "bad" | "muted" } {
+export function streamerLabel(s: StreamerPlayer, teammate = false): { text: string; tone: "good" | "warn" | "purple" | "bad" | "muted" } {
+  // You can't fight a teammate, so there's never anything of theirs to clip.
+  if (teammate && s.status !== "clipped") return { text: "your teammate · nothing to clip", tone: "muted" };
   // The VPS lines a VOD up in under a minute; the app asks every 10 s.
   if (s.checking) return { text: `${s.manual ? "checking it was this match" : "lining up their VOD"} · about a minute`, tone: "purple" };
   const eta = s.status === "working" && s.etaSec ? ` · ${timeLeft(s.etaSec)}` : "";

@@ -239,10 +239,14 @@ async function streamers(region: string, id: string, url: URL, env: Env, ctx?: E
   // (1-2 minutes): the scanner measures it from when rounds ended, so clips
   // are cut at the right second. "pending" until it has (a minute or two).
   const shown = all.streamers.filter((s) => s.puuid !== me);
+  // Teammates never fight you, so there's nothing of theirs to clip: don't
+  // have the scanner line up their VOD.
+  const myTeam = me ? match.players.find((p) => p.puuid === me)?.team : undefined;
   const measured = await Promise.all(
     shown.map(async (s) => {
       const team = match.players.find((p) => p.puuid === s.puuid)?.team;
-      return s.vod && team ? { ...s, verify: await scannerVerify(env, match, s.channel.login, team, "shift") } : s;
+      if (!s.vod || !team || (myTeam && team === myTeam)) return s;
+      return { ...s, verify: await scannerVerify(env, match, s.channel.login, team, "shift") };
     }),
   );
   const pending = scan.status === "pending" || measured.some((s) => "verify" in s && s.verify?.verdict === "pending");

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Page } from "../components/Shell";
 import { Notice } from "../components/ui";
-import { isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
+import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
 import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
@@ -86,9 +86,11 @@ export default function Streamers({
             <span role="columnheader"><span className="sr-only">Watch</span></span>
           </div>
           {rows.map(({ matchId, player: p, match }) => {
-            const l = streamerLabel(p);
-            const pct = p.status === "working" && !p.checking ? progress(p) : null;
             const who = match?.players.find((x) => x.puuid === p.puuid);
+            const me = match ? findMe(match, settings.riotId) : undefined;
+            const mate = Boolean(me && who && who.team === me.team);
+            const l = streamerLabel(p, mate);
+            const pct = p.status === "working" && !p.checking && !mate ? progress(p) : null;
             const clip = firstClip(matchId, [p.channel.login, p.channel.displayName]);
             return (
               <div key={`${matchId}-${p.puuid}`} className="table-row" role="row">
@@ -96,7 +98,7 @@ export default function Streamers({
                   <span className="avatar sq" aria-hidden="true">{ini(p.channel.displayName)}</span>
                   <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <a href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b></a>
-                    <span className="muted small ellipsis">{["Twitch", who?.agent].filter(Boolean).join(" · ")}</span>
+                    <span className="muted small ellipsis">{["Twitch", mate ? "Teammate" : me && who ? "Enemy" : null, who?.agent].filter(Boolean).join(" · ")}</span>
                   </span>
                 </span>
                 <span role="cell" className="muted">{match ? `${match.map} · ${matchTimeAgo(match.startedAt)}` : ""}{p.fights ? ` · ${p.fights} fight${p.fights === 1 ? "" : "s"}` : ""}</span>

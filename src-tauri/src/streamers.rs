@@ -638,10 +638,18 @@ pub fn settle_stuck(state: &mut MatchStreamers, me_known: bool) {
 pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchSummary, me: Option<&str>, s: &Settings) {
     for hit in hits {
         let fights = me.map(|me| fight_windows(m, me, &hit.puuid, s).len() as u32).unwrap_or(0);
-        let shift = hit.verify.clone();
+        // Nothing between you two to clip (a teammate, or an enemy you never
+        // fought): settle now instead of lining up their VOD for nothing.
+        let nothing = me.is_some() && fights == 0;
+        let shift = if nothing { None } else { hit.verify.clone() };
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == hit.puuid) {
             p.vod = hit.vod.or(p.vod.take());
             p.fights = fights;
+            if nothing && p.status == StreamerStatus::Working {
+                p.status = StreamerStatus::NoFights;
+                p.checking = false;
+                p.eta_sec = None;
+            }
             if let Some(v) = &shift {
                 apply_shift(p, v);
             }
@@ -650,7 +658,7 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 puuid: hit.puuid,
                 name: hit.name,
                 channel: hit.channel,
-                status: if hit.vod.is_some() { StreamerStatus::Working } else { StreamerStatus::NoVod },
+                status: if hit.vod.is_none() { StreamerStatus::NoVod } else if nothing { StreamerStatus::NoFights } else { StreamerStatus::Working },
                 vod: hit.vod,
                 clips: 0,
                 fights,
@@ -1493,5 +1501,27 @@ mod tests {
         merge_hits(&mut state, vec![measured], &m, Some("me"), &five_sec());
         assert!(!state.players[0].checking);
         assert_eq!(state.players[0].delay_sec, 74.0);
+    }
+
+    #[test]
+    fn a_streamer_you_never_fought_is_settled_without_lining_up() {
+        let m = sample();
+        let mut state = MatchStreamers { match_id: m.id.clone(), ..Default::default() };
+        // A teammate: no kills between you two, while the scanner would still be measuring.
+        let mate = StreamerHit {
+            puuid: "mate".into(),
+            name: "mate".into(),
+            tag: "1".into(),
+            channel: Channel { id: "8".into(), login: "mate".into(), display_name: "Mate".into() },
+            vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
+            live_game: Some("VALORANT".into()),
+            verify: Some(VerifyInfo { verdict: "pending".into(), delay_sec: None }),
+        };
+        merge_hits(&mut state, vec![mate.clone()], &m, Some("me"), &five_sec());
+        assert_eq!(state.players[0].status, StreamerStatus::NoFights);
+        assert!(!state.players[0].checking, "nothing to wait for");
+        merge_hits(&mut state, vec![mate], &m, Some("me"), &five_sec());
+        assert_eq!(state.players.len(), 1);
+        assert_eq!(state.players[0].status, StreamerStatus::NoFights);
     }
 }
