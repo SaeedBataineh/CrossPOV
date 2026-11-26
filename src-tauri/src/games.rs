@@ -11,7 +11,10 @@
 //! never recorded. Nothing here touches the game: it only reads the process
 //! list and the position of the front window.
 
-use std::sync::Mutex;
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use serde::Serialize;
 
@@ -142,6 +145,10 @@ impl Game {
     }
 }
 
+/// When the listed game's screen was last looked up.
+static SCREEN_CHECKED: Mutex<Option<Instant>> = Mutex::new(None);
+const SCREEN_RECHECK: Duration = Duration::from_secs(10);
+
 /// The game found last time, so a fullscreen one is kept while you alt-tab.
 static CURRENT: Mutex<Option<Game>> = Mutex::new(None);
 
@@ -160,14 +167,23 @@ pub fn display_name(exe: &str) -> String {
 pub fn detect(s: &Settings) -> Option<Game> {
     let mut current = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
 
-    // 1-2: a game on the built-in list or yours, running now.
-    let listed = procs::shared(|p| {
-        let known = KNOWN_GAMES.iter().map(|(exe, name)| (exe.to_string(), name.to_string(), Found::Known));
-        let yours = s.custom_games.iter().map(|g| (g.exe.clone(), g.name.clone(), Found::Yours));
-        known.chain(yours).find(|(exe, _, _)| !ignored(s, exe) && p.is_running(exe))
-    });
+    // 1-2: a game on the built-in list or yours, running now. One pass over
+    // the process list, then a lookup per name.
+    let running = procs::shared(|p| p.running_names());
+    let known = KNOWN_GAMES.iter().map(|(exe, name)| (exe.to_string(), name.to_string(), Found::Known));
+    let yours = s.custom_games.iter().map(|g| (g.exe.clone(), g.name.clone(), Found::Yours));
+    let listed = known.chain(yours).find(|(exe, _, _)| running.contains(&exe.to_lowercase()) && !ignored(s, exe));
     let found = if let Some((exe, name, found)) = listed {
-        let (output_idx, screen_height) = window::screen_of_process(&exe).unwrap_or((0, None));
+        // Which screen it's on: looked up when it starts, then every 10 s
+        // (the window list and graphics-card query aren't free).
+        let same = current.as_ref().filter(|g| g.exe == exe);
+        let (output_idx, screen_height) = match same {
+            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => (g.output_idx, g.screen_height),
+            _ => {
+                *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+                window::screen_of_process(&exe).unwrap_or((0, None))
+            }
+        };
         Some(Game { exe, name, found, output_idx, screen_height, pid: None })
     } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
         // 3, still open: keep it, even while you're tabbed out.
@@ -245,8 +261,8 @@ mod window {
         0
     }
 
-    /// Screen index and height for a window.
-    fn screen_of(hwnd: HWND) -> (u32, Option<u32>, RECT) {
+    /// The screen a window is on: its handle, height and rectangle. Cheap.
+    fn monitor_of(hwnd: HWND) -> (HMONITOR, Option<u32>, RECT) {
         // SAFETY: `hwnd` came from Windows; MONITORINFO has cbSize set as required.
         unsafe {
             let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -254,7 +270,7 @@ mod window {
             let ok = GetMonitorInfoW(monitor, &mut info).as_bool();
             let rect = info.rcMonitor;
             let height = (ok && rect.bottom > rect.top).then(|| (rect.bottom - rect.top) as u32);
-            (output_index(monitor), height, rect)
+            (monitor, height, rect)
         }
     }
 
@@ -283,9 +299,10 @@ mod window {
             }
             let mut win = RECT::default();
             GetWindowRect(hwnd, &mut win).ok()?;
-            let (output_idx, screen_height, screen) = screen_of(hwnd);
+            let (monitor, screen_height, screen) = monitor_of(hwnd);
             let covers = win.left <= screen.left && win.top <= screen.top && win.right >= screen.right && win.bottom >= screen.bottom;
-            covers.then_some(Front { pid, output_idx, screen_height })
+            // Only a fullscreen window is worth asking the graphics card which screen it is.
+            covers.then(|| Front { pid, output_idx: output_index(monitor), screen_height })
         }
     }
 
@@ -322,8 +339,8 @@ mod window {
         // SAFETY: the callback only touches `search`, which outlives the call.
         let _ = unsafe { EnumWindows(Some(visit), LPARAM(&mut search as *mut Search as isize)) };
         let (_, hwnd) = search.best?;
-        let (idx, height, _) = screen_of(hwnd);
-        Some((idx, height))
+        let (monitor, height, _) = monitor_of(hwnd);
+        Some((output_index(monitor), height))
     }
 }
 

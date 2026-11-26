@@ -97,6 +97,13 @@ impl Procs {
         roots
     }
 
+    /// Every running program's name, in lower case: one pass over the
+    /// process list, for checking many names at once.
+    pub fn running_names(&self) -> std::collections::HashSet<String> {
+        let Some(sys) = &self.sys else { return Default::default() };
+        sys.processes().values().map(|p| p.name().to_string_lossy().to_lowercase()).collect()
+    }
+
     /// Exe names for the given process IDs.
     pub fn names(&self, pids: &[u32]) -> HashMap<u32, String> {
         let Some(sys) = &self.sys else { return HashMap::new() };
