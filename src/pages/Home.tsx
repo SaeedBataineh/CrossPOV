@@ -1,8 +1,8 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Select } from "../components/Select";
-import { ArrowsClockwise, FilmStrip, GearSix, Play, Sword } from "@phosphor-icons/react";
+import { ArrowsClockwise, FilmStrip, GearSix, Play, Sword, TwitchLogo } from "@phosphor-icons/react";
 import { MatchCard, type Show } from "../components/MatchCard";
-import { SegmentedControl } from "../components/SegmentedControl";
+import { SegmentedControl, type Segment } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
 import { Keycap } from "../components/TopBar";
 import { mapArt } from "../components/ValorantArt";
@@ -211,10 +211,10 @@ export default function Home({
     }
   }
 
-  const tabs: { id: Show; label: string; n?: number }[] = [
-    { id: "all", label: "All matches" },
-    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length },
-    { id: "mine", label: "My clips only" },
+  const tabs: Segment<Show>[] = [
+    { id: "all", label: "All matches", Icon: Sword },
+    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length, Icon: TwitchLogo },
+    { id: "mine", label: "My clips only", Icon: FilmStrip },
   ];
 
   return (
@@ -237,7 +237,7 @@ export default function Home({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#222225]">
         <SegmentedControl label="Show" value={show} segments={tabs} onChange={setShow} hideZero />
         {isDesktop && (
           <button
@@ -245,7 +245,7 @@ export default function Home({
             onClick={() => void checkNow()}
             disabled={checking || !status?.configured}
             title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}
-            className="inline-flex h-9 items-center gap-2 rounded-[10px] border-0 bg-white/[0.05] px-3.5 text-[13px] font-medium text-zinc-200 ring-1 ring-white/[0.07] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none disabled:opacity-50"
+            className="mb-1.5 inline-flex h-9 items-center gap-2 rounded-[10px] border-0 bg-white/[0.05] px-3.5 text-[13px] font-medium text-zinc-200 ring-1 ring-white/[0.07] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none disabled:opacity-50"
           >
             <ArrowsClockwise size={14} weight="bold" aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
             {checking ? "Checking…" : "Check for new matches"}

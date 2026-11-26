@@ -8,7 +8,7 @@ import { findPairs } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
 import { useFavourites } from "../lib/favourites";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
-import { Trash, X } from "@phosphor-icons/react";
+import { SquaresFour, Star, Trash, TwitchLogo, User, X, type Icon } from "@phosphor-icons/react";
 
 /** A game's logo, when we know it. */
 const brandLogo = (name: string) => {
@@ -62,11 +62,11 @@ export default function Clips({
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
   const theirs = clips.filter((c) => c.kind === "theirs").length;
-  const tabs: { value: Tab; label: string; n: number }[] = [
-    { value: "all", label: "All", n: clips.length },
-    { value: "theirs", label: "Streamer clips", n: theirs },
-    { value: "mine", label: "My clips", n: clips.length - theirs },
-    { value: "fav", label: "Favourites", n: clips.filter((c) => favs.has(c.path)).length },
+  const tabs: { value: Tab; label: string; n: number; Icon: Icon }[] = [
+    { value: "all", label: "All", n: clips.length, Icon: SquaresFour },
+    { value: "theirs", label: "Streamer clips", n: theirs, Icon: TwitchLogo },
+    { value: "mine", label: "My clips", n: clips.length - theirs, Icon: User },
+    { value: "fav", label: "Favourites", n: clips.filter((c) => favs.has(c.path)).length, Icon: Star },
   ];
 
   const shown = useMemo(() => {
@@ -114,7 +114,7 @@ export default function Clips({
   return (
     <section className="page wide" aria-label="Clips">
       <div className="tabs-row">
-        <SegmentedControl label="Show" value={tab} segments={tabs.map((t) => ({ id: t.value, label: t.label, n: t.n }))} onChange={setTab} />
+        <SegmentedControl label="Show" value={tab} segments={tabs.map((t) => ({ id: t.value, label: t.label, n: t.n, Icon: t.Icon }))} onChange={setTab} />
         <span className="row" style={{ gap: 8 }}>
         {games.length > 1 && (
           <Select label="Game" value={game} onChange={setGame} options={[{ value: "all", label: "All games" }, ...games.map((g) => ({ value: g, label: g, icon: brandLogo(g) }))]} />

@@ -1,15 +1,18 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import type { Icon } from "@phosphor-icons/react";
 
 export interface Segment<T extends string> {
   id: T;
   label: string;
   /** A small count after the label; hidden when undefined (0 still shows). */
   n?: number;
+  /** An icon before the label (filled when the tab is chosen). */
+  Icon?: Icon;
 }
 
 /**
- * Segmented control with a glass thumb that slides to the chosen segment.
- * Tabs semantics: arrow keys move between segments.
+ * Library tabs (GG-style): icon, label and count, with an accent underline
+ * that slides to the chosen tab. Tabs semantics: arrow keys move between them.
  */
 export function SegmentedControl<T extends string>({
   label,
@@ -56,18 +59,12 @@ export function SegmentedControl<T extends string>({
   }
 
   return (
-    <div
-      ref={list}
-      role="tablist"
-      aria-label={label}
-      onKeyDown={onKey}
-      className="relative inline-flex h-9 items-center rounded-[10px] bg-[#111113] p-[3px] ring-1 ring-[#2b2b2f]"
-    >
+    <div ref={list} role="tablist" aria-label={label} onKeyDown={onKey} className="relative inline-flex h-11 items-stretch gap-1">
       {thumb && (
         <span
           aria-hidden
-          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-[#3b9eff]/[0.16] ring-1 ring-[#3b9eff]/40 shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
-          style={{ width: thumb.w, transform: `translateX(${thumb.x}px)` }}
+          className="absolute bottom-0 left-0 h-[3px] rounded-t-full bg-[#3b9eff] shadow-[0_-2px_12px_rgba(59,158,255,0.55)] transition-[transform,width] duration-250 ease-[cubic-bezier(0.2,0.8,0.2,1)]"
+          style={{ width: thumb.w - 16, transform: `translateX(${thumb.x + 8}px)` }}
         />
       )}
       {segments.map((s) => {
@@ -81,11 +78,12 @@ export function SegmentedControl<T extends string>({
             aria-selected={on}
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(s.id)}
-            className={`relative z-10 inline-flex h-full items-center gap-1.5 rounded-[7px] border-0 bg-transparent px-3.5 text-[13px] font-medium tracking-[-0.01em] transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${on ? "text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            className={`group relative inline-flex items-center gap-2 rounded-lg border-0 bg-transparent px-3 text-[14px] font-semibold tracking-[-0.01em] transition-[color,background-color] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#3b9eff] ${on ? "text-white" : "text-[#85858e] hover:bg-white/[0.04] hover:text-[#d9d9de]"}`}
           >
+            {s.Icon && <s.Icon size={17} weight={on ? "fill" : "bold"} aria-hidden className={`transition-colors duration-150 ${on ? "text-[#6ab7ff]" : ""}`} />}
             {s.label}
             {s.n != null && !(hideZero && s.n === 0) && (
-              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-[#3b9eff]/25 text-white" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
+              <span className={`min-w-[20px] rounded-full px-1.5 text-center text-[11px] leading-[18px] font-bold tabular-nums transition-colors duration-150 ${on ? "bg-[#3b9eff] text-white" : "bg-white/[0.07] text-[#a3a3ab]"}`}>{s.n}</span>
             )}
           </button>
         );
