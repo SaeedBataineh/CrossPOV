@@ -112,10 +112,12 @@ export function demoClips(): ClipInfo[] {
     ...extra,
   });
   return [
-    clip("streamer_one_R17_you-killed", "theirs", 29, 108, 300, { streamer: "streamer_one", round: 17, moment: "You killed them" }),
-    clip("streamer_two_R14_killed-you", "theirs", 30, 120, 412, { streamer: "streamer_two", round: 14, moment: "They killed you" }),
-    clip("streamer_two_R9_you-killed", "theirs", 31, 120, 405, { streamer: "streamer_two", round: 9, moment: "You killed them" }),
-    clip("streamer_two_R3_killed-you", "theirs", 31, 120, 398, { streamer: "streamer_two", round: 3, moment: "They killed you" }),
+    clip("streamer_one_R17_you-killed", "theirs", 29, 108, 300, { streamer: "streamer_one", round: 17, moment: "You killed them", matchId: "demo-ascent", matchStartSec: 1558, vodUrl: "https://www.twitch.tv/videos/demo", vodStartSec: 1868 }),
+    clip("streamer_two_R14_killed-you", "theirs", 30, 120, 412, { streamer: "streamer_two", round: 14, moment: "They killed you", matchId: "demo-ascent", matchStartSec: 1301, vodUrl: "https://www.twitch.tv/videos/demo", vodStartSec: 5661 }),
+    clip("streamer_two_R9_you-killed", "theirs", 31, 120, 405, { streamer: "streamer_two", round: 9, moment: "You killed them", matchId: "demo-ascent", matchStartSec: 758, vodUrl: "https://www.twitch.tv/videos/demo", vodStartSec: 5118 }),
+    clip("streamer_two_R3_killed-you", "theirs", 31, 120, 398, { streamer: "streamer_two", round: 3, moment: "They killed you", matchId: "demo-ascent", matchStartSec: 201, vodUrl: "https://www.twitch.tv/videos/demo", vodStartSec: 4561 }),
+    clip("Clip_Round-9", "mine", 56, 60, 186),
+    clip("Clip_Round-17", "mine", 42.8, 60, 190),
     clip("Clip_Round-14-clutch", "mine", 41, 60, 188),
     clip("Clip_Round-5", "mine", 60, 60, 186),
     clip("Clip_Round-3-ace", "mine", 150, 60, 191, { map: "Lotus" }),

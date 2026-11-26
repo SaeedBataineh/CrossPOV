@@ -58,7 +58,13 @@ export function useMatches() {
     }
   }, []);
 
-  return { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers };
+  /** Reads the saved matches again, e.g. after switching Riot accounts cleared them. */
+  const reload = useCallback(() => {
+    listMatches().then(setMatches, () => setMatches([]));
+    streamerStates().then((all) => setStreamers(Object.fromEntries(all.map((s) => [s.matchId, s]))), () => setStreamers({}));
+  }, []);
+
+  return { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers, reload };
 }
 
 export function matchTimeAgo(iso: string, now = Date.now()): string {

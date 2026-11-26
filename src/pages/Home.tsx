@@ -1,6 +1,6 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Page } from "../components/Shell";
-import { GalleryCard, Notice, PendingCard } from "../components/ui";
+import { cardTitle, GalleryCard, Notice, PendingCard } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
@@ -15,6 +15,7 @@ import {
   type WebStreamer,
 } from "../lib/backend";
 import { progress, result, resultColor, streamerLabel } from "../lib/matchInfo";
+import { findPairs, matchOf, type Pair } from "../lib/pairs";
 import { REGIONS, type Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
 import { timeAgo, type useRecorder } from "../lib/useRecorder";
@@ -107,22 +108,32 @@ interface Fight {
   status: Live;
 }
 
+/** Which matches and cards the Home tabs show. */
+export type Show = "all" | "streamers" | "mine";
+
 function MatchView({
   match,
   riotId,
   clips,
+  myClips = [],
+  pairs = [],
+  show = "all",
   streamers,
   web,
-  onPlay,
+  onOpen,
   actions,
   children,
 }: {
   match: MatchSummary;
   riotId: string;
   clips: ClipInfo[];
+  /** Your own clips saved during this match. */
+  myClips?: ClipInfo[];
+  pairs?: Pair[];
+  show?: Show;
   streamers?: MatchStreamers;
   web?: WebStreamer[] | "checking";
-  onPlay: (c: ClipInfo) => void;
+  onOpen: (c: ClipInfo) => void;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
@@ -149,7 +160,14 @@ function MatchView({
   }
   const fightRounds = new Set(fights.map((f) => f.round));
   const clipFor = (f: Fight) =>
-    clips.find((c) => c.kind === "theirs" && c.streamer?.toLowerCase() === f.login.toLowerCase() && c.round === f.round + 1 && (!c.map || c.map === match.map));
+    clips.find(
+      (c) =>
+        c.kind === "theirs" &&
+        (c.matchId ? c.matchId === match.id : !c.map || c.map === match.map) &&
+        c.round === f.round + 1 &&
+        [f.login, f.name].some((n) => n.toLowerCase() === c.streamer?.toLowerCase()),
+    );
+  const pairOf = (c: ClipInfo) => pairs.find((p) => p.theirs.path === c.path || p.mine.path === c.path);
   const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
 
   const [open, setOpen] = useState(false);
@@ -170,8 +188,41 @@ function MatchView({
     : !fights.length && me ? "you didn't fight the streamers"
     : "";
 
+  // Cards: each fight with a streamer (both sides when you saved it too), then your other clips.
+  const paired = new Set<string>();
+  const tiles: ReactNode[] = [];
+  if (show !== "mine") {
+    for (const f of cards) {
+      const c = clipFor(f);
+      const title = `R${f.round + 1} · ${what(f)}`;
+      if (!c) {
+        tiles.push(
+          <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
+            <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
+          </PendingCard>,
+        );
+        continue;
+      }
+      const p = pairOf(c);
+      if (p) paired.add(p.mine.path);
+      tiles.push(<GalleryCard key={c.path} clip={c} other={p?.mine} title={title} meta={p ? `Both sides · ${f.name}` : `Their side · ${f.name}`} onPlay={() => onOpen(c)} />);
+    }
+  } else {
+    for (const c of myClips) {
+      const p = pairOf(c);
+      if (!p) continue;
+      paired.add(c.path);
+      tiles.push(<GalleryCard key={c.path} clip={c} other={p.theirs} title={cardTitle(c)} meta={`Both sides · ${p.theirs.streamer ?? "streamer"}`} onPlay={() => onOpen(c)} />);
+    }
+  }
+  for (const c of myClips) {
+    if (paired.has(c.path)) continue;
+    const into = Math.max(0, Math.round((c.createdMs - (c.durationSec ?? 0) * 1000 - Date.parse(match.startedAt)) / 1000));
+    tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} onPlay={() => onOpen(c)} />);
+  }
+
   return (
-    <article className="match-card">
+    <article className={tiles.length || open ? "match-card" : "match-card compact"}>
       <div className="match-card-head">
         <b className="map">{match.map}</b>
         <b style={{ color: resultColor(r?.letter) }}>{score}</b>
@@ -181,21 +232,7 @@ function MatchView({
         <button type="button" className="linkish muted" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Details"}</button>
       </div>
 
-      {cards.length > 0 && (
-        <div className="gallery">
-          {cards.map((f) => {
-            const c = clipFor(f);
-            const title = `R${f.round + 1} · ${what(f)}`;
-            return c ? (
-              <GalleryCard key={`${f.login}-${f.round}`} clip={c} title={title} meta={f.name} onPlay={() => onPlay(c)} />
-            ) : (
-              <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
-                <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
-              </PendingCard>
-            );
-          })}
-        </div>
-      )}
+      {tiles.length > 0 && <div className="gallery">{tiles}</div>}
 
       {open && (
         <div className="match-details">
@@ -376,27 +413,54 @@ function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, we
   );
 }
 
-export default function Matches({
+/** What a match is searched by: map, agent, players, streamers. */
+function matchText(m: MatchSummary, streamers?: MatchStreamers): string {
+  return [m.map, m.mode, ...m.players.flatMap((p) => [p.name, p.agent]), ...(streamers?.players ?? []).map((p) => p.channel.displayName)].join(" ").toLowerCase();
+}
+
+/** Home: every match, with your clips and the streamers' clips from it. */
+export default function Home({
   settings,
   matchesState,
   recorder,
+  query,
   onNavigate,
-  onPlay,
+  onOpen,
 }: {
   settings: Settings;
   matchesState: ReturnType<typeof useMatches>;
   recorder: ReturnType<typeof useRecorder>;
+  query: string;
   onNavigate: (p: Page) => void;
-  onPlay: (c: ClipInfo) => void;
+  onOpen: (c: ClipInfo) => void;
 }) {
   const { matches, status, checking, checkNow, streamers, putStreamers, checkStreamers } = matchesState;
   const [rechecking, setRechecking] = useState<string | null>(null);
   const [recheckError, setRecheckError] = useState("");
+  const [show, setShow] = useState<Show>("all");
   /** Website demo: a real match the visitor looked up. */
   const [looked, setLooked] = useState<{ match: MatchSummary; riotId: string; web?: WebStreamer[] | "checking" } | null>(null);
 
-  const all = looked ? [looked.match, ...matches.filter((m) => m.id !== looked.match.id)] : matches;
-  const play = onPlay;
+  const clips = recorder.clips;
+  const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
+  const mineByMatch = useMemo(() => {
+    const by = new Map<string, ClipInfo[]>();
+    for (const c of clips) {
+      if (c.kind !== "mine") continue;
+      const m = matchOf(c, matches);
+      if (m) by.set(m.id, [...(by.get(m.id) ?? []), c].sort((a, b) => a.createdMs - b.createdMs));
+    }
+    return by;
+  }, [clips, matches]);
+
+  const withStreamers = (m: MatchSummary) => Boolean(streamers[m.id]?.players.length);
+  const q = query.trim().toLowerCase();
+  const shown = matches.filter(
+    (m) =>
+      (show === "all" || (show === "streamers" ? withStreamers(m) : mineByMatch.has(m.id))) &&
+      (!q || matchText(m, streamers[m.id]).includes(q)),
+  );
+  const all = looked && show !== "mine" ? [looked.match, ...shown.filter((m) => m.id !== looked.match.id)] : shown;
 
   async function recheck(id: string) {
     setRechecking(id);
@@ -410,8 +474,14 @@ export default function Matches({
     }
   }
 
+  const tabs: { id: Show; label: string; n?: number }[] = [
+    { id: "all", label: "All matches" },
+    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length },
+    { id: "mine", label: "My clips only" },
+  ];
+
   return (
-    <section className="s12 page narrow-wide" aria-label="Matches">
+    <section className="page wide" aria-label="Home">
       {status && !status.configured && isDesktop && (
         <Notice tone="warn">
           Add your Riot ID in Settings so CrossPOV can find your matches.{" "}
@@ -421,15 +491,22 @@ export default function Matches({
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
 
-      <header className="page-head">
-        <h1>Matches</h1>
-        <span className="spacer" />
+      <div className="tabs-row">
+        <div className="tabs" role="tablist" aria-label="Show">
+          {tabs.map((t) => (
+            <button key={t.id} type="button" role="tab" aria-selected={show === t.id} onClick={() => setShow(t.id)}>
+              {t.label}
+              {t.n ? <span className="count">{t.n}</span> : null}
+            </button>
+          ))}
+        </div>
         {isDesktop && (
-          <button type="button" className="btn quiet" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
-            {checking ? "Checking…" : "Check now"}
+          <button type="button" className="btn quiet sm-btn" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
+            {checking ? "Checking…" : "Check for new matches"}
           </button>
         )}
-      </header>
+      </div>
+
       {!isDesktop && (
         <DemoLookup
           onFound={(m, riotId, web) => {
@@ -441,15 +518,18 @@ export default function Matches({
         <div className="match-feed">
           {all.map((m) =>
             m.id === looked?.match.id ? (
-              <MatchView key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onPlay={play} />
+              <MatchView key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
             ) : (
               <MatchView
                 key={m.id}
                 match={m}
                 riotId={settings.riotId}
-                clips={recorder.clips}
+                clips={clips}
+                myClips={mineByMatch.get(m.id)}
+                pairs={pairs}
+                show={show}
                 streamers={streamers[m.id]}
-                onPlay={play}
+                onOpen={onOpen}
                 actions={isDesktop && <button type="button" className="btn quiet" style={{ alignSelf: "flex-start" }} onClick={() => void recheck(m.id)} disabled={rechecking === m.id}>{rechecking === m.id ? "Checking…" : "Check this match again"}</button>}
               >
                 {(streamers[m.id]?.suggested ?? []).map((s) => (
@@ -462,8 +542,14 @@ export default function Matches({
         </div>
       ) : (
         <div className="empty-state">
-          <b>No matches yet</b>
-          <span>{settings.riotId ? "Play a match. It shows up a minute or two after it ends." : "Add your Riot ID in Settings first."}</span>
+          <b>{matches.length ? "Nothing matches" : "No matches yet"}</b>
+          <span>
+            {matches.length
+              ? "Try another search or tab."
+              : settings.riotId
+                ? "Play a match. It shows up a minute or two after it ends."
+                : "Add your Riot ID in Settings first."}
+          </span>
         </div>
       )}
     </section>

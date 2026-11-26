@@ -312,6 +312,10 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Setti
         allow_clip_folder(&app, &PathBuf::from(&settings.clip_folder));
     }
     state.recorder.update_settings(settings.clone());
+    // Switched to another Riot account: the old account's matches go.
+    if !old.riot_id.trim().is_empty() && !matches::same_riot_id(&old.riot_id, &settings.riot_id) {
+        state.matches.clear_history();
+    }
     state.matches.update_settings(settings.clone());
     state.streamers.update(settings.clone(), clip_folder(&app, &settings));
     *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = settings.clone();

@@ -1,40 +1,62 @@
 import type { ReactNode } from "react";
 import { isDesktop, saveClipNow, type RecorderStatus, type UpdateStatus } from "../lib/backend";
 import type { Settings } from "../lib/settings";
-import { ClipsIcon, GearIcon, Logo, MatchesIcon, StreamIcon } from "./Icons";
+import { ClipsIcon, GearIcon, HomeIcon, Logo, SearchIcon, StreamIcon } from "./Icons";
 
-export type Page = "clips" | "matches" | "streamers" | "settings";
+export type Page = "home" | "clips" | "streamers" | "settings";
 
 const NAV: { id: Page; label: string; icon: ReactNode }[] = [
+  { id: "home", label: "Home", icon: <HomeIcon size={20} /> },
   { id: "clips", label: "Clips", icon: <ClipsIcon size={20} /> },
-  { id: "matches", label: "Matches", icon: <MatchesIcon size={20} /> },
   { id: "streamers", label: "Streamers", icon: <StreamIcon size={20} /> },
 ];
 
-function NavItem({ page, id, label, icon, onNavigate }: { page: Page; id: Page; label: string; icon: ReactNode; onNavigate: (p: Page) => void }) {
+function RailItem({ page, id, label, icon, onNavigate }: { page: Page; id: Page; label: string; icon: ReactNode; onNavigate: (p: Page) => void }) {
   return (
-    <button type="button" className="nav-item" aria-current={page === id ? "page" : undefined} onClick={() => onNavigate(id)}>
+    <button type="button" className="rail-item" aria-current={page === id ? "page" : undefined} onClick={() => onNavigate(id)}>
       {icon}
-      {label}
+      <span>{label}</span>
     </button>
   );
 }
 
-/** Everything lives in the left sidebar: the pages, the recorder, Settings. */
-export function Sidebar({
-  page,
+/** The slim menu on the left: the pages, and Settings at the bottom. */
+export function Rail({ page, update, onNavigate }: { page: Page; update: UpdateStatus | null; onNavigate: (p: Page) => void }) {
+  return (
+    <nav className="rail" aria-label="Main">
+      <span className="rail-logo" title="CrossPOV"><Logo size={28} /></span>
+      {NAV.map((n) => (
+        <RailItem key={n.id} page={page} {...n} onNavigate={onNavigate} />
+      ))}
+      <span className="spacer" />
+      {update?.state === "waiting" && (
+        <span className="rail-note" title={`Update v${update.version} installs as soon as VALORANT is closed`}>Update after game</span>
+      )}
+      <RailItem page={page} id="settings" label="Settings" icon={<GearIcon size={20} />} onNavigate={onNavigate} />
+      {!isDesktop && <a className="rail-item" href="/"><span>About</span></a>}
+    </nav>
+  );
+}
+
+/** Top bar: search (where it applies) and the recorder, with a Save clip button. */
+export function TopBar({
   settings,
   status,
-  onNavigate,
+  query,
+  onQuery,
+  searchLabel,
   onSaving,
-  update,
+  title,
 }: {
-  page: Page;
-  update: UpdateStatus | null;
   settings: Settings;
   status: RecorderStatus | null;
-  onNavigate: (p: Page) => void;
+  query: string;
+  onQuery: (q: string) => void;
+  /** No search box when undefined. */
+  searchLabel?: string;
   onSaving: () => void;
+  /** Shown instead of the search box. */
+  title?: ReactNode;
 }) {
   const state = status?.state;
   const recording = state === "recording";
@@ -47,43 +69,34 @@ export function Sidebar({
     : "Starting…";
 
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <Logo size={24} />
-        CrossPOV
-      </div>
-      <nav className="nav" aria-label="Main">
-        {NAV.map((n) => (
-          <NavItem key={n.id} page={page} {...n} onNavigate={onNavigate} />
-        ))}
-      </nav>
-      <span className="spacer" />
-      {update?.state === "waiting" && (
-        <p className="side-note" title="CrossPOV updates itself as soon as VALORANT is closed">Update v{update.version} installs after this game</p>
+    <header className="topbar">
+      {searchLabel ? (
+        <label className="top-search">
+          <SearchIcon size={16} />
+          <span className="sr-only">{searchLabel}</span>
+          <input type="search" placeholder={searchLabel} value={query} onChange={(e) => onQuery(e.target.value)} spellCheck={false} />
+        </label>
+      ) : (
+        <div className="top-title">{title}</div>
       )}
-      <div className="rec-card" title={status?.message ?? undefined}>
-        <span className="row" style={{ gap: 8 }}>
-          <span className={`dot ${recording ? "rec" : bad ? "bad" : "idle"}`} aria-hidden="true" />
-          <b>{line}</b>
-        </span>
-        {recording ? (
-          <button
-            type="button"
-            className="btn quiet sm-btn"
-            title={`Save the last ${settings.bufferSeconds} s`}
-            onClick={() => {
-              onSaving();
-              void saveClipNow();
-            }}
-          >
-            Save clip · {settings.hotkey}
-          </button>
-        ) : (
-          isDesktop && <span className="muted small">{settings.hotkey} saves a clip in game</span>
-        )}
+      <span className="spacer" />
+      <div className="rec-status" title={status?.message ?? undefined} role="status">
+        <span className={`dot ${recording ? "rec" : bad ? "bad" : "idle"}`} aria-hidden="true" />
+        <b>{line}</b>
+        {isDesktop && <span className="muted">· press <kbd>{settings.hotkey}</kbd> to save the last {settings.bufferSeconds} s</span>}
       </div>
-      <NavItem page={page} id="settings" label="Settings" icon={<GearIcon size={20} />} onNavigate={onNavigate} />
-      {!isDesktop && <a className="nav-item" href="/">About CrossPOV</a>}
-    </aside>
+      {recording && (
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+            onSaving();
+            void saveClipNow();
+          }}
+        >
+          Save clip
+        </button>
+      )}
+    </header>
   );
 }

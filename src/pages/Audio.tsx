@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Panel, Row, Seg, Toggle, Volume } from "../components/ui";
+import { Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
 import { isDesktop, listAudioApps, listMicDevices } from "../lib/backend";
 import type { AppAudio, Settings } from "../lib/settings";
 import { useDraft, type Draft } from "../lib/useDraft";
@@ -8,15 +8,9 @@ import { useDraft, type Draft } from "../lib/useDraft";
 const appName = (exe: string) => exe.replace(/\.exe$/i, "");
 const COLORS = ["#5865f2", "#1db954", "#f2c14e", "#53fc18", "#ff8a86", "#b48bff"];
 
-/** Unsaved-changes indicator with Save, shown in a panel header. */
+/** Shown in a panel header: changes save by themselves. */
 export function SaveBar({ d }: { d: Draft }) {
-  return (
-    <span className="row">
-      <span className="m tiny muted" role="status">{d.status || (d.dirty ? "unsaved changes" : "")}</span>
-      {d.dirty && <button type="button" className="b sm" onClick={d.discard}>Undo</button>}
-      <button type="button" className="b sm r" onClick={() => void d.save()} disabled={!d.dirty || d.saving}>{d.saving ? "Saving…" : "Save"}</button>
-    </span>
-  );
+  return <SaveState d={d} />;
 }
 
 function Channel({

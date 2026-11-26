@@ -447,6 +447,10 @@ impl Recorder {
             round: None,
             moment: None,
             map: None,
+            match_id: None,
+            match_start_sec: None,
+            vod_url: None,
+            vod_start_sec: None,
         })
     }
 }

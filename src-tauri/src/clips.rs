@@ -38,6 +38,16 @@ pub struct ClipMeta {
     pub moment: Option<String>,
     #[serde(default)]
     pub map: Option<String>,
+    /// Streamer clips only: the match, and where the clip starts in the match
+    /// and in their VOD (seconds), so the app can line it up with your clip.
+    #[serde(default)]
+    pub match_id: Option<String>,
+    #[serde(default)]
+    pub match_start_sec: Option<f64>,
+    #[serde(default)]
+    pub vod_url: Option<String>,
+    #[serde(default)]
+    pub vod_start_sec: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +65,10 @@ pub struct ClipInfo {
     pub round: Option<u32>,
     pub moment: Option<String>,
     pub map: Option<String>,
+    pub match_id: Option<String>,
+    pub match_start_sec: Option<f64>,
+    pub vod_url: Option<String>,
+    pub vod_start_sec: Option<f64>,
 }
 
 fn is_video(p: &Path) -> bool {
@@ -131,6 +145,10 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
         round: details.round,
         moment: details.moment,
         map: details.map,
+        match_id: details.match_id,
+        match_start_sec: details.match_start_sec,
+        vod_url: details.vod_url,
+        vod_start_sec: details.vod_start_sec,
     })
 }
 

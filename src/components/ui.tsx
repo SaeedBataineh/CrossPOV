@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { thumbSrc, type ClipInfo } from "../lib/backend";
+import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
 
 /** A titled box. `color` is the small square before the title. */
@@ -186,9 +187,23 @@ const TrashIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
 );
 
-/** A clip in the gallery: click to play; folder and delete appear on hover. */
-export function GalleryCard({ clip, title, meta, onPlay, onReveal, onDelete }: {
+const TwitchMark = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path fill="#9146ff" d="M2.15 0 .58 4.1v16.8h5.71V24h3.22l3.04-3.1h4.6l6.25-6.2V0z" /></svg>
+);
+
+function Half({ clip }: { clip: ClipInfo }) {
+  const src = thumbSrc(clip.thumb);
+  return <span className={isTheirs(clip) ? "half theirs" : "half"}>{src && <img src={src} alt="" loading="lazy" decoding="async" />}</span>;
+}
+
+/**
+ * A clip in a grid: click to open it. With `other` (the other side of the same
+ * fight) the thumbnail is split: YOU on the left, THEM on the right.
+ * Folder and delete appear on hover.
+ */
+export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDelete }: {
   clip: ClipInfo;
+  other?: ClipInfo;
   title?: string;
   meta?: string;
   onPlay: () => void;
@@ -197,14 +212,25 @@ export function GalleryCard({ clip, title, meta, onPlay, onReveal, onDelete }: {
 }) {
   const src = thumbSrc(clip.thumb);
   const t = title ?? cardTitle(clip);
+  const mine = isTheirs(clip) ? other : clip;
+  const theirs = isTheirs(clip) ? clip : other;
+  const both = Boolean(mine && theirs);
   return (
     <div className="gcard">
-      <button type="button" className={isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Play ${t}`}>
-        {src ? <img src={src} alt="" loading="lazy" decoding="async" /> : (
-          <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#ffffff1a" /><path d="M10 8l6 4-6 4z" fill="#ffffffcc" /></svg>
+      <button type="button" className={both ? "gthumb split" : isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Open ${t}`}>
+        {both ? (
+          <>
+            <Half clip={mine!} />
+            <Half clip={theirs!} />
+          </>
+        ) : src ? (
+          <img src={src} alt="" loading="lazy" decoding="async" />
+        ) : (
+          <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#ffffff14" /><path d="M10 8l6 4-6 4z" fill="#ffffffb3" /></svg>
         )}
-        {src && <span className="hover-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg></span>}
-        {isTheirs(clip) && clip.streamer && <span className="badge">{clip.streamer}</span>}
+        <span className="hover-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg></span>
+        {mine && <span className="tag you">YOU</span>}
+        {theirs && <span className="tag them"><TwitchMark />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
         {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
       </button>
       {(onReveal || onDelete) && (
@@ -229,3 +255,17 @@ export function PendingCard({ title, meta, children }: { title: string; meta?: s
     </div>
   );
 }
+
+/** "Saved automatically", or what saving is doing right now. */
+export function SaveState({ d }: { d: Draft }) {
+  const bad = d.status.startsWith("Could not");
+  return (
+    <span className={bad ? "save-state bad" : "save-state"} role="status">
+      {!bad && !d.saving && (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--win)" strokeWidth="2.5" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" /></svg>
+      )}
+      {d.saving || d.dirty ? "Saving…" : bad ? d.status : "Saved automatically"}
+    </span>
+  );
+}
+

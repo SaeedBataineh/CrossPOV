@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
-import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo } from "../lib/backend";
+import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { findPairs } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
 
@@ -14,12 +15,25 @@ const SORTS: Record<Sort, (a: ClipInfo, b: ClipInfo) => number> = {
   largest: (a, b) => b.sizeBytes - a.sizeBytes,
 };
 
-export default function Clips({ settings, recorder, onPlay }: { settings: Settings; recorder: ReturnType<typeof useRecorder>; onPlay: (c: ClipInfo) => void }) {
+/** Every clip in one grid, newest first. Search comes from the top bar. */
+export default function Clips({
+  settings,
+  recorder,
+  matches,
+  query,
+  onOpen,
+}: {
+  settings: Settings;
+  recorder: ReturnType<typeof useRecorder>;
+  matches: MatchSummary[];
+  query: string;
+  onOpen: (c: ClipInfo) => void;
+}) {
   const { clips, refreshClips, notify } = recorder;
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("newest");
-  const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
+  const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
   const theirs = clips.filter((c) => c.kind === "theirs").length;
   const tabs: { value: Tab; label: string; n: number }[] = [
@@ -36,7 +50,6 @@ export default function Clips({ settings, recorder, onPlay }: { settings: Settin
   }, [clips, tab, query, sort]);
   useEffect(() => setLimit(PAGE), [tab, query, sort]);
 
-
   const totalBytes = clips.reduce((n, c) => n + c.sizeBytes, 0);
   const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
 
@@ -51,14 +64,15 @@ export default function Clips({ settings, recorder, onPlay }: { settings: Settin
   }
 
   return (
-    <section className="s12 page" aria-label="Clips">
-      <header className="page-head">
-        <h1>Clips</h1>
-        <span className="spacer" />
-        <label className="field search-field">
-          <span className="sr-only">Search clips</span>
-          <input type="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
-        </label>
+    <section className="page wide" aria-label="Clips">
+      <div className="tabs-row">
+        <div className="tabs" role="tablist" aria-label="Show">
+          {tabs.map((t) => (
+            <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}>
+              {t.label} <span className="count">{t.n}</span>
+            </button>
+          ))}
+        </div>
         <label className="field">
           <span className="sr-only">Sort</span>
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
@@ -67,33 +81,30 @@ export default function Clips({ settings, recorder, onPlay }: { settings: Settin
             <option value="largest">Largest</option>
           </select>
         </label>
-      </header>
-      <div className="chips" role="radiogroup" aria-label="Show">
-        {tabs.map((t) => (
-          <button key={t.value} type="button" role="radio" aria-checked={tab === t.value} onClick={() => setTab(t.value)}>
-            {t.label} <span className="count">{t.n}</span>
-          </button>
-        ))}
       </div>
 
       {shown.length ? (
         <div className="gallery">
-          {shown.slice(0, limit).map((c) => (
-            <GalleryCard
-              key={c.path}
-              clip={c}
-              onPlay={() => onPlay(c)}
-              onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
-              onDelete={() => void remove(c)}
-            />
-          ))}
+          {shown.slice(0, limit).map((c) => {
+            const p = pairs.find((x) => x.mine.path === c.path || x.theirs.path === c.path);
+            return (
+              <GalleryCard
+                key={c.path}
+                clip={c}
+                other={p ? (c.kind === "mine" ? p.theirs : p.mine) : undefined}
+                onPlay={() => onOpen(c)}
+                onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
+                onDelete={() => void remove(c)}
+              />
+            );
+          })}
         </div>
       ) : (
         <div className="empty-state">
           <b>{clips.length ? "No clips match" : tab === "theirs" ? "No streamer clips yet" : "No clips yet"}</b>
           <span>
             {clips.length
-              ? "Try another search or filter."
+              ? "Try another search or tab."
               : tab === "theirs"
                 ? "They appear here after you play against someone who was streaming."
                 : `Press ${settings.hotkey} in game to save the last ${settings.bufferSeconds} seconds.`}

@@ -81,6 +81,11 @@ export interface ClipInfo {
   round: number | null;
   moment: string | null;
   map: string | null;
+  /** Streamer clips only (newer clips): which match, and where the clip starts in the match and in their VOD, in seconds. */
+  matchId?: string | null;
+  matchStartSec?: number | null;
+  vodUrl?: string | null;
+  vodStartSec?: number | null;
 }
 
 export interface AudioApp {

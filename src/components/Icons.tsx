@@ -14,7 +14,7 @@ const base = (size: number) => ({
 });
 
 export const HomeIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /></svg>
+  <svg {...base(size)}><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></svg>
 );
 export const MatchesIcon = ({ size = 18 }: P) => (
   <svg {...base(size)}><path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6" /></svg>

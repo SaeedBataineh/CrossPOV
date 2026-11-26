@@ -1,7 +1,8 @@
-import { lazy, Suspense, useState, type KeyboardEvent } from "react";
-import { Panel, Row, Seg, Toggle } from "../components/ui";
+import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
+import { Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
 import { diagnostics, isDesktop, pickFolder } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
+import { same, validRiotId } from "../lib/riotId";
 import { useDraft } from "../lib/useDraft";
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);
@@ -48,35 +49,73 @@ function ProblemReport() {
   );
 }
 
-type Section = "recording" | "streamers" | "audio" | "account";
+type Section = "recording" | "hotkey" | "streamers" | "audio" | "account";
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "recording", label: "Recording" },
+  { id: "hotkey", label: "Hotkey and replay" },
   { id: "streamers", label: "Streamer clips" },
   { id: "audio", label: "Audio" },
   { id: "account", label: "Account and app" },
 ];
 
-/** Settings in one column, a tab per topic (Audio keeps its own unsaved changes). */
+/** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
   const [tab, setTab] = useState<Section>("recording");
   return (
-    <section className="s12 page narrow" aria-label="Settings">
-      <header className="page-head">
-        <h1>Settings</h1>
-      </header>
-      <div className="chips" role="tablist" aria-label="Settings sections">
+    <section className="settings-layout" aria-label="Settings">
+      <nav className="settings-nav" aria-label="Settings sections">
         {SECTIONS.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
+      </nav>
+      <div className="settings-body">
+        {tab === "audio" ? (
+          <Suspense fallback={<p className="muted">Loading…</p>}>
+            <div className="settings-audio"><Audio settings={settings} onSaved={onSaved} /></div>
+          </Suspense>
+        ) : (
+          <GeneralSettings settings={settings} onSaved={onSaved} section={tab} />
+        )}
       </div>
-      {tab === "audio" ? (
-        <Suspense fallback={<p className="muted">Loading…</p>}>
-          <div className="settings-audio"><Audio settings={settings} onSaved={onSaved} /></div>
-        </Suspense>
-      ) : (
-        <GeneralSettings settings={settings} onSaved={onSaved} section={tab} />
-      )}
     </section>
+  );
+}
+
+/**
+ * Riot ID: saved when you leave the box or press Enter, not on every key,
+ * because switching to another account clears the match history.
+ */
+function RiotIdField({ value, onCommit }: { value: string; onCommit: (id: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const ok = text.trim() === "" || validRiotId(text);
+
+  function commit() {
+    const id = text.trim();
+    if (same(id, value) || !ok) return;
+    if (value.trim() && !window.confirm(`Switch to ${id || "no account"}? Your match history for ${value.trim()} will be cleared. Your clips stay.`)) {
+      setText(value);
+      return;
+    }
+    onCommit(id);
+  }
+
+  return (
+    <input
+      className="input"
+      style={{ width: 190 }}
+      placeholder="Name#TAG"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setText(value);
+      }}
+      aria-invalid={!ok}
+      aria-label="Riot ID"
+      spellCheck={false}
+    />
   );
 }
 
@@ -104,18 +143,14 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
     }
   }
 
-  // Riot names and tags can contain spaces (e.g. "CLOUDEY#X 3"); only one "#" and something on each side.
-  const riotIdOk = draft.riotId.trim() === "" || /^[^#]*\S[^#]*#[^#]*\S[^#]*$/.test(draft.riotId.trim());
   const nothingToClip = draft.streamerAuto && !draft.clipKilledYou && !draft.clipYouKilled && !draft.clipWholeRound;
 
   return (
     <>
-      <div className="save-bar">
-        <span className="muted small" role="status">{d.status || (d.dirty ? "You have unsaved changes" : "All changes saved")}</span>
-        <span className="spacer" />
-        {d.dirty && <button type="button" className="btn quiet" onClick={d.discard}>Undo</button>}
-        <button type="button" className="btn primary" onClick={() => void d.save()} disabled={!d.dirty || d.saving}>{d.saving ? "Saving…" : "Save"}</button>
-      </div>
+      <header className="settings-head">
+        <h2>{SECTIONS.find((x) => x.id === section)?.label}</h2>
+        <SaveState d={d} />
+      </header>
 
       {section === "recording" && (
         <>
@@ -134,7 +169,11 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
             <Seg label="File type" value={draft.format} onChange={(v) => set("format", v)} options={[{ value: "mp4", label: "MP4" }, { value: "mkv", label: "MKV" }]} />
           </Row>
         </Panel>
+        </>
+      )}
 
+      {section === "hotkey" && (
+        <>
         <Panel title="Hotkey and replay">
           <Row label="Save clip" help={listening ? "press the new key or combo · Esc cancels" : "works while you're in game"}>
             <span className="row">
@@ -171,8 +210,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
       {section === "account" && (
         <>
         <Panel title="Account">
-          <Row label="Riot ID" help={riotIdOk ? "only used to find your matches" : "type it as Name#TAG"}>
-            <input className="input" style={{ width: 170 }} placeholder="Name#TAG" value={draft.riotId} onChange={(e) => set("riotId", e.target.value)} aria-invalid={!riotIdOk} aria-label="Riot ID" spellCheck={false} />
+          <Row label="Riot ID" help="only used to find your matches · switching accounts clears your match history">
+            <RiotIdField value={draft.riotId} onCommit={(id) => set("riotId", id)} />
           </Row>
           <Row label="Region">
             <select className="input" aria-label="Region" value={draft.region} onChange={(e) => set("region", e.target.value)}>
@@ -199,7 +238,16 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Version" help="Not endorsed by Riot Games"><span className="pill">v{__APP_VERSION__}</span></Row>
           <ProblemReport />
         </Panel>
-        <button type="button" className="linkish muted small" style={{ alignSelf: "flex-start" }} onClick={() => void d.reset()}>Reset all settings to defaults</button>
+        <button
+          type="button"
+          className="linkish muted small"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => {
+            if (window.confirm("Reset all settings to their defaults? Your Riot ID, region and clips stay.")) void d.reset();
+          }}
+        >
+          Reset all settings to defaults
+        </button>
         </>
       )}
     </>

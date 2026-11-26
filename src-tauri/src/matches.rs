@@ -148,6 +148,11 @@ pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSu
     }
 }
 
+/// Whether two Riot IDs are the same account as typed ("Name#TAG", any case, spaces around ignored).
+pub fn same_riot_id(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 /// Matches saved on disk, one JSON file each.
 #[derive(Clone)]
 pub struct MatchStore {
@@ -190,6 +195,16 @@ impl MatchStore {
             .collect();
         out.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         out
+    }
+
+    /// Forgets every saved match (and the streamer results stored beside them).
+    pub fn clear(&self) {
+        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        for e in entries.flatten() {
+            if e.path().extension().is_some_and(|x| x == "json") {
+                let _ = fs::remove_file(e.path());
+            }
+        }
     }
 
     fn prune(&self) {
@@ -250,6 +265,18 @@ impl MatchWatcher {
         let status = {
             let mut st = self.status.lock().unwrap_or_else(|e| e.into_inner());
             st.configured = configured;
+            st.clone()
+        };
+        (self.listener)(MatchEvent::Status(status));
+    }
+
+    /// A different Riot account: its matches aren't yours, so start the history afresh.
+    pub fn clear_history(&self) {
+        self.store.clear();
+        let status = {
+            let mut st = self.status.lock().unwrap_or_else(|e| e.into_inner());
+            st.last_check_ms = None;
+            st.error = None;
             st.clone()
         };
         (self.listener)(MatchEvent::Status(status));
@@ -407,5 +434,27 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].started_at, "2026-11-25T00:00:00Z", "newest first");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clear_forgets_matches_and_their_streamers() {
+        let dir = std::env::temp_dir().join(format!("crosspov-matches-clear-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let store = MatchStore::new(dir.clone());
+        let m = serde_json::from_str::<LatestResponse>(SAMPLE).unwrap().match_;
+        store.save(&m).unwrap();
+        fs::write(dir.join(format!("{}.streamers.json", m.id)), b"{}").unwrap();
+        fs::write(dir.join("keep.txt"), b"not ours").unwrap();
+        store.clear();
+        assert!(store.list().is_empty());
+        assert!(!dir.join(format!("{}.streamers.json", m.id)).exists());
+        assert!(dir.join("keep.txt").exists(), "only match files are removed");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn same_riot_id_ignores_case_and_spaces() {
+        assert!(same_riot_id(" Player#EUW ", "player#euw"));
+        assert!(!same_riot_id("Player#EUW", "Player#NA1"));
     }
 }

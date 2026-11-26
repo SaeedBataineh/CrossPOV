@@ -1079,6 +1079,10 @@ impl StreamerWorker {
                         round: Some(w.round + 1),
                         moment: Some(w.moment.label().into()),
                         map: Some(m.map.clone()),
+                        match_id: Some(m.id.clone()),
+                        match_start_sec: Some(w.start),
+                        vod_url: Some(vod.url.clone()),
+                        vod_start_sec: Some(from),
                     };
                     clips::write_meta(&root, &clip, &meta);
                     // Learn how long a clip takes here, for the next estimates.
