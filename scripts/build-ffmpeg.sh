@@ -53,6 +53,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
   --pkg-config=pkg-config --pkg-config-flags=--static \
   --extra-cflags="-I$PREFIX/include -O2" \
+  --extra-cxxflags="-I$PREFIX/include -O2" \
   --extra-ldflags="-static -static-libgcc -s" \
   --disable-everything --disable-autodetect \
   --disable-debug --disable-doc --disable-ffplay --disable-ffprobe \
