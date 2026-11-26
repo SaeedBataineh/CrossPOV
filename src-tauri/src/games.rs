@@ -172,18 +172,22 @@ pub fn detect(s: &Settings) -> Option<Game> {
     let running = procs::shared(|p| p.running_names());
     let known = KNOWN_GAMES.iter().map(|(exe, name)| (exe.to_string(), name.to_string(), Found::Known));
     let yours = s.custom_games.iter().map(|g| (g.exe.clone(), g.name.clone(), Found::Yours));
-    let listed = known.chain(yours).find(|(exe, _, _)| running.contains(&exe.to_lowercase()) && !ignored(s, exe));
-    let found = if let Some((exe, name, found)) = listed {
-        // Which screen it's on: looked up when it starts, then every 10 s
+    // A listed game only counts with a visible window: some (Roblox, for one)
+    // keep running in the background after you close them.
+    let listed = known.chain(yours).filter(|(exe, _, _)| running.contains(&exe.to_lowercase()) && !ignored(s, exe)).find_map(|(exe, name, found)| {
+        // Its window (and screen): looked up when it starts, then every 10 s
         // (the window list and graphics-card query aren't free).
         let same = current.as_ref().filter(|g| g.exe == exe);
-        let (output_idx, screen_height) = match same {
-            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => (g.output_idx, g.screen_height),
+        let screen = match same {
+            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some((g.output_idx, g.screen_height)),
             _ => {
                 *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-                window::screen_of_process(&exe).unwrap_or((0, None))
+                window::screen_of_process(&exe)
             }
         };
+        screen.map(|(output_idx, screen_height)| (exe, name, found, output_idx, screen_height))
+    });
+    let found = if let Some((exe, name, found, output_idx, screen_height)) = listed {
         Some(Game { exe, name, found, output_idx, screen_height, pid: None })
     } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
         // 3, still open: keep it, even while you're tabbed out.
@@ -336,7 +340,8 @@ mod window {
                     let mut r = RECT::default();
                     if GetWindowRect(hwnd, &mut r).is_ok() {
                         let area = i64::from(r.right - r.left) * i64::from(r.bottom - r.top);
-                        if search.best.is_none_or(|(a, _)| area > a) {
+                        // Tiny or empty "windows" don't count: background programs keep those.
+                        if area >= 100 * 100 && search.best.is_none_or(|(a, _)| area > a) {
                             search.best = Some((area, hwnd));
                         }
                     }
