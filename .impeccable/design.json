@@ -1,0 +1,465 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-26T20:26:33.923212+00:00",
+  "title": "Design System: CrossPOV",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "primary",
+        "displayName": "Bone White",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "win": {
+        "role": "secondary",
+        "displayName": "Signal Emerald",
+        "tonalRamp": [
+          "#022c22",
+          "#064e3b",
+          "#065f46",
+          "#047857",
+          "#059669",
+          "#10b981",
+          "#6ee7b7",
+          "#d1fae5"
+        ]
+      },
+      "loss": {
+        "role": "tertiary",
+        "displayName": "Signal Rose",
+        "tonalRamp": [
+          "#4c0519",
+          "#881337",
+          "#9f1239",
+          "#be123c",
+          "#e11d48",
+          "#f43f5e",
+          "#fda4af",
+          "#ffe4e6"
+        ]
+      },
+      "loss-text": {
+        "role": "tertiary",
+        "displayName": "Rose Text",
+        "tonalRamp": [
+          "#4c0519",
+          "#881337",
+          "#9f1239",
+          "#be123c",
+          "#e11d48",
+          "#f43f5e",
+          "#fda4af",
+          "#ffe4e6"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "avatar": {
+        "role": "neutral",
+        "displayName": "Avatar Tile",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ],
+        "canonical": "rgb(39 39 42 / 0.8)"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "edge-hover": {
+        "role": "neutral",
+        "displayName": "Control Edge Hover",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "body": {
+        "role": "neutral",
+        "displayName": "Body",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      },
+      "quiet": {
+        "role": "neutral",
+        "displayName": "Quiet",
+        "tonalRamp": [
+          "#09090b",
+          "#18181b",
+          "#27272a",
+          "#3f3f46",
+          "#52525b",
+          "#71717a",
+          "#a1a1aa",
+          "#e4e4e7"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The big number in each stat-strip cell."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page title in the top bar; section titles at 18px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Map name on a match panel; settings panel titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text, nav, buttons, inputs."
+      },
+      "body-small": {
+        "displayName": "Body Small",
+        "purpose": "Meta lines, help text, captions, compact buttons."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase data labels only: table headers, inline stat captions, result word, YOU/THEM tags."
+      },
+      "number": {
+        "displayName": "Number",
+        "purpose": "Every figure: scores, K/D/A, counts, durations. Digit runs inside text switch to it at 0.94em."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "0 24px 60px -24px rgba(0, 0, 0, 0.8)",
+        "purpose": "Video player and update dialog only."
+      },
+      {
+        "name": "toast",
+        "value": "0 16px 40px -16px rgba(0, 0, 0, 0.8)",
+        "purpose": "Transient toasts."
+      },
+      {
+        "name": "keycap-lip",
+        "value": "inset 0 -1px 0 #3f3f46",
+        "purpose": "Bottom edge of a keyboard key."
+      },
+      {
+        "name": "scrim",
+        "value": "rgba(9, 9, 11, 0.92)",
+        "purpose": "Backdrop behind overlays; opaque, never blurred."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The single easing for framer-motion transitions."
+      },
+      {
+        "name": "quick",
+        "value": "180ms",
+        "purpose": "Page crossfade: opacity 0 to 1, y 4px to 0."
+      },
+      {
+        "name": "slide",
+        "value": "220ms tween",
+        "purpose": "Shared-layout indicators: sidebar active block, filter-tab underline, settings nav block."
+      },
+      {
+        "name": "collapse",
+        "value": "height 220ms ease-out-expo, opacity 160ms ease-out",
+        "purpose": "Match details accordion."
+      },
+      {
+        "name": "css-state",
+        "value": "150-160ms ease-out",
+        "purpose": "Colour and border transitions on hover; switch thumb 180ms."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "MotionConfig reducedMotion=\"user\"; CSS transitions and the status ping disabled under prefers-reduced-motion",
+        "purpose": "Respect the viewer's setting everywhere."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "639px",
+        "purpose": "Below: sidebar becomes a fixed bottom bar, 16px gutters."
+      },
+      {
+        "name": "rail",
+        "value": "1100px",
+        "purpose": "Below: sidebar is a 64px icon rail; at or above, 208px with labels."
+      },
+      {
+        "name": "status-detail",
+        "value": "1200px",
+        "purpose": "Recorder status shows game name, hotkey and buffer."
+      },
+      {
+        "name": "strip",
+        "value": "1280px",
+        "purpose": "Stat strip four across; below, 2 by 2."
+      },
+      {
+        "name": "window-min",
+        "value": "900px",
+        "purpose": "Minimum desktop window width (900 by 600)."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one decisive action in an area: Save clip, Look up, Save.",
+      "html": "<button class=\"ds-btn-primary\">Save clip</button>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-btn-primary{height:36px;padding:0 14px;border-radius:6px;border:1px solid var(--ink);background:var(--ink);color:var(--canvas);font:600 14px/1 var(--sans);cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out}.ds-btn-primary:hover{background:#e4e4e7;border-color:#e4e4e7}.ds-btn-primary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}.ds-btn-primary:active{background:#d4d4d8}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Default button: transparent rectangle with a control-edge hairline.",
+      "html": "<button class=\"ds-btn-ghost\">Details <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"/></svg></button>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-btn-ghost{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 8px 0 12px;border-radius:6px;border:1px solid var(--edge);background:transparent;color:var(--body);font:500 13px/1 var(--sans);cursor:pointer;transition:background-color 160ms ease-out,border-color 160ms ease-out}.ds-btn-ghost:hover{background:var(--hover);border-color:var(--edge-h);color:var(--ink)}.ds-btn-ghost:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Top-bar search with leading icon and Ctrl K keycaps; border turns light on focus.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input placeholder=\"Search maps, agents, players, streamers\"><kbd class=\"ds-kbd\">Ctrl</kbd><kbd class=\"ds-kbd\">K</kbd></label>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-search{display:flex;align-items:center;gap:10px;height:36px;width:400px;max-width:100%;padding:0 12px;border-radius:6px;border:1px solid #27272a;background:var(--panel);color:var(--quiet);transition:border-color 150ms ease-out}.ds-search:hover{border-color:var(--edge)}.ds-search:focus-within{border-color:#a1a1aa;color:var(--body)}.ds-search input{flex:1;min-width:0;border:0;background:transparent;color:var(--body);font:400 14px var(--sans);outline:none}.ds-search input::placeholder{color:var(--quiet)}.ds-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 5px;border:1px solid var(--edge);border-radius:4px;background:var(--hover);box-shadow:inset 0 -1px 0 var(--edge);font:600 11px/1 var(--mono);color:var(--ink)}"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Flat rail: quiet items, the active one bone white on a hover-surface block.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item on\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z\"/></svg>Home</a><a class=\"ds-nav-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"8\" width=\"18\" height=\"13\" rx=\"1\"/><path d=\"M3 8l3-5h12l3 5\"/></svg>Clips</a><a class=\"ds-nav-item\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\"><circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4\"/></svg>Streamers</a></nav>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-nav{display:flex;flex-direction:column;gap:4px;width:208px;padding:16px 12px;background:var(--panel);border-right:1px solid var(--line)}.ds-nav-item{display:flex;align-items:center;gap:12px;height:36px;padding:0 10px;border-radius:6px;color:var(--quiet);font:500 14px var(--sans);text-decoration:none;cursor:pointer;transition:color 150ms ease-out}.ds-nav-item:hover{color:var(--body)}.ds-nav-item.on{color:var(--ink);background:var(--hover);box-shadow:inset 0 0 0 1px #27272a}.ds-nav-item:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}"
+    },
+    {
+      "name": "Filter Tabs",
+      "kind": "nav",
+      "refersTo": "segmented-option",
+      "description": "Plain text tabs on a hairline with a sliding 2px underline and mono counts.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"on\">All matches</button><button>With streamers <span class=\"ds-count\">2</span></button><button>My clips only</button></div>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-tabs{display:flex;gap:20px;height:36px;border-bottom:1px solid var(--line)}.ds-tabs button{position:relative;display:inline-flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--quiet);font:500 14px var(--sans);cursor:pointer;transition:color 150ms ease-out}.ds-tabs button:hover{color:var(--body)}.ds-tabs button.on{color:var(--ink)}.ds-tabs button.on::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ink)}.ds-tabs button:focus-visible{outline:2px solid var(--ink);outline-offset:4px}.ds-count{min-width:20px;padding:0 4px;border-radius:4px;background:var(--hover);font:600 11px/18px var(--mono);text-align:center}"
+    },
+    {
+      "name": "Recorder Status",
+      "kind": "custom",
+      "refersTo": "recorder-status",
+      "description": "Rectangular top-bar status: square state dot, words, hotkey keycap, Save clip.",
+      "html": "<div class=\"ds-rec\"><i></i><b>Recording</b><span class=\"ds-rec-key\"><kbd>F9</kbd> saves the last <em>60s</em></span><button>Save clip</button></div>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-rec{display:inline-flex;align-items:center;gap:10px;height:36px;padding:0 4px 0 12px;border:1px solid #27272a;border-radius:6px;background:var(--panel);font:14px var(--sans);color:var(--ink);white-space:nowrap}.ds-rec i{width:8px;height:8px;border-radius:2px;background:var(--loss)}.ds-rec b{font-weight:500}.ds-rec-key{display:flex;align-items:center;gap:6px;padding-left:10px;border-left:1px solid #27272a;font-size:13px;color:var(--quiet)}.ds-rec-key em{font:normal 600 13px var(--mono);color:var(--body)}.ds-rec kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--edge);border-radius:4px;background:var(--hover);box-shadow:inset 0 -1px 0 var(--edge);font:600 11px/1 var(--mono);color:var(--ink)}.ds-rec button{height:28px;padding:0 10px;border-radius:4px;border:1px solid var(--ink);background:var(--ink);color:var(--canvas);font:600 13px var(--sans);cursor:pointer;transition:background-color 150ms ease-out}.ds-rec button:hover{background:#e4e4e7}.ds-rec button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}"
+    },
+    {
+      "name": "Stat Strip",
+      "kind": "card",
+      "refersTo": "stat-cell",
+      "description": "Four cells in one panel divided by 1px hairline gaps; mono numbers.",
+      "html": "<div class=\"ds-strip\"><div><span>Win rate</span><b>75%</b><small><em>3</em>W · <em>1</em>L <i class=\"w\"></i><i class=\"w\"></i><i class=\"l\"></i><i class=\"w\"></i></small></div><div><span>K/D ratio</span><b>1.79</b><small><em>100</em> kills · <em>56</em> deaths</small></div><div><span>Saved clips</span><b>14</b><small><em>10</em> yours · <em>4</em> from streamers</small></div><div><span>Streamer matches</span><b>2</b><small><em>3</em> streamers met</small></div></div>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;overflow:hidden;border:1px solid var(--line);border-radius:6px;background:var(--line)}.ds-strip>div{display:flex;flex-direction:column;gap:8px;padding:16px 20px;background:var(--panel)}.ds-strip span,.ds-strip small{font:13px var(--sans);color:var(--quiet)}.ds-strip b{font:600 26px/1 var(--mono);letter-spacing:-0.02em;font-variant-numeric:tabular-nums;color:var(--ink)}.ds-strip em{font:normal 600 13px var(--mono);color:var(--body)}.ds-strip i{display:inline-block;width:6px;height:12px;margin-left:3px;border-radius:1px;vertical-align:middle}.ds-strip i.w{background:var(--win)}.ds-strip i.l{background:var(--loss)}"
+    },
+    {
+      "name": "Result Tag",
+      "kind": "chip",
+      "refersTo": "result-tag-win",
+      "description": "Square-cornered result and score, tinted only by the outcome.",
+      "html": "<span class=\"ds-result win\"><span>Win</span><b>14–8</b></span> <span class=\"ds-result loss\"><span>Loss</span><b>9–13</b></span>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-result{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid;border-radius:4px}.ds-result span{font:600 11px var(--sans);letter-spacing:0.08em;text-transform:uppercase}.ds-result b{font:600 15px var(--mono);font-variant-numeric:tabular-nums}.ds-result.win{color:var(--win);border-color:rgb(16 185 129/.4);background:rgb(16 185 129/.1)}.ds-result.loss{color:var(--loss);border-color:rgb(244 63 94/.4);background:rgb(244 63 94/.1)}"
+    },
+    {
+      "name": "Notice",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Hairline box with a leading Lucide icon; warnings stay neutral, errors go rose.",
+      "html": "<p class=\"ds-notice\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z\"/><path d=\"M12 9v4M12 17h.01\"/></svg><span><b>Sub-only VOD.</b> Their side can't be downloaded.</span></p>",
+      "css": ":host{--canvas:#09090b;--panel:#111113;--hover:#18181b;--line:rgb(39 39 42/.8);--line-2:#27272a;--edge:#3f3f46;--edge-h:#52525b;--ink:#fafafa;--body:#f4f4f5;--quiet:#a1a1aa;--win:#10b981;--loss:#f43f5e;--sans:'Geist Variable','Segoe UI',system-ui,sans-serif;--mono:'Geist Mono Variable',ui-monospace,monospace;}.ds-notice{display:flex;align-items:flex-start;gap:10px;margin:0;padding:11px 14px;border:1px solid #27272a;border-radius:6px;background:var(--panel);color:var(--body);font:14px/1.5 var(--sans)}.ds-notice svg{flex:none;margin-top:3px;color:var(--quiet)}.ds-notice b{color:var(--ink);font-weight:600}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Instrument Panel",
+    "overview": "CrossPOV is read like a flight instrument, not browsed like a launcher. Three near-black zinc surfaces stack with 1px hairlines between them; there is no glass, no glow and no blur. The eye goes to numbers (win rate, K/D/A, round scores, clip lengths) because they are the only things set in a second typeface, Geist Mono at semibold with tabular figures, and to two colours, because emerald and rose are the only hues on screen and each means exactly one thing.\n\nDensity is deliberate and calm: one stat strip, one row of filter tabs, then match panels that open in place. Panels are flat rectangles with 6px corners; inside a panel, content sits on hairline-separated rows rather than in nested boxes. Motion is short and purposeful (160 to 220ms, a fast ease-out with no bounce): a \"you are here\" block slides between nav items and tabs, a match grows open to show its fights, a page fades in 4px from below. Everything honours the viewer's reduced-motion setting.\n\nThis world replaced an earlier frosted-glass, glowing, pill-shaped look. The rejection is part of the system: translucency, coloured glows and capsule shapes do not come back.",
+    "keyCharacteristics": [
+      "Three-step dark surface scale (canvas, panel, hover) separated by 1px hairlines.",
+      "Two semantic colours only: emerald for win and ready, rose for loss, error and recording.",
+      "Rectangles everywhere: 6px for containers and controls, 4px for small tags and inner options, 2px for status dots. No pills, no circles.",
+      "Geist Sans for words, Geist Mono semibold tabular for every number, including numbers inside sentences.",
+      "Lucide icons at 1.75 stroke; Phosphor only for the Twitch logo; a custom split-frame crosshair as the brand mark.",
+      "Motion is functional and brief (160 to 220ms), with shared-layout indicators and a height accordion."
+    ],
+    "rules": [
+      {
+        "name": "The Two Lamps Rule",
+        "body": "Emerald and rose are the only hues. Emerald is a win or ready; rose is a loss, an error or recording. Nothing is coloured for decoration, and no third hue (amber, purple, blue) is introduced for warnings, links or brands.",
+        "section": "colors"
+      },
+      {
+        "name": "The Neutral Warning Rule",
+        "body": "A warning is neutral text in a hairline box, identified by a leading Lucide triangle icon, never by colour. Only errors turn rose.",
+        "section": "colors"
+      },
+      {
+        "name": "The Glyph Not Purple Rule",
+        "body": "Twitch is marked by its logo glyph in the current text colour, never by Twitch purple.",
+        "section": "colors"
+      },
+      {
+        "name": "The Readout Rule",
+        "body": "Every number is Geist Mono semibold with tabular figures, even mid-sentence. Text that mixes words and digits (\"R14 · they killed you\", \"37 min\", \"9:00 into the match\") passes through the digit-run wrapper so only the digits switch face, at 0.94em.",
+        "section": "typography"
+      },
+      {
+        "name": "The Label Is Data Rule",
+        "body": "Uppercase tracked text names a value or column it sits on. It never floats above a heading as a decorative kicker.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Panel Rule",
+        "body": "One panel, one hairline, no shadow, no backdrop-filter. Nothing floats unless it is an overlay.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Nesting Rule",
+        "body": "A panel never holds another bordered card. Details inside a match sit on the panel itself as hairline-separated rows.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Pill Rule",
+        "body": "Nothing is fully rounded: no capsule buttons, no circular avatars, no round status dots. The largest corner in the system is 6px.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** build every surface from canvas, panel and hover with 1px hairlines between them.",
+      "**Do** set every number in Geist Mono semibold with tabular figures, wrapping digit runs inside sentences.",
+      "**Do** use emerald only for win or ready, and rose only for loss, error or recording.",
+      "**Do** mark a warning with a leading Lucide icon on a neutral hairline box.",
+      "**Do** draw Lucide icons at 1.75 stroke (16px inline, 18px in navigation); use Phosphor only for the Twitch logo.",
+      "**Do** keep corners at 6px for containers and controls, 4px for small inner pieces, 2px for dots.",
+      "**Do** animate with the fast ease-out (160 to 220ms) and keep reduced motion respected.",
+      "**Do** place details inside a panel as hairline-separated rows."
+    ],
+    "donts": [
+      "**Don't** use pills, capsules or circles anywhere: buttons, tags, avatars and status dots are rectangles.",
+      "**Don't** bring back frosted glass, backdrop blur, glows or coloured shadows.",
+      "**Don't** add a third hue for warnings, links, Twitch or decoration.",
+      "**Don't** nest a bordered card inside a panel.",
+      "**Don't** show initials as an avatar; follow the picture, agent, glyph chain.",
+      "**Don't** set numbers in the sans face, or use proportional figures in a column.",
+      "**Don't** put an uppercase tracked kicker above a heading; uppercase labels name data only.",
+      "**Don't** add shadows to anything that is not an overlay (player, dialog, toast)."
+    ]
+  }
+}
