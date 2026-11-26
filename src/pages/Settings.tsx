@@ -60,6 +60,16 @@ const SECTIONS: { id: Section; label: string }[] = [
 ];
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
+/** Whether CrossPOV's own player can play H.265 on this PC (needs the
+ * graphics card's decoder, and on some PCs Windows' HEVC extension). */
+const h265Plays = (() => {
+  try {
+    return document.createElement("video").canPlayType('video/mp4; codecs="hvc1.1.6.L153.B0"') !== "";
+  } catch {
+    return false;
+  }
+})();
+
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
   const [tab, setTab] = useState<Section>("games");
   return (
@@ -167,6 +177,21 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           </Row>
           <Row label="Encoder" help="GPU keeps your FPS up">
             <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "Intel" }, { value: "cpu", label: "CPU" }]} />
+          </Row>
+          <Row
+            label="Video format"
+            help={
+              h265Plays
+                ? "H.265 is sharper at the same size · Copy for Discord still makes H.264"
+                : "H.265 isn't available: this PC can't play it back"
+            }
+          >
+            <Seg
+              label="Video format"
+              value={draft.codec}
+              onChange={(v) => set("codec", v)}
+              options={[{ value: "h264", label: "H.264" }, ...(h265Plays || draft.codec === "h265" ? [{ value: "h265" as const, label: "H.265" }] : [])]}
+            />
           </Row>
           <Row label="File type" help="MKV survives crashes">
             <Seg label="File type" value={draft.format} onChange={(v) => set("format", v)} options={[{ value: "mp4", label: "MP4" }, { value: "mkv", label: "MKV" }]} />

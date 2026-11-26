@@ -18,8 +18,9 @@ use serde::Serialize;
 use crate::settings::{Container, Encoder, Quality, Resolution, Settings};
 
 /// Length of each buffer segment. A hotkey clip is a whole number of these,
-/// and saving waits for the one being written to finish: short keeps it quick.
-pub const SEGMENT_SECONDS: u32 = 1;
+/// and each starts with a full picture (keyframe). Shorter saves sooner but
+/// spends more of the bitrate on keyframes; 2 s keeps clips sharp.
+pub const SEGMENT_SECONDS: u32 = 2;
 pub const AUDIO_RATE: u32 = 48_000;
 pub const AUDIO_CHANNELS: u16 = 4;
 
@@ -112,6 +113,20 @@ impl VideoEncoder {
             VideoEncoder::Cpu => "h264_mf",
             #[cfg(not(windows))]
             VideoEncoder::Cpu => "libx264",
+        }
+    }
+
+    /// The H.265 encoder on the same hardware.
+    pub fn hevc_codec(self) -> &'static str {
+        match self {
+            VideoEncoder::Nvenc => "hevc_nvenc",
+            VideoEncoder::Amf => "hevc_amf",
+            #[cfg(windows)]
+            VideoEncoder::Qsv | VideoEncoder::Cpu => "hevc_mf",
+            #[cfg(not(windows))]
+            VideoEncoder::Qsv => "hevc_qsv",
+            #[cfg(not(windows))]
+            VideoEncoder::Cpu => "libx265",
         }
     }
 
@@ -226,6 +241,8 @@ pub struct RecordPlan {
     pub screen_height: Option<u32>,
     /// Which screen to capture (0 = main), as Desktop Duplication counts them.
     pub output_idx: u32,
+    /// Record H.265 instead of H.264.
+    pub hevc: bool,
 }
 
 impl RecordPlan {
@@ -336,10 +353,23 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     // Encoder. A keyframe every segment so the buffer can be cut anywhere.
     let kbps = bitrate_kbps(s);
     let gop = (s.fps * SEGMENT_SECONDS).to_string();
-    push(&mut a, &["-c:v", plan.encoder.codec()]);
+    push(&mut a, &["-c:v", if plan.hevc { plan.encoder.hevc_codec() } else { plan.encoder.codec() }]);
     match plan.encoder {
-        VideoEncoder::Nvenc => push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]),
-        VideoEncoder::Amf => push(&mut a, &["-usage", "transcoding", "-quality", "balanced", "-rc", "vbr_peak"]),
+        VideoEncoder::Nvenc => {
+            push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
+            // Spend the bits where the eye looks (edges, faces, text) and on
+            // what stays on screen; B-frames for more detail per bit. Left out
+            // in compatibility mode, in case an older card refuses them.
+            if !plan.compat {
+                push(&mut a, &["-spatial-aq", "1", "-temporal-aq", "1", "-aq-strength", "8", "-bf", "3"]);
+            }
+        }
+        VideoEncoder::Amf => {
+            push(&mut a, &["-usage", "transcoding", "-quality", if plan.compat { "balanced" } else { "quality" }, "-rc", "vbr_peak"]);
+            if !plan.compat {
+                push(&mut a, &["-vbaq", "true"]);
+            }
+        }
         #[cfg(windows)]
         VideoEncoder::Qsv => push(&mut a, &["-hw_encoding", "1", "-rate_control", "cbr", "-scenario", "display_remoting"]),
         #[cfg(not(windows))]
@@ -373,13 +403,17 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
 }
 
 /// Arguments that join buffer segments into one clip without re-encoding.
-pub fn concat_args(concat_list: &Path, out: &Path, format: Container) -> Vec<String> {
+pub fn concat_args(concat_list: &Path, out: &Path, format: Container, hevc: bool) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i"]
         .iter()
         .map(|s| s.to_string())
         .collect();
     a.push(concat_list.to_string_lossy().into_owned());
     a.extend(["-map", "0", "-c", "copy"].iter().map(|s| s.to_string()));
+    if hevc && format == Container::Mp4 {
+        // The tag browsers (and CrossPOV's player) expect for H.265 in MP4.
+        a.extend(["-tag:v", "hvc1"].iter().map(|s| s.to_string()));
+    }
     if format == Container::Mp4 {
         a.extend(["-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"].iter().map(|s| s.to_string()));
     }
@@ -404,7 +438,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0 }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -421,7 +455,7 @@ mod tests {
         assert!(!args.contains("hwdownload"), "{args}");
         assert!(args.contains("-map 0:v"));
         assert!(args.contains("-c:v h264_nvenc"));
-        assert!(args.contains("-g 60"), "a keyframe every segment");
+        assert!(args.contains("-g 120"), "a keyframe every segment");
     }
 
     #[test]
@@ -477,9 +511,27 @@ mod tests {
     }
 
     #[test]
+    fn h265_uses_the_same_card_and_plays_in_mp4() {
+        let p = RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let a = joined(&Settings::default(), &p);
+        assert!(a.contains("-c:v hevc_nvenc"), "{a}");
+        assert!(a.contains("-spatial-aq 1"), "{a}");
+        let compat = joined(&Settings::default(), &RecordPlan { compat: true, ..p });
+        assert!(!compat.contains("-bf 3"), "compatibility mode keeps to basic options");
+        let amd = joined(&Settings::default(), &RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Amf, false) });
+        assert!(amd.contains("-c:v hevc_amf") && amd.contains("-quality quality"), "{amd}");
+
+        let list = PathBuf::from("l.txt");
+        let mp4 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, true).join(" ");
+        assert!(mp4.contains("-tag:v hvc1"), "{mp4}");
+        let h264 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, false).join(" ");
+        assert!(!h264.contains("hvc1"));
+    }
+
+    #[test]
     fn ring_buffer_settings() {
-        assert_eq!(segment_count(60), 64);
-        assert_eq!(segment_count(15), 19);
+        assert_eq!(segment_count(60), 34);
+        assert_eq!(segment_count(15), 12);
         let a = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(a.contains("-segment_wrap 34 -segment_list_size 34"));
     }

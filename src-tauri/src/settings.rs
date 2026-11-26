@@ -40,6 +40,16 @@ pub enum Encoder {
     Cpu,
 }
 
+/// Video format of recordings. H.265 is sharper at the same size, but not
+/// every PC can play it, so the app only offers it where it plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Codec {
+    #[serde(rename = "h264")]
+    H264,
+    #[serde(rename = "h265")]
+    H265,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Container {
@@ -110,6 +120,7 @@ pub struct Settings {
     pub quality: Quality,
     pub encoder: Encoder,
     pub format: Container,
+    pub codec: Codec,
     // Which games to record
     /// Any app running fullscreen (or borderless fullscreen) counts as a game.
     pub record_fullscreen: bool,
@@ -167,6 +178,7 @@ impl Default for Settings {
             quality: Quality::High,
             encoder: Encoder::Auto,
             format: Container::Mp4,
+            codec: Codec::H264,
             record_fullscreen: true,
             custom_games: Vec::new(),
             ignored_games: Vec::new(),

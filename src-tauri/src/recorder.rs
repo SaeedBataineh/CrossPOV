@@ -62,7 +62,7 @@ impl RecorderStatus {
 /// Settings that require restarting FFmpeg when they change.
 fn recording_key(s: &Settings) -> String {
     serde_json::json!([
-        s.fps, s.resolution, s.quality, s.encoder, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
+        s.fps, s.resolution, s.quality, s.encoder, s.codec, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
         s.apps, s.microphone, s.mic_device, s.mic_volume, s.separate_tracks
     ])
     .to_string()
@@ -382,6 +382,7 @@ impl Recorder {
             segment_count: ffmpeg::segment_count(settings.buffer_seconds),
             screen_height: game.screen_height.or_else(primary_screen_height),
             output_idx: game.output_idx,
+            hevc: settings.codec == crate::settings::Codec::H265,
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)
@@ -451,7 +452,7 @@ impl Recorder {
 
         let list = plan.segment_dir.join(format!("concat-{}.txt", now_ms()));
         fs::write(&list, take.iter().map(|p| concat_list_line(p)).collect::<String>()).map_err(|e| e.to_string())?;
-        let result = run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &out, settings.format));
+        let result = run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &out, settings.format, plan.hevc));
         let _ = fs::remove_file(&list);
         result.map_err(|e| format!("Could not save clip: {e}"))?;
 

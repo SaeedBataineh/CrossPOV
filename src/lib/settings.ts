@@ -40,6 +40,7 @@ export interface Settings {
   quality: Quality;
   encoder: Encoder;
   format: Container;
+  codec: "h264" | "h265";
   // Which games to record
   /** Any app running fullscreen counts as a game. */
   recordFullscreen: boolean;
@@ -92,6 +93,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: "high",
   encoder: "auto",
   format: "mp4",
+  codec: "h264",
   recordFullscreen: true,
   customGames: [],
   ignoredGames: [],
