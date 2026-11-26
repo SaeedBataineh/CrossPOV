@@ -107,7 +107,7 @@ export default function Streamers({
                   {pct != null && pct < 100 && <span className="bar" style={{ width: 160 }}><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
                 </span>
                 <span role="cell" style={{ justifySelf: "end" }}>
-                  {clip && <button type="button" className="btn primary sm-btn" onClick={() => onOpen(clip)}>Watch</button>}
+                  {clip && <button type="button" className="btn sm-btn" onClick={() => onOpen(clip)}>Watch</button>}
                 </span>
               </div>
             );

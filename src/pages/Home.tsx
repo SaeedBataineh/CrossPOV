@@ -256,7 +256,7 @@ export default function Home({
             onClick={() => void checkNow()}
             disabled={checking || !status?.configured}
             title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}
-            className="inline-flex h-9 items-center gap-2 rounded-full border-0 bg-white/[0.06] px-4 text-[13px] font-medium text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-1 ring-white/[0.07] transition-all hover:bg-white/[0.11] hover:text-white active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-2 rounded-[10px] border-0 bg-white/[0.05] px-3.5 text-[13px] font-medium text-zinc-200 ring-1 ring-white/[0.07] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none disabled:opacity-50"
           >
             <RefreshCw size={14} strokeWidth={2.2} aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
             {checking ? "Checking…" : "Check for new matches"}
@@ -318,13 +318,12 @@ export default function Home({
 
 // ---------- Summary strip ----------
 
-/** One glass tile: icon, a big number, and what it means. */
-function Tile({ icon, label, value, sub, accent }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; accent: string }) {
+/** One tile: icon, a big number, and what it means. */
+function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] border-t-white/10 bg-zinc-900/60 p-4 shadow-[0_12px_32px_-20px_rgba(0,0,0,0.9)] backdrop-blur-xl">
-      <span aria-hidden className="pointer-events-none absolute -top-10 -right-10 size-28 rounded-full opacity-25 blur-2xl" style={{ background: accent }} />
+    <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]">
       <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
-        <span className="grid size-6 place-items-center rounded-lg bg-white/[0.06] ring-1 ring-white/[0.06]" style={{ color: accent }}>{icon}</span>
+        <span className="grid size-6 place-items-center rounded-lg bg-white/[0.05] text-zinc-300">{icon}</span>
         {label}
       </div>
       <div className="mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.03em] text-white tabular-nums">{value}</div>
@@ -355,7 +354,6 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
       <Tile
         icon={<Trophy size={13} strokeWidth={2.2} aria-hidden />}
         label="Win rate"
-        accent="#30D158"
         value={rate == null ? "–" : <>{rate}<span className="text-[16px] text-zinc-500">%</span></>}
         sub={
           played.length ? (
@@ -363,7 +361,7 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
               <span>{wins}W · {losses}L</span>
               <span className="flex gap-[3px]" aria-hidden>
                 {played.slice(0, 10).reverse().map((p, i) => (
-                  <i key={i} className={`h-2.5 w-1 rounded-full ${p.letter === "W" ? "bg-[#30D158]" : p.letter === "L" ? "bg-[#FF453A]" : "bg-zinc-600"}`} />
+                  <i key={i} className={`h-2.5 w-1 rounded-sm ${p.letter === "W" ? "bg-[#30D158]/70" : p.letter === "L" ? "bg-[#FF453A]/70" : "bg-zinc-600"}`} />
                 ))}
               </span>
             </span>
@@ -373,21 +371,18 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
       <Tile
         icon={<Target size={13} strokeWidth={2.2} aria-hidden />}
         label="K/D ratio"
-        accent="#64D2FF"
         value={played.length ? (kills / Math.max(1, deaths)).toFixed(2) : "–"}
         sub={played.length ? `${kills} kills · ${deaths} deaths` : undefined}
       />
       <Tile
         icon={<Clapperboard size={13} strokeWidth={2.2} aria-hidden />}
         label="Saved clips"
-        accent="#FF9F0A"
         value={clips.length}
         sub={`${clips.length - theirs} yours · ${theirs} from streamers`}
       />
       <Tile
         icon={<Swords size={13} strokeWidth={2.2} aria-hidden />}
         label="Streamer matches"
-        accent="#BF5AF2"
         value={withStreamers}
         sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}
       />

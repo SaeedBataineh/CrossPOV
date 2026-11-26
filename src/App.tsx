@@ -131,6 +131,8 @@ export default function App() {
             </Notice>
           )}
           <Suspense fallback={<p className="muted">Loading…</p>}>
+            {/* Keyed by what's shown, so each page or clip fades in when you open it. */}
+            <div key={viewing ? `clip:${viewing.path}` : page} className="page-enter">
             {viewing ? (
               <Viewer
                 clip={viewing}
@@ -155,6 +157,7 @@ export default function App() {
                 {page === "settings" && <SettingsPage settings={settings} onSaved={onSaved} />}
               </>
             )}
+            </div>
           </Suspense>
         </main>
       </div>

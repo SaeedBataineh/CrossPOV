@@ -240,7 +240,7 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
         )}
         <span className="hover-play" aria-hidden="true"><Play size={20} fill="currentColor" strokeWidth={0} /></span>
         {mine && <span className="tag you">YOU</span>}
-        {theirs && <span className="tag them"><TwitchIcon size={10} color="#a970ff" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
+        {theirs && <span className="tag them"><TwitchIcon size={10} color="#a1a1aa" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
         {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
       </button>
       {(onReveal || onDelete) && (

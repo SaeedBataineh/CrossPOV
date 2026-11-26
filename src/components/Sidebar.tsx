@@ -11,15 +11,15 @@ const NAV: { id: Page; label: string; Icon: LucideIcon }[] = [
 ];
 
 const item =
-  "group relative flex w-[68px] flex-col items-center justify-center gap-1 rounded-2xl border-0 bg-transparent py-2.5 text-[11px] font-medium tracking-[-0.01em] no-underline transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70";
+  "group relative flex w-[68px] flex-col items-center justify-center gap-1 rounded-xl border-0 bg-transparent py-2.5 text-[11px] font-medium tracking-[-0.01em] no-underline transition-colors duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-white/60";
 const idle = "text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100";
-const active = "bg-white/[0.09] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.10),inset_0_-1px_2px_rgba(0,0,0,0.35),0_4px_14px_-6px_rgba(0,0,0,0.6)] ring-1 ring-white/[0.08]";
+const active = "bg-white/[0.08] text-white";
 
 function NavItem({ page, id, label, Icon, onNavigate }: { page: Page; id: Page; label: string; Icon: LucideIcon; onNavigate: (p: Page) => void }) {
   const on = page === id;
   return (
     <button type="button" className={`${item} ${on ? active : idle}`} aria-current={on ? "page" : undefined} onClick={() => onNavigate(id)}>
-      <Icon size={20} strokeWidth={on ? 2.2 : 1.8} className="transition-transform duration-200 group-hover:scale-105 group-active:scale-95" aria-hidden />
+      <Icon size={20} strokeWidth={on ? 2 : 1.75} aria-hidden />
       <span>{label}</span>
     </button>
   );
@@ -41,7 +41,7 @@ export function Sidebar({ page, update, onNavigate }: { page: Page; update: Upda
       <span className="flex-1" />
       {update?.state === "waiting" && (
         <span
-          className="w-[68px] rounded-xl bg-sky-400/10 px-1.5 py-1.5 text-center text-[10.5px] leading-tight font-medium text-sky-200 ring-1 ring-sky-300/20"
+          className="w-[68px] rounded-lg bg-white/[0.05] px-1.5 py-1.5 text-center text-[10.5px] leading-tight font-medium text-zinc-200 ring-1 ring-white/[0.08]"
           title={`Update v${update.version} installs as soon as VALORANT is closed`}
         >
           Update after game

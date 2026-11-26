@@ -100,16 +100,16 @@ export type Show = "all" | "streamers" | "mine";
 // ---------- Header pieces ----------
 
 const RESULT = {
-  W: { label: "Win", cls: "text-[#30D158] bg-[#30D158]/[0.12] ring-[#30D158]/25 shadow-[0_0_22px_-4px_rgba(48,209,88,0.55)]" },
-  L: { label: "Loss", cls: "text-[#FF453A] bg-[#FF453A]/[0.12] ring-[#FF453A]/25 shadow-[0_0_22px_-6px_rgba(255,69,58,0.45)]" },
+  W: { label: "Win", cls: "text-[#4ADE80] bg-[#30D158]/[0.08] ring-[#30D158]/20" },
+  L: { label: "Loss", cls: "text-[#FB7185] bg-[#FF453A]/[0.08] ring-[#FF453A]/20" },
   D: { label: "Draw", cls: "text-zinc-200 bg-white/[0.07] ring-white/10" },
 } as const;
 
-/** Bold score capsule, coloured and glowing by the result. */
+/** The score, tinted by the result. */
 function ResultPill({ letter, score }: { letter?: "W" | "L" | "D"; score: string }) {
   const r = letter ? RESULT[letter] : { label: "", cls: "text-zinc-300 bg-white/[0.06] ring-white/10" };
   return (
-    <span className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-full px-3 ring-1 ring-inset ${r.cls}`}>
+    <span className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 ring-1 ring-inset ${r.cls}`}>
       {r.label && <span className="text-[10.5px] font-bold tracking-[0.08em] uppercase opacity-80">{r.label}</span>}
       <b className="text-[15px] font-bold tracking-[-0.01em] tabular-nums">{score}</b>
     </span>
@@ -132,23 +132,23 @@ function StreamerBadge({ live, checking, checked }: { live: Live[]; checking: bo
     return (
       <span
         title={live.map((l) => `${l.name}: ${l.text}`).join("\n")}
-        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-full bg-gradient-to-r from-violet-500/20 to-indigo-500/15 py-1 pr-3 pl-1 text-[12.5px] font-semibold text-violet-100 shadow-[0_0_20px_-6px_rgba(145,70,255,0.7),inset_0_1px_0_rgba(255,255,255,0.08)] ring-1 ring-violet-400/30 ring-inset"
+        className="inline-flex h-8 max-w-full min-w-0 items-center gap-2 rounded-lg bg-white/[0.04] py-1 pr-3 pl-1 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.07] ring-inset"
       >
-        <span className="flex shrink-0 -space-x-2">
+        <span className="flex shrink-0 -space-x-1">
           {live.slice(0, 3).map((l) => (
-            <span key={l.login} className="overflow-hidden rounded-full ring-2 ring-zinc-900 [&>*]:rounded-full">
+            <span key={l.login} className="overflow-hidden rounded-md ring-2 ring-zinc-900 [&>*]:rounded-md">
               <Avatar name={l.name} avatar={l.avatar} size={24} />
             </span>
           ))}
         </span>
-        <TwitchIcon size={12} color="#bf94ff" />
+        <TwitchIcon size={12} color="#a1a1aa" />
         <span className="truncate">{text}</span>
       </span>
     );
   }
   const Icon = checking ? LoaderCircle : !checked ? Clock : null;
   return (
-    <span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/[0.04] px-3 text-[12px] font-medium text-zinc-500 ring-1 ring-white/[0.06] ring-inset">
+    <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[12px] font-medium text-zinc-400">
       {Icon && <Icon size={13} className={checking ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden />}
       {checking ? "Checking who was live" : !checked ? "Checked after the match" : "No streamers"}
     </span>
@@ -278,7 +278,7 @@ export function MatchCard({
   return (
     <article
       aria-label={`${match.map}, ${score}`}
-      className="@container group/card relative rounded-2xl border border-white/[0.06] border-t-white/10 bg-zinc-900/70 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_12px_32px_-18px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-all duration-200 hover:border-white/[0.09] hover:border-t-white/[0.14] hover:bg-zinc-800/80 hover:shadow-[0_1px_0_rgba(255,255,255,0.05)_inset,0_18px_40px_-18px_rgba(0,0,0,0.95)]"
+      className="@container group/card relative rounded-2xl border border-white/[0.06] bg-zinc-900/80 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_12px_32px_-20px_rgba(0,0,0,0.8)] transition-[border-color,background-color] duration-200 ease-out hover:border-white/[0.1] hover:bg-zinc-900"
     >
       <div className="flex items-center gap-4 p-3.5 pr-4">
         <MapThumb map={match.map} agent={me?.agent} />
@@ -314,17 +314,17 @@ export function MatchCard({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full border-0 bg-white/[0.06] pr-2.5 pl-3.5 text-[12.5px] font-medium text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] ring-1 ring-white/[0.06] transition-all duration-200 hover:bg-white/[0.12] hover:text-white active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none"
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           {open ? "Hide" : "Details"}
-          <ChevronDown size={15} strokeWidth={2.2} aria-hidden className={`transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
+          <ChevronDown size={15} strokeWidth={2.2} aria-hidden className={`transition-transform duration-200 ease-out ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
 
       {tiles.length > 0 && <div className="gallery border-t border-white/[0.05] px-4 pt-4 pb-5">{tiles}</div>}
 
       {open && (
-        <div className="match-details mx-4 mb-4">
+        <div className="match-details details-enter mx-4 mb-4">
           {liveList.length > 0 && (
             <div className="streamer-cards">
               {liveList.map((p) => {

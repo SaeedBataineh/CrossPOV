@@ -61,12 +61,12 @@ export function SegmentedControl<T extends string>({
       role="tablist"
       aria-label={label}
       onKeyDown={onKey}
-      className="relative inline-flex h-9 items-center rounded-full bg-zinc-900/70 p-[3px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] ring-1 ring-white/[0.06] backdrop-blur-xl"
+      className="relative inline-flex h-9 items-center rounded-[10px] bg-zinc-900/70 p-[3px] ring-1 ring-white/[0.06]"
     >
       {thumb && (
         <span
           aria-hidden
-          className="absolute top-[3px] bottom-[3px] left-0 rounded-full bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_1px_3px_rgba(0,0,0,0.4)] ring-1 ring-white/[0.08] transition-[transform,width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-white/[0.09] shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
           style={{ width: thumb.w, transform: `translateX(${thumb.x}px)` }}
         />
       )}
@@ -81,11 +81,11 @@ export function SegmentedControl<T extends string>({
             aria-selected={on}
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(s.id)}
-            className={`relative z-10 inline-flex h-full items-center gap-1.5 rounded-full border-0 bg-transparent px-3.5 text-[13px] font-medium tracking-[-0.01em] transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 ${on ? "text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+            className={`relative z-10 inline-flex h-full items-center gap-1.5 rounded-[7px] border-0 bg-transparent px-3.5 text-[13px] font-medium tracking-[-0.01em] transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${on ? "text-white" : "text-zinc-400 hover:text-zinc-200"}`}
           >
             {s.label}
             {s.n != null && !(hideZero && s.n === 0) && (
-              <span className={`min-w-[18px] rounded-full px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-white/15 text-white" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
+              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-white/15 text-white" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
             )}
           </button>
         );

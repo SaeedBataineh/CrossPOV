@@ -28,7 +28,7 @@ function Spotlight({ label, query, onQuery }: { label: string; query: string; on
   }, []);
 
   return (
-    <label className="group relative flex h-10 w-full max-w-[420px] min-w-0 items-center gap-2.5 rounded-xl bg-zinc-900/60 px-3 text-zinc-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_24px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/[0.08] backdrop-blur-2xl transition-all duration-200 focus-within:bg-zinc-900/80 focus-within:text-zinc-300 focus-within:ring-2 focus-within:ring-sky-400/50 hover:ring-white/[0.14]">
+    <label className="group relative flex h-10 w-full max-w-[420px] min-w-0 items-center gap-2.5 rounded-xl bg-zinc-900/60 px-3 text-zinc-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_24px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/[0.08] backdrop-blur-2xl transition-all duration-200 focus-within:bg-zinc-900/80 focus-within:text-zinc-300 focus-within:ring-2 focus-within:ring-white/25 hover:ring-white/[0.14]">
       <Search size={16} strokeWidth={2.2} aria-hidden className="shrink-0" />
       <span className="sr-only">{label}</span>
       <input
@@ -51,7 +51,7 @@ function Spotlight({ label, query, onQuery }: { label: string; query: string; on
           type="button"
           aria-label="Clear search"
           onClick={() => onQuery("")}
-          className="grid size-5 place-items-center rounded-full border-0 bg-white/10 text-zinc-300 transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none"
+          className="grid size-5 place-items-center rounded-full border-0 bg-white/10 text-zinc-300 transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           <X size={12} strokeWidth={2.6} aria-hidden />
         </button>
@@ -142,8 +142,9 @@ export function TopBar({
   const recording = status?.state === "recording";
   const game = recording ? status?.game : null;
 
+  // Lines up with the centred 1200px page column below (main has 28px padding and a 10px scrollbar gutter).
   return (
-    <header className="relative z-10 flex h-[68px] shrink-0 items-center gap-4 px-7">
+    <header className="relative z-10 flex h-[68px] shrink-0 items-center gap-4 pr-[max(38px,calc((100%-1190px)/2))] pl-[max(28px,calc((100%-1210px)/2))]">
       {searchLabel ? (
         <Spotlight label={searchLabel} query={query} onQuery={onQuery} />
       ) : (
@@ -158,7 +159,7 @@ export function TopBar({
             onClick={() => {
               if (window.confirm(`Stop recording ${game.name}? It won't be recorded again. You can undo this in Settings › Games.`)) onIgnore(game.exe);
             }}
-            className="h-7 rounded-full border-0 bg-white/[0.08] px-3 text-[12px] font-medium text-zinc-200 transition-colors hover:bg-white/[0.14] focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none"
+            className="h-7 rounded-full border-0 bg-white/[0.08] px-3 text-[12px] font-medium text-zinc-200 transition-colors hover:bg-white/[0.14] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
           >
             Not a game?
           </button>
@@ -170,7 +171,7 @@ export function TopBar({
               onSaving();
               void saveClipNow();
             }}
-            className="h-7 rounded-full border-0 bg-white px-3.5 text-[12.5px] font-semibold text-zinc-950 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_4px_12px_-4px_rgba(255,255,255,0.35)] transition-all hover:bg-zinc-100 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none"
+            className="h-7 rounded-full border-0 bg-white px-3.5 text-[12.5px] font-semibold text-zinc-950 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_4px_12px_-4px_rgba(255,255,255,0.35)] transition-all hover:bg-zinc-100 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
           >
             Save clip
           </button>
