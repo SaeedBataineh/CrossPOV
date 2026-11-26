@@ -58,6 +58,7 @@ export interface Settings {
   microphone: boolean;
   micDevice: string;
   micVolume: number;
+  micNoiseSuppression: boolean;
   separateTracks: boolean;
   // Streamer clips
   streamerAuto: boolean;
@@ -104,6 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
   microphone: false,
   micDevice: "default",
   micVolume: 100,
+  micNoiseSuppression: false,
   separateTracks: true,
   streamerAuto: true,
   clipKilledYou: true,

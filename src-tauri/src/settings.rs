@@ -129,6 +129,8 @@ pub struct Settings {
     pub microphone: bool,
     pub mic_device: String,
     pub mic_volume: u32,
+    /// Removes background noise (keyboard, fans, hum) from the mic.
+    pub mic_noise_suppression: bool,
     pub separate_tracks: bool,
     // Streamer clips
     pub streamer_auto: bool,
@@ -178,6 +180,7 @@ impl Default for Settings {
             microphone: false,
             mic_device: "default".into(),
             mic_volume: 100,
+            mic_noise_suppression: false,
             separate_tracks: true,
             streamer_auto: true,
             clip_killed_you: true,

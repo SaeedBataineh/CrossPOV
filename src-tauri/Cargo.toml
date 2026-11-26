@@ -29,6 +29,7 @@ sysinfo = { version = "0.40.4", default-features = false, features = ["system"] 
 ureq = { version = "3.5.2", default-features = false, features = ["json", "native-tls", "gzip"] }
 tauri-plugin-updater = "2"
 time = { version = "0.3", features = ["local-offset", "parsing", "formatting", "macros"] }
+nnnoiseless = { version = "0.5.2", default-features = false }
 
 [features]
 # One self-contained CrossPOV.exe that updates by replacing itself. FFmpeg and

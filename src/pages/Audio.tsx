@@ -151,6 +151,9 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
               {draft.micDevice !== "default" && !mics.includes(draft.micDevice) && <option value={draft.micDevice}>{draft.micDevice} (not connected)</option>}
             </select>
           </Row>
+          <Row label="Noise suppression" help="removes keyboard, fans and background noise · uses a little CPU">
+            <Toggle label="Noise suppression" checked={draft.micNoiseSuppression} disabled={!draft.microphone} onChange={(v) => set("micNoiseSuppression", v)} />
+          </Row>
         </Panel>
 
         <Panel title="Apps making sound" color="var(--twitch)" right={<button type="button" className="b sm" onClick={() => void refresh()}>Refresh</button>}>

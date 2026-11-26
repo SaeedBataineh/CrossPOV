@@ -288,6 +288,45 @@ fn push_stereo_48k(samples: &[f32], src: &Shared) {
     }
 }
 
+/// Removes background noise from the mic (RNNoise), in place on stereo
+/// 48 kHz samples. The mic is mono anyway, so both channels get the cleaned
+/// mono signal. Adds one 10 ms frame of delay, which keeps every call's
+/// output the same length as its input.
+struct Denoiser {
+    state: Box<nnnoiseless::DenoiseState<'static>>,
+    input: Vec<f32>,
+    output: VecDeque<f32>,
+    frame: Vec<f32>,
+}
+
+impl Denoiser {
+    const FRAME: usize = nnnoiseless::DenoiseState::FRAME_SIZE;
+
+    fn new() -> Self {
+        Self {
+            state: nnnoiseless::DenoiseState::new(),
+            input: Vec::with_capacity(Self::FRAME),
+            output: std::iter::repeat_n(0.0, Self::FRAME).collect(),
+            frame: vec![0.0; Self::FRAME],
+        }
+    }
+
+    fn process(&mut self, stereo: &mut [f32]) {
+        for pair in stereo.chunks_exact_mut(2) {
+            // RNNoise works on 16-bit-sized values.
+            self.input.push((pair[0] + pair[1]) * 0.5 * 32768.0);
+            if self.input.len() == Self::FRAME {
+                self.state.process_frame(&mut self.frame, &self.input);
+                self.output.extend(self.frame.iter().map(|v| v / 32768.0));
+                self.input.clear();
+            }
+            let v = self.output.pop_front().unwrap_or(0.0);
+            pair[0] = v;
+            pair[1] = v;
+        }
+    }
+}
+
 /// What to record, taken from settings when recording starts.
 #[derive(Debug, Clone)]
 struct Plan {
@@ -296,6 +335,7 @@ struct Plan {
     game_exe: String,
     apps: Vec<(String, f32)>,
     mic: Option<(String, f32)>,
+    denoise_mic: bool,
 }
 
 impl Plan {
@@ -307,6 +347,7 @@ impl Plan {
             game_exe: game_exe.to_string(),
             apps: s.apps.iter().filter(|a| a.enabled).map(|a| (a.exe.clone(), volume(a.volume))).collect(),
             mic: s.microphone.then(|| (s.mic_device.clone(), volume(s.mic_volume))),
+            denoise_mic: s.microphone && s.mic_noise_suppression,
         }
     }
 
@@ -376,6 +417,7 @@ impl AudioPipe {
                 let mut fell_back = false;
                 let mut last_scan: Option<Instant> = None;
 
+                let mut denoiser = plan.denoise_mic.then(Denoiser::new);
                 let started = Instant::now();
                 let mut written: u64 = 0;
                 let (mut track1, mut track2) = (Vec::new(), Vec::new());
@@ -435,6 +477,9 @@ impl AudioPipe {
                     }
                     if let Some((src, vol)) = &mic {
                         mix_in(src, frames, *vol, &mut track2);
+                        if let Some(d) = denoiser.as_mut() {
+                            d.process(&mut track2);
+                        }
                     }
                     bytes.clear();
                     for i in 0..frames {
@@ -494,6 +539,31 @@ mod tests {
         let frames = out.len() / 2;
         assert!((47_990..=48_010).contains(&frames), "{frames}");
         assert!(out.iter().skip(4).all(|&v| (v - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn denoiser_keeps_timing_and_quiets_hiss() {
+        let mut d = Denoiser::new();
+        // Two seconds of steady hiss, fed in uneven chunks like the mixer does.
+        let mut seed: u32 = 1;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 0.2 - 0.1
+        };
+        let (mut before, mut after) = (0.0f64, 0.0f64);
+        for (i, len) in [317usize, 960, 1, 4800].iter().cycle().take(60).enumerate() {
+            let mut chunk: Vec<f32> = (0..len * 2).map(|_| noise()).collect();
+            let energy = |c: &[f32]| c.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>();
+            let e_in = energy(&chunk);
+            d.process(&mut chunk);
+            assert_eq!(chunk.len(), len * 2, "same length out as in");
+            assert!(chunk.chunks(2).all(|p| p[0] == p[1]), "both channels the same");
+            if i >= 20 {
+                before += e_in;
+                after += energy(&chunk);
+            }
+        }
+        assert!(after < before * 0.25, "hiss reduced: {after} vs {before}");
     }
 
     #[test]
