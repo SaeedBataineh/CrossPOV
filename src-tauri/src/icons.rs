@@ -36,7 +36,7 @@ pub fn icon_png(exe: &str, path: Option<PathBuf>) -> Option<Vec<u8>> {
     let named_exe = |p: &PathBuf| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(exe));
     let path = match path.filter(named_exe) {
         Some(p) => p,
-        None => crate::procs::shared(|p| p.exe_path(exe))?,
+        None => running_path(exe)?,
     };
     let png = extract(&path)?;
     if let Some(cache) = cache {
@@ -46,6 +46,43 @@ pub fn icon_png(exe: &str, path: Option<PathBuf>) -> Option<Vec<u8>> {
         let _ = std::fs::write(cache, &png);
     }
     Some(png)
+}
+
+/// Where a running program is. Asks Windows for the bare minimum ("limited
+/// information"), which works even for games protected by anti-cheat
+/// (VALORANT's Vanguard), where reading the full process details doesn't.
+fn running_path(exe: &str) -> Option<PathBuf> {
+    if let Some(p) = crate::procs::shared(|p| p.exe_path(exe)) {
+        return Some(p);
+    }
+    #[cfg(windows)]
+    for pid in crate::procs::shared(|p| p.root_pids(exe)) {
+        use windows::core::PWSTR;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+        // SAFETY: plain query on a process handle we open and close here; the
+        // buffer outlives the call and its length is passed in.
+        unsafe {
+            let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { continue };
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+            let _ = CloseHandle(handle);
+            if ok && len > 0 {
+                return Some(PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])));
+            }
+        }
+    }
+    None
+}
+
+/// Keeps a game's icon as soon as it's seen running, so Settings can show
+/// it later. In the background: never slows down game detection.
+pub fn remember(exe: &str) {
+    let exe = exe.to_string();
+    std::thread::spawn(move || {
+        let _ = icon_png(&exe, None);
+    });
 }
 
 #[cfg(not(windows))]

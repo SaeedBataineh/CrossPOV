@@ -92,6 +92,9 @@ struct Inner {
     status: RecorderStatus,
     /// 0 = direct GPU path, 1 = compatibility mode, 2 = CPU encoder.
     fallback: u8,
+    /// Recording just the game's window failed on this PC (or for this game):
+    /// record its screen instead until the game closes.
+    window_failed: bool,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
 }
@@ -170,6 +173,7 @@ impl Recorder {
                 running: None,
                 status: RecorderStatus::new(RecState::Starting),
                 fallback: 0,
+                window_failed: false,
                 halted: false,
             })),
             work_dir,
@@ -275,11 +279,15 @@ impl Recorder {
         let mut inner = self.lock();
         let want = game.is_some() && !inner.halted;
         // Another game, or the game moved to another screen: start afresh.
+        // Just the game's window when known (a new window, e.g. the game
+        // restarting, starts afresh); its screen if window capture failed.
+        let window = game.as_ref().map(|g| g.hwnd).filter(|&h| h != 0 && !inner.window_failed);
         let key = format!(
-            "{}|{}|{}",
+            "{}|{}|{}|{}",
             recording_key(&inner.settings),
             game.as_ref().map_or("", |g| g.exe.as_str()).to_lowercase(),
-            game.as_ref().map_or(0, |g| g.output_idx)
+            game.as_ref().map_or(0, |g| g.output_idx),
+            window.unwrap_or(0)
         );
         inner.status.game = game.clone();
 
@@ -295,13 +303,17 @@ impl Recorder {
             if let Ok(Some(code)) = r.child.try_wait() {
                 let log = fs::read_to_string(self.work_dir.join("ffmpeg.log")).unwrap_or_default();
                 let reason = log.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
-                died_early = Some((r.started.elapsed() < EARLY_EXIT, format!("Recorder stopped ({code}). {reason}")));
+                died_early = Some((r.started.elapsed() < EARLY_EXIT, format!("Recorder stopped ({code}). {reason}"), r.plan.window.is_some()));
                 inner.running = None;
             }
         }
-        if let Some((early, msg)) = died_early {
+        if let Some((early, msg, was_window)) = died_early {
             eprintln!("{msg}");
-            if early {
+            if early && was_window {
+                // Window capture didn't work here: record the screen instead.
+                crate::trail(&format!("recording: window capture failed, recording the screen ({msg})"));
+                inner.window_failed = true;
+            } else if early {
                 inner.fallback += 1; // Try a safer setup next time.
             }
             if inner.fallback > 2 {
@@ -330,7 +342,9 @@ impl Recorder {
                 ffmpeg::bitrate_kbps(&settings) / 1000,
                 settings.codec,
             ));
-            let g = game.clone().unwrap_or_default();
+            let mut g = game.clone().unwrap_or_default();
+            g.hwnd = window.unwrap_or(0);
+            crate::trail(if window.is_some() { "recording: the game's window" } else { "recording: the whole screen" });
             match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
                 Ok(running) => {
                     crate::trail("recording: started");
@@ -355,6 +369,9 @@ impl Recorder {
             inner.status.state = RecState::Waiting;
             inner.status.message = None;
             inner.fallback = 0;
+        }
+        if !want {
+            inner.window_failed = false;
         }
 
         // Surface audio fallbacks (e.g. older Windows) once they're known.
@@ -391,6 +408,7 @@ impl Recorder {
             screen_height: game.screen_height.or_else(primary_screen_height),
             output_idx: game.output_idx,
             hevc: settings.codec == crate::settings::Codec::H265,
+            window: (game.hwnd != 0).then_some(game.hwnd),
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)

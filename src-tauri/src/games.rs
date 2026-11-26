@@ -133,6 +133,9 @@ pub struct Game {
     /// That screen's height in pixels, if known.
     #[serde(skip)]
     pub screen_height: Option<u32>,
+    /// The game's window (HWND), to record just it. 0 = unknown: record the screen.
+    #[serde(skip)]
+    pub hwnd: u64,
     /// The process found fullscreen (kept until it closes).
     #[serde(skip)]
     pid: Option<u32>,
@@ -179,16 +182,16 @@ pub fn detect(s: &Settings) -> Option<Game> {
         // (the window list and graphics-card query aren't free).
         let same = current.as_ref().filter(|g| g.exe == exe);
         let screen = match same {
-            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some((g.output_idx, g.screen_height)),
+            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some((g.output_idx, g.screen_height, g.hwnd)),
             _ => {
                 *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
                 window::screen_of_process(&exe)
             }
         };
-        screen.map(|(output_idx, screen_height)| (exe, name, found, output_idx, screen_height))
+        screen.map(|(output_idx, screen_height, hwnd)| (exe, name, found, output_idx, screen_height, hwnd))
     });
-    let found = if let Some((exe, name, found, output_idx, screen_height)) = listed {
-        Some(Game { exe, name, found, output_idx, screen_height, pid: None })
+    let found = if let Some((exe, name, found, output_idx, screen_height, hwnd)) = listed {
+        Some(Game { exe, name, found, output_idx, screen_height, hwnd, pid: None })
     } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
         // 3, still open: keep it, even while you're tabbed out.
         let alive = g.pid.is_some_and(|pid| procs::shared(|p| p.pid_running(pid)));
@@ -213,6 +216,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
             found: Found::Fullscreen,
             output_idx: front.output_idx,
             screen_height: front.screen_height,
+            hwnd: front.hwnd,
             pid: Some(front.pid),
         })
     });
@@ -220,6 +224,9 @@ pub fn detect(s: &Settings) -> Option<Game> {
     let before = current.as_ref().map(|g| g.exe.to_lowercase());
     let now = found.as_ref().map(|g| g.exe.to_lowercase());
     if before != now {
+        if let Some(g) = &found {
+            crate::icons::remember(&g.exe);
+        }
         crate::trail(&match &found {
             Some(g) => format!("game: {} ({}, {:?}, screen {})", g.name, g.exe, g.found, g.output_idx),
             None => "game: none".to_string(),
@@ -238,6 +245,7 @@ pub fn last_seen() -> Option<Game> {
 #[cfg_attr(not(windows), allow(dead_code))]
 struct Front {
     pid: u32,
+    hwnd: u64,
     output_idx: u32,
     screen_height: Option<u32>,
 }
@@ -315,12 +323,13 @@ mod window {
             let (monitor, screen_height, screen) = monitor_of(hwnd);
             let covers = win.left <= screen.left && win.top <= screen.top && win.right >= screen.right && win.bottom >= screen.bottom;
             // Only a fullscreen window is worth asking the graphics card which screen it is.
-            covers.then(|| Front { pid, output_idx: output_index(monitor), screen_height })
+            covers.then(|| Front { pid, hwnd: hwnd.0 as usize as u64, output_idx: output_index(monitor), screen_height })
         }
     }
 
     /// The screen a listed game's biggest visible window is on.
-    pub(super) fn screen_of_process(exe: &str) -> Option<(u32, Option<u32>)> {
+    /// Also its window, to record just that.
+    pub(super) fn screen_of_process(exe: &str) -> Option<(u32, Option<u32>, u64)> {
         let pids: Vec<u32> = crate::procs::shared(|p| p.root_pids(exe));
         if pids.is_empty() {
             return None;
@@ -354,7 +363,7 @@ mod window {
         let _ = unsafe { EnumWindows(Some(visit), LPARAM(&mut search as *mut Search as isize)) };
         let (_, hwnd) = search.best?;
         let (monitor, height, _) = monitor_of(hwnd);
-        Some((output_index(monitor), height))
+        Some((output_index(monitor), height, hwnd.0 as usize as u64))
     }
 }
 
@@ -364,7 +373,7 @@ mod window {
     pub(super) fn fullscreen_front() -> Option<Front> {
         None
     }
-    pub(super) fn screen_of_process(_exe: &str) -> Option<(u32, Option<u32>)> {
+    pub(super) fn screen_of_process(_exe: &str) -> Option<(u32, Option<u32>, u64)> {
         None
     }
 }

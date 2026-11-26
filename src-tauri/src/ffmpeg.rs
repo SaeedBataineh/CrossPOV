@@ -246,6 +246,9 @@ pub struct RecordPlan {
     pub output_idx: u32,
     /// Record H.265 instead of H.264.
     pub hevc: bool,
+    /// Record just this window (the game's HWND) instead of the whole
+    /// screen, so alt-tabbing doesn't show the desktop or other apps.
+    pub window: Option<u64>,
 }
 
 impl RecordPlan {
@@ -272,10 +275,16 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let fps = s.fps.to_string();
     match plan.source {
         VideoSource::Desktop => {
-            // draw_mouse=0: the in-game crosshair is part of the game image; the
-            // Windows cursor would only show up on menus.
+            // No mouse cursor: the in-game crosshair is part of the game image;
+            // the Windows cursor would only show up on menus.
             push(&mut a, &["-f", "lavfi", "-thread_queue_size", "64", "-i"]);
-            a.push(format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx));
+            match plan.window {
+                // Windows' window capture: only the game, even when other windows
+                // cover it. Frames come only when the game draws one, so `fps`
+                // (below) makes the steady frame rate the encoder expects.
+                Some(hwnd) => a.push(format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0")),
+                None => a.push(format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx)),
+            }
         }
         VideoSource::TestPattern => {
             push(&mut a, &["-re", "-f", "lavfi", "-i"]);
@@ -300,6 +309,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let on_gpu = plan.source == VideoSource::Desktop;
     let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
     let mut vf: Vec<String> = Vec::new();
+    if on_gpu && plan.window.is_some() {
+        vf.push(format!("fps={fps}"));
+    }
     if gpu_path {
         if let Some(h) = height {
             vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
@@ -445,7 +457,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -533,6 +545,17 @@ mod tests {
         assert!(mp4.contains("-tag:v hvc1"), "{mp4}");
         let h264 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, false).join(" ");
         assert!(!h264.contains("hvc1"));
+    }
+
+    #[test]
+    fn records_just_the_game_window_when_known() {
+        let p = RecordPlan { window: Some(132_456), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let a = joined(&Settings::default(), &p);
+        assert!(a.contains("gfxcapture=hwnd=132456:max_framerate=60:capture_cursor=0"), "{a}");
+        assert!(a.contains("[0:v]fps=60"), "steady frame rate: {a}");
+        assert!(!a.contains("ddagrab"));
+        let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
+        assert!(screen.contains("ddagrab") && !screen.contains("fps=60"), "{screen}");
     }
 
     #[test]

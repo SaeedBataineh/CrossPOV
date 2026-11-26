@@ -6,7 +6,8 @@
 #   scripts/build-ffmpeg.sh OUTPUT.exe [WORK_DIR]
 #
 # What CrossPOV asks FFmpeg to do, and what that needs:
-#   record:     lavfi ddagrab (screen, D3D11) + f32le audio on stdin
+#   record:     lavfi gfxcapture (the game's window) or ddagrab (screen),
+#               both D3D11, + f32le audio on stdin
 #               -> scale_d3d11 (resize on the GPU) or hwdownload/format/scale,
 #                  pan/alimiter filters
 #               -> h264_nvenc / h264_amf / h264_mf (CPU fallback via Windows) + aac
@@ -19,6 +20,7 @@
 # Intel GPUs encode through Media Foundation (h264_mf), so there is no QSV.
 set -euo pipefail
 
+HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$(realpath -m "${1:?output path}")
 WORK=$(realpath -m "${2:-$(mktemp -d)}")
 FFMPEG_TAG=n8.1.3
@@ -41,6 +43,9 @@ fi
 PREFIX="$WORK/prefix"
 make -s -C nv-codec-headers PREFIX="$PREFIX" install
 mkdir -p "$PREFIX/include/AMF" && cp -r amf/amf/public/include/* "$PREFIX/include/AMF/"
+# Window capture (gfxcapture) needs two Windows headers that Ubuntu's MinGW
+# (11.x) doesn't have yet; these come from newer mingw-w64.
+cp "$HERE/winrt-headers/"*.h "$PREFIX/include/"
 
 cd ffmpeg
 PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
@@ -55,7 +60,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-w32threads --enable-d3d11va --enable-ffnvcodec --enable-nvenc --enable-amf \
   --enable-mediafoundation --enable-schannel --enable-network \
   --enable-indev=lavfi \
-  --enable-filter=ddagrab,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
+  --enable-filter=ddagrab,gfxcapture,fps,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
   --enable-encoder=h264_nvenc,h264_amf,h264_mf,hevc_nvenc,hevc_amf,hevc_mf,aac,mjpeg,wrapped_avframe,rawvideo,pcm_s16le \
   --enable-decoder=h264,hevc,aac,aac_fixed,mp3float,pcm_f32le,pcm_s16le,mjpeg,png,rawvideo,wrapped_avframe \
   --enable-demuxer=concat,mpegts,mov,matroska,hls,aac,h264,pcm_f32le,flv,image2,mjpeg \
