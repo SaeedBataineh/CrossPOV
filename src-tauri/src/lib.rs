@@ -7,6 +7,7 @@
 
 mod audio;
 mod clips;
+mod edit;
 mod fastvod;
 mod ffmpeg;
 mod games;
@@ -421,6 +422,113 @@ fn delete_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Resu
     clips::delete(&root, &clip)
 }
 
+/// Runs FFmpeg with `args` and waits; the error says what went wrong.
+fn run_ffmpeg(ff: &std::path::Path, args: &[String]) -> Result<(), String> {
+    use crate::ffmpeg::NoWindow;
+    let out = std::process::Command::new(ff).args(args).stdin(std::process::Stdio::null()).no_window().output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("FFmpeg failed").to_string())
+    }
+}
+
+/// The clip, where it lives (and so its kind), and FFmpeg: what every edit needs.
+fn edit_inputs(app: &AppHandle, state: &AppState, path: &str) -> Result<(PathBuf, PathBuf, clips::ClipInfo, PathBuf, ffmpeg::VideoEncoder), String> {
+    let root = clip_folder(app, &state.get());
+    let clip = clips::validate(&root, path)?;
+    let kind = if clip.parent().and_then(|p| p.file_name()).is_some_and(|n| n == clips::STREAMER_CLIPS) { clips::ClipKind::Theirs } else { clips::ClipKind::Mine };
+    let info = clips::info(&root, &clip, kind).ok_or("Clip not found")?;
+    let (ff, enc) = state.recorder.ffmpeg_tools().ok_or("FFmpeg isn't ready yet. Try again in a moment.")?;
+    Ok((root, clip, info, ff, enc))
+}
+
+/// Checks a start/end pair against the clip's length.
+fn check_range(start: f64, end: f64, info: &clips::ClipInfo) -> Result<(), String> {
+    let len = info.duration_sec.unwrap_or(f64::MAX);
+    if !(start.is_finite() && end.is_finite()) || start < 0.0 || end <= start + 0.5 || start >= len {
+        return Err("Pick a start and end at least half a second apart.".into());
+    }
+    Ok(())
+}
+
+/// Saves `start`..`end` of a clip as a new clip next to it. `exact` re-encodes
+/// for a frame-exact cut; otherwise it's instant but starts on a keyframe.
+#[tauri::command]
+async fn trim_clip(app: AppHandle, state: State<'_, AppState>, path: String, start: f64, end: f64, exact: bool) -> Result<clips::ClipInfo, String> {
+    let (root, clip, info, ff, enc) = edit_inputs(&app, &state, &path)?;
+    check_range(start, end, &info)?;
+    let end = end.min(info.duration_sec.unwrap_or(end));
+    tauri::async_runtime::spawn_blocking(move || {
+        let ext = if exact { "mp4" } else { clip.extension().and_then(|e| e.to_str()).unwrap_or("mp4") };
+        let stem = clip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let dir = clip.parent().ok_or("Clip not found")?;
+        let mut out = dir.join(format!("{stem}_cut.{ext}"));
+        let mut n = 2;
+        while out.exists() {
+            out = dir.join(format!("{stem}_cut{n}.{ext}"));
+            n += 1;
+        }
+        run_ffmpeg(&ff, &edit::trim_args(&clip, &out, start, end, exact, enc)).map_err(|e| format!("Couldn't cut the clip: {e}"))?;
+        // Your clips are matched to games and fights by when they were saved:
+        // date the cut as if it had been saved at its own end.
+        if info.kind == clips::ClipKind::Mine {
+            if let (Some(len), Ok(f)) = (info.duration_sec, std::fs::File::options().write(true).open(&out)) {
+                let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(info.created_ms) - std::time::Duration::from_secs_f64((len - end).max(0.0));
+                let _ = f.set_modified(at);
+            }
+        }
+        let thumb = clips::thumb_path(&root, &out);
+        if let Some(d) = thumb.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = run_ffmpeg(&ff, &ffmpeg::thumbnail_args(&out, &thumb));
+        clips::write_meta(
+            &root,
+            &out,
+            &clips::ClipMeta {
+                duration_sec: Some(end - start),
+                streamer: info.streamer.clone(),
+                round: info.round,
+                moment: info.moment.clone(),
+                map: info.map.clone(),
+                match_id: info.match_id.clone(),
+                match_start_sec: info.match_start_sec.map(|s| s + start),
+                vod_url: info.vod_url.clone(),
+                vod_start_sec: info.vod_start_sec.map(|s| s + start),
+                game: info.game.clone(),
+            },
+        );
+        clips::info(&root, &out, info.kind).ok_or_else(|| "The cut clip wasn't saved.".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Makes a copy of `start`..`end` small enough for Discord's free upload
+/// limit and puts the file on the clipboard, ready to paste. Returns its size.
+#[tauri::command]
+async fn copy_for_discord(app: AppHandle, state: State<'_, AppState>, path: String, start: f64, end: f64) -> Result<u64, String> {
+    let (root, clip, info, ff, enc) = edit_inputs(&app, &state, &path)?;
+    check_range(start, end, &info)?;
+    let end = end.min(info.duration_sec.unwrap_or(end));
+    tauri::async_runtime::spawn_blocking(move || {
+        let args_for = |out: &std::path::Path| edit::discord_args(&clip, out, start, end, enc);
+        let dir = root.join("For Discord");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let stem = clip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let out = dir.join(format!("{stem}_discord.mp4"));
+        let args = args_for(&out).ok_or_else(|| format!("That's too long for Discord's 10 MB limit. Trim it to under {} seconds first.", edit::discord_max_seconds()))?;
+        run_ffmpeg(&ff, &args).map_err(|e| format!("Couldn't make the Discord copy: {e}"))?;
+        let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        edit::copy_file_to_clipboard(&out)?;
+        Ok(size)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
@@ -830,6 +938,8 @@ pub fn run() {
             get_settings,
             save_settings,
             known_games,
+            trim_clip,
+            copy_for_discord,
             default_clip_folder,
             open_clip_folder,
             recorder_status,

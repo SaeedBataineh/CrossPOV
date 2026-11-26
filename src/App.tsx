@@ -143,6 +143,7 @@ export default function App() {
                   setViewing(null);
                   recorder.refreshClips();
                 }}
+                onChanged={recorder.refreshClips}
                 notify={recorder.notify}
               />
             ) : (

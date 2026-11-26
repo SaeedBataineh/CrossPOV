@@ -562,3 +562,38 @@ a { color: var(--text); }
 :focus-visible { outline-color: #fff; }
 .toast { border-radius: 6px; border: 1px solid var(--line-2); }
 img.avatar { object-fit: cover; display: block; background: var(--raised); }
+
+/* ---------- CrossPOV's own player ---------- */
+.player-wrap { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.player-wrap:fullscreen { background: #000; padding: 16px 20px; justify-content: center; }
+.player-wrap:fullscreen .video-box { flex: 1; aspect-ratio: auto; border-radius: 0; }
+.player-wrap:fullscreen .side-by-side { flex: 1; align-items: center; }
+.video-box video { cursor: pointer; object-fit: contain; }
+.side-by-side video { cursor: pointer; }
+
+.pc { display: flex; flex-direction: column; gap: 6px; user-select: none; }
+.pc-track { position: relative; height: 22px; cursor: pointer; touch-action: none; outline: none; }
+.pc-track:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 4px; }
+.pc-rail, .pc-played, .pc-keep { position: absolute; top: 9px; height: 4px; border-radius: 2px; }
+.pc-rail { left: 0; right: 0; background: var(--line-3); }
+.pc-played { left: 0; background: #fff; }
+.pc-track:hover .pc-rail, .pc-track:hover .pc-played { top: 8px; height: 6px; }
+.pc-track.cutting .pc-played { background: #ffffff80; }
+.pc-keep { top: 6px; height: 10px; background: #3ddc8433; border: 1px solid var(--good); border-radius: 3px; }
+.pc-head { position: absolute; top: 4px; width: 3px; height: 14px; margin-left: -1px; background: #fff; border-radius: 2px; pointer-events: none; }
+.pc-mark { position: absolute; top: 5px; width: 12px; height: 12px; margin-left: -6px; padding: 0; border: 2px solid var(--bg); border-radius: 3px; background: var(--good); cursor: pointer; z-index: 1; }
+.pc-mark:hover { transform: scale(1.25); }
+.pc-handle { position: absolute; top: 0; width: 10px; height: 22px; margin-left: -5px; padding: 0; border: 0; border-radius: 3px; background: #fff; cursor: ew-resize; z-index: 2; box-shadow: 0 0 0 2px var(--bg); }
+.pc-handle:focus-visible { outline: 2px solid var(--good); }
+
+.pc-bar { display: flex; align-items: center; gap: 4px; }
+.pc-btn { height: 34px; min-width: 34px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.pc-btn:hover { background: var(--raised); }
+.pc-btn.on { background: var(--text); color: var(--on-primary); }
+.pc-time { margin-left: 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pc-time span { color: var(--dim); }
+.pc-speed select { height: 30px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--field); color: var(--text); font-size: 12.5px; }
+.pc-vol { width: 84px; accent-color: #fff; }
+
+.cut-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 14px; border: 1px solid var(--good); border-radius: 6px; background: #3ddc840d; }
+.cut-range { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }

@@ -167,6 +167,18 @@ export async function openClip(path: string): Promise<void> {
   await tauriInvoke<void>("open_clip", { path });
 }
 
+/** Saves `start`..`end` (seconds) as a new clip next to the original. `exact`: frame-exact (re-encodes, a few seconds). */
+export async function trimClip(path: string, start: number, end: number, exact: boolean): Promise<ClipInfo> {
+  if (!isDesktop) throw NEEDS_APP("Cutting clips");
+  return tauriInvoke<ClipInfo>("trim_clip", { path, start, end, exact });
+}
+
+/** Makes a copy that fits Discord's free upload limit and puts it on the clipboard. Returns its size in bytes. */
+export async function copyForDiscord(path: string, start: number, end: number): Promise<number> {
+  if (!isDesktop) throw NEEDS_APP("Copy for Discord");
+  return tauriInvoke<number>("copy_for_discord", { path, start, end });
+}
+
 export async function revealClip(path: string): Promise<void> {
   if (!isDesktop) throw NEEDS_APP("Opening the clip folder");
   await tauriInvoke<void>("reveal_clip", { path });

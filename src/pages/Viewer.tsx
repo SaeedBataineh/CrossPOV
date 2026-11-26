@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
 import { Avatar, cardMeta, cardTitle } from "../components/ui";
-import { clipVideoSrc, deleteClip, findMe, isDesktop, openClip, revealClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
+import { clipVideoSrc, copyForDiscord, deleteClip, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
 import { result, resultColor } from "../lib/matchInfo";
 import { findPairs, fightMarks, matchOf, pairsWith, vodLink } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
-import { formatDuration } from "../lib/useRecorder";
+import { formatSize } from "../lib/useRecorder";
 
 type View = "mine" | "theirs" | "both";
 
@@ -36,32 +37,11 @@ function NoVideo({ clip, onOutside }: { clip: ClipInfo; onOutside: () => void })
   );
 }
 
-/** Thin bar under a video with a mark at each fight; click a mark to jump there. */
-function Marks({ marks, duration, onSeek }: { marks: number[]; duration: number; onSeek: (t: number) => void }) {
-  if (!marks.length || !duration) return null;
-  return (
-    <div className="fight-marks">
-      <div className="fight-track" aria-hidden="true" />
-      {marks.map((t, i) => (
-        <button
-          key={i}
-          type="button"
-          className="fight-mark"
-          style={{ left: `${Math.min(100, (t / duration) * 100)}%` }}
-          onClick={() => onSeek(Math.max(0, t - 3))}
-          aria-label={`Jump to the fight at ${formatDuration(t)}`}
-          title={`Fight at ${formatDuration(t)}`}
-        />
-      ))}
-      <span className="muted small">{marks.length === 1 ? "The fight" : "Fights"}: {marks.map((t) => formatDuration(t)).join(", ")} · click a mark to jump</span>
-    </div>
-  );
-}
-
 /** Both clips playing together: yours drives, theirs follows at the right moment. */
 function SideBySide({ mine, theirs, mineSrc, theirSrc, offsetSec }: { mine: ClipInfo; theirs: ClipInfo; mineSrc: string; theirSrc: string; offsetSec: number }) {
   const a = useRef<HTMLVideoElement>(null);
   const b = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const [nudge, setNudge] = useState(0);
   const [theirSound, setTheirSound] = useState(false);
   const lag = offsetSec + nudge;
@@ -95,9 +75,10 @@ function SideBySide({ mine, theirs, mineSrc, theirSrc, offsetSec }: { mine: Clip
 
   return (
     <div className="stack" style={{ gap: 10 }}>
+      <div className="player-wrap" ref={box}>
       <div className="side-by-side">
         <figure>
-          <video ref={a} src={mineSrc} controls playsInline><track kind="captions" /></video>
+          <video ref={a} src={mineSrc} playsInline onClick={() => (a.current?.paused ? void a.current.play() : a.current?.pause())}><track kind="captions" /></video>
           <figcaption><span className="tag you">YOU</span>{cardTitle(mine)}</figcaption>
         </figure>
         <figure>
@@ -105,8 +86,10 @@ function SideBySide({ mine, theirs, mineSrc, theirSrc, offsetSec }: { mine: Clip
           <figcaption><span className="tag them">THEM</span>{theirs.streamer ?? "Streamer"}</figcaption>
         </figure>
       </div>
+      <PlayerControls video={a} box={box} fallbackDuration={mine.durationSec ?? 0} marks={[]} trim={null} />
+      </div>
       <div className="row-wrap" style={{ gap: 8 }}>
-        <span className="muted small">Your clip controls both. If they're slightly out of step:</span>
+        <span className="muted small">These controls play both. If they're slightly out of step:</span>
         <button type="button" className="btn quiet sm-btn" onClick={() => setNudge((n) => n - 0.5)}>Theirs earlier</button>
         <button type="button" className="btn quiet sm-btn" onClick={() => setNudge((n) => n + 0.5)}>Theirs later</button>
         {nudge !== 0 && <button type="button" className="linkish muted small" onClick={() => setNudge(0)}>Reset ({nudge > 0 ? "+" : ""}{nudge} s)</button>}
@@ -130,6 +113,7 @@ export default function Viewer({
   onBack,
   onOpen,
   onDeleted,
+  onChanged,
   notify,
 }: {
   clip: ClipInfo;
@@ -140,6 +124,8 @@ export default function Viewer({
   onBack: () => void;
   onOpen: (c: ClipInfo) => void;
   onDeleted: () => void;
+  /** A new clip was saved (a cut): refresh the list. */
+  onChanged: () => void;
   notify: (text: string, tone: "good" | "bad" | "info") => void;
 }) {
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
@@ -154,6 +140,11 @@ export default function Viewer({
   const theirSrc = useVideoSrc(theirs);
   const src = view === "mine" ? mineSrc : theirSrc;
   const video = useRef<HTMLVideoElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  /** The part to keep while cutting; null when not cutting. */
+  const [trim, setTrim] = useState<Range | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => setTrim(null), [clip, view]);
 
   const match = matchOf(clip, matches) ?? (pair ? matchOf(pair.mine, matches) : undefined);
   const me = match ? findMe(match, settings.riotId) : undefined;
@@ -166,7 +157,8 @@ export default function Viewer({
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !(e.target instanceof HTMLInputElement)) onBack();
+      // The player handles Escape first while cutting (it ends cutting).
+      if (e.key === "Escape" && !e.defaultPrevented && !(e.target instanceof HTMLInputElement)) onBack();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
@@ -180,6 +172,37 @@ export default function Viewer({
       onDeleted();
     } catch (err) {
       notify(`Couldn't delete: ${String(err)}`, "bad");
+    }
+  }
+
+  /** The clip on screen, and the part a cut or Discord copy uses. */
+  const target = shownClip ?? clip;
+  const part = trim ?? { start: 0, end: target.durationSec ?? 0 };
+
+  async function saveCut(exact: boolean) {
+    if (!trim) return;
+    setBusy(exact ? "Saving an exact cut…" : "Saving…");
+    try {
+      const saved = await trimClip(target.path, trim.start, trim.end, exact);
+      notify(`Saved the cut (${formatSize(saved.sizeBytes)}). The original is kept.`, "good");
+      onChanged();
+      onOpen(saved);
+    } catch (err) {
+      notify(String(err), "bad");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function discord() {
+    setBusy("Making a Discord copy…");
+    try {
+      const bytes = await copyForDiscord(target.path, part.start, part.end);
+      notify(`Copied (${formatSize(bytes)}). Paste it into Discord with Ctrl+V.`, "good");
+    } catch (err) {
+      notify(String(err), "bad");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -223,14 +246,51 @@ export default function Viewer({
               {src === undefined ? (
                 <div className="video-box" />
               ) : src ? (
-                <div className="video-box">
-                  <span className={shownClip.kind === "theirs" ? "tag them" : "tag you"}>{shownClip.kind === "theirs" ? `THEIR VIEW · ${shownClip.streamer ?? ""}` : "YOUR VIEW"}</span>
-                  <video ref={video} key={shownClip.path} src={src} controls autoPlay playsInline><track kind="captions" /></video>
-                </div>
+                <>
+                <div className="player-wrap" ref={box}>
+                  <div className="video-box">
+                    <span className={shownClip.kind === "theirs" ? "tag them" : "tag you"}>{shownClip.kind === "theirs" ? `THEIR VIEW · ${shownClip.streamer ?? ""}` : "YOUR VIEW"}</span>
+                    <video
+                      ref={video}
+                      key={shownClip.path}
+                      src={src}
+                      autoPlay
+                      playsInline
+                      onClick={() => (video.current?.paused ? void video.current.play() : video.current?.pause())}
+                    >
+                      <track kind="captions" />
+                    </video>
+                  </div>
+                  <PlayerControls
+                    key={shownClip.path}
+                    video={video}
+                    box={box}
+                    fallbackDuration={shownClip.durationSec ?? 0}
+                    marks={marks}
+                    trim={trim}
+                    onTrim={setTrim}
+                    canTrim={isDesktop}
+                  />
+                  </div>
+                  {trim && (
+                    <div className="cut-panel" role="group" aria-label="Cut">
+                      <div className="cut-range">
+                        <b>Keep {fine(trim.start)} → {fine(trim.end)}</b>
+                        <span className="muted">{(trim.end - trim.start).toFixed(1)} s · drag the white handles, or press I / O at the play position</span>
+                      </div>
+                      <div className="row-wrap" style={{ gap: 8 }}>
+                        <button type="button" className="btn primary sm-btn" disabled={Boolean(busy)} onClick={() => void saveCut(true)} title="Re-encodes on your graphics card: frame-exact, a few seconds">Save cut</button>
+                        <button type="button" className="btn quiet sm-btn" disabled={Boolean(busy)} onClick={() => void saveCut(false)} title="Instant, no quality loss; starts on the nearest keyframe (up to ~1 s early)">Quick save</button>
+                        <button type="button" className="btn quiet sm-btn" disabled={Boolean(busy)} onClick={() => void discord()}>Copy for Discord</button>
+                        <button type="button" className="linkish muted small" onClick={() => setTrim(null)}>Cancel (Esc)</button>
+                        {busy && <span className="muted small" role="status">{busy}</span>}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <NoVideo clip={shownClip} onOutside={run(() => openClip(shownClip.path))} />
               )}
-              <Marks marks={marks} duration={shownClip.durationSec ?? 0} onSeek={(t) => { if (video.current) video.current.currentTime = t; }} />
             </>
           ) : null}
         </div>
@@ -269,6 +329,11 @@ export default function Viewer({
           )}
 
           <span className="spacer" />
+          {isDesktop && !trim && view !== "both" && (
+            <button type="button" className="btn primary full" disabled={Boolean(busy)} onClick={() => void discord()} title="Makes a copy that fits Discord's free 10 MB limit and copies it, ready to paste">
+              {busy ?? "Copy for Discord"}
+            </button>
+          )}
           <div className="row" style={{ gap: 8 }}>
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => revealClip(clip.path))}>Show in folder</button>}
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => openClip((shownClip ?? clip).path))}>Open in player</button>}

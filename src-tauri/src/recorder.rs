@@ -391,6 +391,11 @@ impl Recorder {
         Ok(Running { child, audio, plan, started: Instant::now(), key, game: game.name.clone() })
     }
 
+    /// FFmpeg and the encoder it found, once known (used to cut clips too).
+    pub fn ffmpeg_tools(&self) -> Option<(PathBuf, VideoEncoder)> {
+        self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     /// Saves the last `buffer_seconds` as a clip. Waits for the segment being
     /// written right now to finish, so the clip includes the moment the
     /// hotkey was pressed.
