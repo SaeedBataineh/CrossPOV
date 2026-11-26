@@ -38,6 +38,8 @@ export interface Settings {
   fps: number;
   resolution: Resolution;
   quality: Quality;
+  /** Mbit/s; 0 = automatic (from quality, resolution and frame rate). */
+  bitrateMbps: number;
   encoder: Encoder;
   format: Container;
   codec: "h264" | "h265";
@@ -91,6 +93,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fps: 60,
   resolution: "1080p",
   quality: "high",
+  bitrateMbps: 0,
   encoder: "auto",
   format: "mp4",
   codec: "h264",
@@ -133,7 +136,8 @@ const BASE_MBPS: Record<Quality, number> = { low: 8, medium: 15, high: 25, max: 
 const RES_FACTOR: Record<Resolution, number> = { native: 1.3, "1440p": 1.5, "1080p": 1, "720p": 0.6 };
 
 /** Rough bitrate the recorder will target; also used for the size estimate in Settings. */
-export function targetMbps(s: Pick<Settings, "quality" | "resolution" | "fps">): number {
+export function targetMbps(s: Pick<Settings, "quality" | "resolution" | "fps" | "bitrateMbps">): number {
+  if (s.bitrateMbps > 0) return s.bitrateMbps;
   const fpsFactor = Math.max(0.6, Math.sqrt(s.fps / 60));
   return BASE_MBPS[s.quality] * RES_FACTOR[s.resolution] * fpsFactor;
 }

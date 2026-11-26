@@ -60,6 +60,56 @@ const SECTIONS: { id: Section; label: string }[] = [
 ];
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
+const BITRATES = [10, 15, 20, 30, 40, 50, 75, 100, 150];
+
+/** Bitrate in Mbps: Auto, a common value, or any number you type. */
+function BitratePicker({ value, auto, onChange }: { value: number; auto: number; onChange: (v: number) => void }) {
+  const [custom, setCustom] = useState(value > 0 && !BITRATES.includes(value));
+  const [text, setText] = useState(value > 0 ? String(value) : "");
+  const commit = () => {
+    const n = Math.round(Number(text));
+    if (Number.isFinite(n) && n > 0) onChange(Math.min(300, Math.max(2, n)));
+  };
+  return (
+    <span className="row" style={{ gap: 8 }}>
+      <select
+        className="input"
+        style={{ width: 150 }}
+        aria-label="Bitrate"
+        value={custom ? "custom" : String(value)}
+        onChange={(e) => {
+          if (e.target.value === "custom") {
+            setCustom(true);
+            setText(String(value || Math.round(auto)));
+            return;
+          }
+          setCustom(false);
+          onChange(Number(e.target.value));
+        }}
+      >
+        <option value="0">Auto ({Math.round(auto)} Mbps)</option>
+        {BITRATES.map((b) => <option key={b} value={b}>{b} Mbps</option>)}
+        <option value="custom">Custom…</option>
+      </select>
+      {custom && (
+        <input
+          className="input"
+          style={{ width: 90 }}
+          type="number"
+          min={2}
+          max={300}
+          aria-label="Custom bitrate in Mbps"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+        />
+      )}
+      {custom && <span className="muted">Mbps</span>}
+    </span>
+  );
+}
+
 /** Whether CrossPOV's own player can play H.265 on this PC (needs the
  * graphics card's decoder, and on some PCs Windows' HEVC extension). */
 const h265Plays = (() => {
@@ -172,8 +222,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Resolution" help="native = your monitor">
             <Seg label="Resolution" value={draft.resolution} onChange={(v) => set("resolution", v)} options={[{ value: "native", label: "Native" }, { value: "1440p", label: "1440p" }, { value: "1080p", label: "1080p" }, { value: "720p", label: "720p" }]} />
           </Row>
-          <Row label="Quality" help="higher = sharper, bigger files">
-            <Seg label="Quality" value={draft.quality} onChange={(v) => set("quality", v)} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Med" }, { value: "high", label: "High" }, { value: "max", label: "Max" }]} />
+          <Row label="Bitrate" help="higher = sharper, bigger files">
+            <BitratePicker value={draft.bitrateMbps} auto={targetMbps({ ...draft, bitrateMbps: 0 })} onChange={(v) => set("bitrateMbps", v)} />
           </Row>
           <Row label="Encoder" help="GPU keeps your FPS up">
             <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "Intel" }, { value: "cpu", label: "CPU" }]} />

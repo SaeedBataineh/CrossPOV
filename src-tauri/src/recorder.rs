@@ -62,7 +62,7 @@ impl RecorderStatus {
 /// Settings that require restarting FFmpeg when they change.
 fn recording_key(s: &Settings) -> String {
     serde_json::json!([
-        s.fps, s.resolution, s.quality, s.encoder, s.codec, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
+        s.fps, s.resolution, s.quality, s.bitrate_mbps, s.encoder, s.codec, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
         s.apps, s.microphone, s.mic_device, s.mic_volume, s.separate_tracks
     ])
     .to_string()

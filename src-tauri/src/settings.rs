@@ -118,6 +118,9 @@ pub struct Settings {
     pub fps: u32,
     pub resolution: Resolution,
     pub quality: Quality,
+    /// Video bitrate in Mbit/s, as picked in Settings. 0 = automatic (from
+    /// `quality`, resolution and frame rate, as before this setting existed).
+    pub bitrate_mbps: u32,
     pub encoder: Encoder,
     pub format: Container,
     pub codec: Codec,
@@ -176,6 +179,7 @@ impl Default for Settings {
             fps: 60,
             resolution: Resolution::P1080,
             quality: Quality::High,
+            bitrate_mbps: 0,
             encoder: Encoder::Auto,
             format: Container::Mp4,
             codec: Codec::H264,
@@ -232,6 +236,9 @@ impl Settings {
             self.server_url = DEFAULT_SERVER_URL.into();
         }
         self.fps = self.fps.clamp(24, 240);
+        if self.bitrate_mbps != 0 {
+            self.bitrate_mbps = self.bitrate_mbps.clamp(2, 300);
+        }
         self.buffer_seconds = self.buffer_seconds.clamp(5, 300);
         self.seconds_before = self.seconds_before.min(MAX_PADDING);
         self.seconds_after = self.seconds_after.min(MAX_PADDING);

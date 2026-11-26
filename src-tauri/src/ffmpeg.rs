@@ -191,6 +191,9 @@ pub fn resolve_encoder(choice: Encoder, detected: VideoEncoder) -> VideoEncoder 
 
 /// Video bitrate in kbit/s. Mirrors `targetMbps` in src/lib/settings.ts.
 pub fn bitrate_kbps(s: &Settings) -> u32 {
+    if s.bitrate_mbps > 0 {
+        return s.bitrate_mbps * 1000;
+    }
     let base = match s.quality {
         Quality::Low => 8.0,
         Quality::Medium => 15.0,
@@ -526,6 +529,14 @@ mod tests {
         assert!(mp4.contains("-tag:v hvc1"), "{mp4}");
         let h264 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, false).join(" ");
         assert!(!h264.contains("hvc1"));
+    }
+
+    #[test]
+    fn a_picked_bitrate_is_used_as_is() {
+        let s = Settings { bitrate_mbps: 50, fps: 120, resolution: Resolution::P1440, ..Settings::default() };
+        assert_eq!(bitrate_kbps(&s), 50_000);
+        assert!(joined(&s, &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false)).contains("-b:v 50000k"));
+        assert_eq!(bitrate_kbps(&Settings::default()), 25_000, "Auto as before");
     }
 
     #[test]
