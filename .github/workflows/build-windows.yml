@@ -46,7 +46,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends mingw-w64 g++-mingw-w64-x86-64 nasm pkg-config git make ca-certificates
+          apt-get install -y -qq --no-install-recommends gcc libc6-dev mingw-w64 g++-mingw-w64-x86-64 nasm pkg-config git make ca-certificates
           x86_64-w64-mingw32-gcc --version | head -1
           scripts/build-ffmpeg.sh ffmpeg-out/ffmpeg.exe "$RUNNER_TEMP/ffbuild"
       - uses: actions/upload-artifact@v4
