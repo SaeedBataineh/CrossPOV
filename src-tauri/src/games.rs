@@ -136,6 +136,13 @@ pub struct Game {
     /// The game's window (HWND), to record just it. 0 = unknown: record the screen.
     #[serde(skip)]
     pub hwnd: u64,
+    /// Size of the game's picture (its window's inside), in pixels.
+    #[serde(skip)]
+    pub window_size: Option<(u32, u32)>,
+    /// Size of its screen as Windows runs it (a "true stretch" resolution
+    /// shows up here as e.g. 1568x1080), in pixels.
+    #[serde(skip)]
+    pub screen_size: Option<(u32, u32)>,
     /// The process found fullscreen (kept until it closes).
     #[serde(skip)]
     pid: Option<u32>,
@@ -182,16 +189,48 @@ pub fn detect(s: &Settings) -> Option<Game> {
         // (the window list and graphics-card query aren't free).
         let same = current.as_ref().filter(|g| g.exe == exe);
         let screen = match same {
-            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some((g.output_idx, g.screen_height, g.hwnd)),
+            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some(Spot {
+                output_idx: g.output_idx,
+                screen_height: g.screen_height,
+                screen_size: g.screen_size,
+                hwnd: g.hwnd,
+                window_size: g.window_size,
+            }),
             _ => {
                 *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-                window::screen_of_process(&exe)
+                let previous = same.filter(|g| g.hwnd != 0).map(|g| Spot {
+                    output_idx: g.output_idx,
+                    screen_height: g.screen_height,
+                    screen_size: g.screen_size,
+                    hwnd: g.hwnd,
+                    window_size: g.window_size,
+                });
+                match (window::screen_of_process(&exe), previous) {
+                    // Minimised (alt-tab out of exclusive fullscreen) the window
+                    // reports no size: keep the one it had.
+                    (Some(now), Some(before)) if now.hwnd == before.hwnd && now.window_size.is_none() => Some(Spot { window_size: before.window_size, ..now }),
+                    (Some(now), _) => Some(now),
+                    // No visible window big enough, but its window still exists
+                    // (minimised): still the game, keep recording.
+                    (None, Some(before)) if window::still_open(before.hwnd) => Some(before),
+                    (None, _) => None,
+                }
             }
         };
-        screen.map(|(output_idx, screen_height, hwnd)| (exe, name, found, output_idx, screen_height, hwnd))
+        screen.map(|spot| (exe, name, found, spot))
     });
-    let found = if let Some((exe, name, found, output_idx, screen_height, hwnd)) = listed {
-        Some(Game { exe, name, found, output_idx, screen_height, hwnd, pid: None })
+    let found = if let Some((exe, name, found, spot)) = listed {
+        Some(Game {
+            exe,
+            name,
+            found,
+            output_idx: spot.output_idx,
+            screen_height: spot.screen_height,
+            hwnd: spot.hwnd,
+            window_size: spot.window_size,
+            screen_size: spot.screen_size,
+            pid: None,
+        })
     } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
         // 3, still open: keep it, even while you're tabbed out.
         let alive = g.pid.is_some_and(|pid| procs::shared(|p| p.pid_running(pid)));
@@ -214,9 +253,11 @@ pub fn detect(s: &Settings) -> Option<Game> {
             name: display_name(&exe),
             exe,
             found: Found::Fullscreen,
-            output_idx: front.output_idx,
-            screen_height: front.screen_height,
-            hwnd: front.hwnd,
+            output_idx: front.spot.output_idx,
+            screen_height: front.spot.screen_height,
+            hwnd: front.spot.hwnd,
+            window_size: front.spot.window_size,
+            screen_size: front.spot.screen_size,
             pid: Some(front.pid),
         })
     });
@@ -241,25 +282,34 @@ pub fn last_seen() -> Option<Game> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+/// Where a game is: its screen and window.
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Spot {
+    output_idx: u32,
+    screen_height: Option<u32>,
+    screen_size: Option<(u32, u32)>,
+    hwnd: u64,
+    window_size: Option<(u32, u32)>,
+}
+
 /// The front window when it fills its whole screen.
 #[cfg_attr(not(windows), allow(dead_code))]
 struct Front {
     pid: u32,
-    hwnd: u64,
-    output_idx: u32,
-    screen_height: Option<u32>,
+    spot: Spot,
 }
 
 #[cfg(windows)]
 mod window {
-    use super::Front;
+    use super::{Front, Spot};
     use windows::Win32::{
         Foundation::{HWND, RECT},
         Graphics::{
             Dxgi::{CreateDXGIFactory1, IDXGIFactory1},
             Gdi::{GetMonitorInfoW, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST},
         },
-        UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible},
+        UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindow, IsWindowVisible},
     };
     use windows::core::BOOL;
     use windows::Win32::Foundation::LPARAM;
@@ -295,6 +345,20 @@ mod window {
         }
     }
 
+    fn spot_of(hwnd: HWND, monitor: HMONITOR, screen_height: Option<u32>, screen: RECT) -> Spot {
+        let size = |r: RECT| (r.right > r.left && r.bottom > r.top).then(|| ((r.right - r.left) as u32, (r.bottom - r.top) as u32));
+        let mut client = RECT::default();
+        // SAFETY: plain query on a window Windows handed us; `client` is a valid local.
+        let window_size = unsafe { GetClientRect(hwnd, &mut client) }.ok().and_then(|_| size(client));
+        Spot { output_idx: output_index(monitor), screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size }
+    }
+
+    /// Whether a window still exists (it may be minimised).
+    pub(super) fn still_open(hwnd: u64) -> bool {
+        // SAFETY: IsWindow only checks the handle; any value is safe to pass.
+        unsafe { IsWindow(Some(HWND(hwnd as usize as *mut core::ffi::c_void))) }.as_bool()
+    }
+
     fn class_of(hwnd: HWND) -> String {
         let mut buf = [0u16; 64];
         // SAFETY: the buffer is valid for its length.
@@ -323,13 +387,13 @@ mod window {
             let (monitor, screen_height, screen) = monitor_of(hwnd);
             let covers = win.left <= screen.left && win.top <= screen.top && win.right >= screen.right && win.bottom >= screen.bottom;
             // Only a fullscreen window is worth asking the graphics card which screen it is.
-            covers.then(|| Front { pid, hwnd: hwnd.0 as usize as u64, output_idx: output_index(monitor), screen_height })
+            covers.then(|| Front { pid, spot: spot_of(hwnd, monitor, screen_height, screen) })
         }
     }
 
     /// The screen a listed game's biggest visible window is on.
     /// Also its window, to record just that.
-    pub(super) fn screen_of_process(exe: &str) -> Option<(u32, Option<u32>, u64)> {
+    pub(super) fn screen_of_process(exe: &str) -> Option<Spot> {
         let pids: Vec<u32> = crate::procs::shared(|p| p.root_pids(exe));
         if pids.is_empty() {
             return None;
@@ -362,18 +426,21 @@ mod window {
         // SAFETY: the callback only touches `search`, which outlives the call.
         let _ = unsafe { EnumWindows(Some(visit), LPARAM(&mut search as *mut Search as isize)) };
         let (_, hwnd) = search.best?;
-        let (monitor, height, _) = monitor_of(hwnd);
-        Some((output_index(monitor), height, hwnd.0 as usize as u64))
+        let (monitor, height, screen) = monitor_of(hwnd);
+        Some(spot_of(hwnd, monitor, height, screen))
     }
 }
 
 #[cfg(not(windows))]
 mod window {
-    use super::Front;
+    use super::{Front, Spot};
     pub(super) fn fullscreen_front() -> Option<Front> {
         None
     }
-    pub(super) fn screen_of_process(_exe: &str) -> Option<(u32, Option<u32>, u64)> {
+    pub(super) fn still_open(_hwnd: u64) -> bool {
+        false
+    }
+    pub(super) fn screen_of_process(_exe: &str) -> Option<Spot> {
         None
     }
 }

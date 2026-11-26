@@ -283,11 +283,13 @@ impl Recorder {
         // restarting, starts afresh); its screen if window capture failed.
         let window = game.as_ref().map(|g| g.hwnd).filter(|&h| h != 0 && !inner.window_failed);
         let key = format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{:?}",
             recording_key(&inner.settings),
             game.as_ref().map_or("", |g| g.exe.as_str()).to_lowercase(),
             game.as_ref().map_or(0, |g| g.output_idx),
-            window.unwrap_or(0)
+            window.unwrap_or(0),
+            // A new game resolution (or stretched one) starts afresh at the right size.
+            game.as_ref().and_then(|g| if window.is_some() { g.window_size } else { g.screen_size })
         );
         inner.status.game = game.clone();
 
@@ -344,7 +346,13 @@ impl Recorder {
             ));
             let mut g = game.clone().unwrap_or_default();
             g.hwnd = window.unwrap_or(0);
-            crate::trail(if window.is_some() { "recording: the game's window" } else { "recording: the whole screen" });
+            let size = if window.is_some() { g.window_size } else { g.screen_size };
+            crate::trail(&format!(
+                "recording: {} {}{}",
+                if window.is_some() { "the game's window" } else { "the whole screen" },
+                size.map(|(w, h)| format!("{w}x{h}")).unwrap_or_else(|| "(size unknown)".into()),
+                ffmpeg::stretched_size(size, settings.resolution).map(|(w, h)| format!(", stretched to {w}x{h}")).unwrap_or_default()
+            ));
             match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
                 Ok(running) => {
                     crate::trail("recording: started");
@@ -409,6 +417,7 @@ impl Recorder {
             output_idx: game.output_idx,
             hevc: settings.codec == crate::settings::Codec::H265,
             window: (game.hwnd != 0).then_some(game.hwnd),
+            source_size: if game.hwnd != 0 { game.window_size } else { game.screen_size },
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)

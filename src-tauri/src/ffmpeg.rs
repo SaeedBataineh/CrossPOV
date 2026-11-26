@@ -210,6 +210,21 @@ pub fn bitrate_kbps(s: &Settings) -> u32 {
     (base * res * fps * 1000.0).round() as u32
 }
 
+/// A "stretched resolution" (e.g. 1568x1080 or 1280x960 shown stretched across
+/// a 16:9 monitor) is narrower than 16:9. Such a picture is recorded the way
+/// the player sees it: stretched to 16:9, at the chosen height (or its own
+/// height for Native). None: record as is (16:9 or wider, or size unknown).
+pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32, u32)> {
+    let (w, h) = source?;
+    // Clearly narrower than 16:9 (a 16:10 monitor isn't stretched).
+    if w == 0 || h == 0 || u64::from(w) * 10 >= u64::from(h) * 16 {
+        return None;
+    }
+    let out_h = target_height(r).unwrap_or(h) & !1;
+    let out_w = ((u64::from(out_h) * 16 / 9) as u32 + 1) & !1;
+    Some((out_w, out_h))
+}
+
 fn target_height(r: Resolution) -> Option<u32> {
     match r {
         Resolution::Native => None,
@@ -249,6 +264,9 @@ pub struct RecordPlan {
     /// Record just this window (the game's HWND) instead of the whole
     /// screen, so alt-tabbing doesn't show the desktop or other apps.
     pub window: Option<u64>,
+    /// Size of the picture being captured (the game window, or the screen as
+    /// Windows runs it), if known.
+    pub source_size: Option<(u32, u32)>,
 }
 
 impl RecordPlan {
@@ -305,6 +323,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     // encoder without touching the CPU, resized on the GPU if needed. The CPU
     // path (copy out, convert, resize) is for Media Foundation, the test
     // pattern, and compatibility mode when a driver refuses the GPU path.
+    let stretch = stretched_size(plan.source_size, s.resolution).filter(|_| plan.source == VideoSource::Desktop);
     let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h));
     let on_gpu = plan.source == VideoSource::Desktop;
     let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
@@ -313,7 +332,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         vf.push(format!("fps={fps}"));
     }
     if gpu_path {
-        if let Some(h) = height {
+        if let Some((w, h)) = stretch {
+            vf.push(format!("scale_d3d11=width={w}:height={h}:format=nv12"));
+        } else if let Some(h) = height {
             vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
         }
     } else {
@@ -321,7 +342,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             vf.push("hwdownload".into());
             vf.push("format=bgra".into());
         }
-        if let Some(h) = height {
+        if let Some((w, h)) = stretch {
+            vf.push(format!("scale={w}:{h}:flags=bicubic"));
+        } else if let Some(h) = height {
             vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
         }
         vf.push("format=nv12".into());
@@ -457,7 +480,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None, source_size: None }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -556,6 +579,24 @@ mod tests {
         assert!(!a.contains("ddagrab"));
         let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(screen.contains("ddagrab") && !screen.contains("fps=60"), "{screen}");
+    }
+
+    #[test]
+    fn stretched_resolutions_are_recorded_stretched() {
+        // "True stretch": 1568x1080 shown across a 16:9 monitor.
+        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1440), Some((2560, 1440)));
+        assert_eq!(stretched_size(Some((1280, 960)), Resolution::P1080), Some((1920, 1080)));
+        assert_eq!(stretched_size(Some((1280, 960)), Resolution::Native), Some((1706, 960)));
+        // 16:9, 16:10 and ultrawide stay as they are.
+        assert_eq!(stretched_size(Some((2560, 1440)), Resolution::P1440), None);
+        assert_eq!(stretched_size(Some((1920, 1200)), Resolution::P1080), None);
+        assert_eq!(stretched_size(Some((3440, 1440)), Resolution::P1440), None);
+        assert_eq!(stretched_size(None, Resolution::P1440), None);
+
+        let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
+        let a = joined(&s, &p);
+        assert!(a.contains("scale_d3d11=width=2560:height=1440:format=nv12"), "{a}");
     }
 
     #[test]
