@@ -31,7 +31,7 @@ use windows::{
         Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT,
         System::{
             Com::{
-                CoCreateInstance, CoInitializeEx, IAgileObject, IAgileObject_Impl, StructuredStorage::{PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0},
+                CoCreateInstance, CoInitializeEx, CoTaskMemAlloc, StructuredStorage::{PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0},
                 BLOB, CLSCTX_ALL, COINIT_MULTITHREADED,
             },
             Threading::{CreateEventW, WaitForSingleObject},
@@ -42,41 +42,35 @@ use windows::{
 
 use crate::ffmpeg::AUDIO_RATE;
 
-/// Called by Windows when activation finishes; forwards the result to the
-/// waiting thread. Must be agile (callable from any thread).
-#[implement(IActivateAudioInterfaceCompletionHandler, IAgileObject)]
+/// Called by Windows when activation finishes: only signals the waiting
+/// thread, which then reads the result itself (the pattern the wasapi crate
+/// uses). Objects from `#[implement]` are agile already.
+#[implement(IActivateAudioInterfaceCompletionHandler)]
 struct Activated {
-    done: mpsc::SyncSender<WinResult<IAudioClient>>,
+    done: mpsc::SyncSender<()>,
 }
 
 impl IActivateAudioInterfaceCompletionHandler_Impl for Activated_Impl {
-    fn ActivateCompleted(&self, op: Ref<IActivateAudioInterfaceAsyncOperation>) -> WinResult<()> {
-        let result = (|| -> WinResult<IAudioClient> {
-            let op = op.ok()?;
-            let mut hr = HRESULT(0);
-            let mut unknown = None;
-            unsafe { op.GetActivateResult(&mut hr, &mut unknown)? };
-            hr.ok()?;
-            unknown.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE))?.cast()
-        })();
-        let _ = self.done.send(result);
+    fn ActivateCompleted(&self, _op: Ref<IActivateAudioInterfaceAsyncOperation>) -> WinResult<()> {
+        let _ = self.done.try_send(());
         Ok(())
     }
 }
 
-// IAgileObject has no methods; implementing it marks the handler as free-threaded.
-impl IAgileObject_Impl for Activated_Impl {}
-
-/// Everything Windows reads during an activation: kept together on the heap,
-/// because Windows may still use it after we stop waiting (see below).
-struct Activation {
-    params: AUDIOCLIENT_ACTIVATION_PARAMS,
-    prop: PROPVARIANT,
-}
-
 fn activate_process_loopback(pid: u32) -> WinResult<IAudioClient> {
-    let mut act = Box::new(Activation {
-        params: AUDIOCLIENT_ACTIVATION_PARAMS {
+    let step = |s: &str| crate::trail(&format!("app audio {pid}: {s}"));
+    // Everything Windows reads lives in memory from Windows' own allocator and
+    // is never freed here: if Windows frees (or keeps using) it, nothing breaks.
+    // That's two small blocks per capture start.
+    // SAFETY: CoTaskMemAlloc returns writable memory of the requested size (or null).
+    let params = unsafe { CoTaskMemAlloc(size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>()) } as *mut AUDIOCLIENT_ACTIVATION_PARAMS;
+    let prop = unsafe { CoTaskMemAlloc(size_of::<PROPVARIANT>()) } as *mut PROPVARIANT;
+    if params.is_null() || prop.is_null() {
+        return Err(windows::core::Error::from(windows::Win32::Foundation::E_OUTOFMEMORY));
+    }
+    // SAFETY: both pointers are valid, suitably aligned allocations of the right size.
+    unsafe {
+        params.write(AUDIOCLIENT_ACTIVATION_PARAMS {
             ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
             Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
                 ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
@@ -84,40 +78,40 @@ fn activate_process_loopback(pid: u32) -> WinResult<IAudioClient> {
                     ProcessLoopbackMode: PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
                 },
             },
-        },
-        prop: PROPVARIANT::default(),
-    });
-    // The blob points into the same box, which never moves.
-    let params_ptr = &mut act.params as *mut AUDIOCLIENT_ACTIVATION_PARAMS as *mut u8;
-    act.prop = PROPVARIANT {
-        Anonymous: PROPVARIANT_0 {
-            Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
-                vt: VT_BLOB,
-                wReserved1: 0,
-                wReserved2: 0,
-                wReserved3: 0,
-                Anonymous: PROPVARIANT_0_0_0 {
-                    blob: BLOB { cbSize: size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32, pBlobData: params_ptr },
-                },
-            }),
-        },
-    };
+        });
+        prop.write(PROPVARIANT {
+            Anonymous: PROPVARIANT_0 {
+                Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
+                    vt: VT_BLOB,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: PROPVARIANT_0_0_0 {
+                        blob: BLOB { cbSize: size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32, pBlobData: params as *mut u8 },
+                    },
+                }),
+            },
+        });
+    }
     let (tx, rx) = mpsc::sync_channel(1);
     let handler: IActivateAudioInterfaceCompletionHandler = Activated { done: tx }.into();
-    let op = unsafe { ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, &IAudioClient::IID, Some(&act.prop), &handler)? };
-    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-        Ok(result) => result,
-        Err(_) => {
-            // Windows hasn't answered yet but may still read the parameters and
-            // finish the operation later. Freeing them now corrupts memory
-            // (and Windows then closes the app), so they're deliberately kept
-            // for the life of the process: a few dozen bytes, only on this rare path.
-            std::mem::forget(act);
-            std::mem::forget(op);
-            std::mem::forget(handler);
-            Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL))
-        }
+    let op = unsafe { ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, &IAudioClient::IID, Some(prop as *const PROPVARIANT), &handler)? };
+    step("activation requested");
+    if rx.recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+        // Windows may still finish later and call the handler: keep it and
+        // the operation alive for good (a few bytes, only on this rare path).
+        std::mem::forget(op);
+        std::mem::forget(handler);
+        return Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL));
     }
+    step("windows answered");
+    let mut hr = HRESULT(0);
+    let mut unknown: Option<windows::core::IUnknown> = None;
+    unsafe { op.GetActivateResult(&mut hr, &mut unknown)? };
+    hr.ok()?;
+    let client: IAudioClient = unknown.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE))?.cast()?;
+    step("got the audio client");
+    Ok(client)
 }
 
 /// Format we ask Windows for: 48 kHz stereo float, so no conversion is
