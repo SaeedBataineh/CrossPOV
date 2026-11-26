@@ -60,11 +60,6 @@ const SECTIONS: { id: Section; label: string }[] = [
 ];
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
-/** "8 Mbps", "12.5 Mbps". */
-function mbps(v: number): string {
-  return `${Number(v.toFixed(v < 10 ? 1 : 0))} Mbps`;
-}
-
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
   const [tab, setTab] = useState<Section>("games");
   return (
@@ -167,10 +162,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Resolution" help="native = your monitor">
             <Seg label="Resolution" value={draft.resolution} onChange={(v) => set("resolution", v)} options={[{ value: "native", label: "Native" }, { value: "1440p", label: "1440p" }, { value: "1080p", label: "1080p" }, { value: "720p", label: "720p" }]} />
           </Row>
-          <Row label="Quality" help="bitrate at your resolution and frame rate">
-            <Seg label="Quality" value={draft.quality} onChange={(v) => set("quality", v)} options={(
-                [["low", "Low"], ["medium", "Med"], ["high", "High"], ["max", "Max"]] as const
-              ).map(([value, name]) => ({ value, label: `${name} · ${mbps(targetMbps({ ...draft, quality: value }))}` }))} />
+          <Row label="Quality" help="higher = sharper, bigger files">
+            <Seg label="Quality" value={draft.quality} onChange={(v) => set("quality", v)} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Med" }, { value: "high", label: "High" }, { value: "max", label: "Max" }]} />
           </Row>
           <Row label="Encoder" help="GPU keeps your FPS up">
             <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "Intel" }, { value: "cpu", label: "CPU" }]} />
@@ -195,7 +188,7 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           </Row>
           <Row label="Clip length" help="how far back a hotkey clip goes"><Seg label="Clip length" value={draft.bufferSeconds} onChange={(v) => set("bufferSeconds", v)} options={opts([15, 30, 60, 120, 300])} /></Row>
           <Row label="Clip sound" help="a beep so you know it worked"><Toggle label="Clip sound" checked={draft.clipSound} onChange={(v) => set("clipSound", v)} /></Row>
-          <p className="note">About {mbps(targetMbps(draft))}, so a {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB.</p>
+          <p className="note">About {Math.round(targetMbps(draft))} Mbps, so a {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB.</p>
         </Panel>
         </>
       )}
