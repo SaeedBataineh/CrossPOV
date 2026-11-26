@@ -359,12 +359,16 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     push(&mut a, &["-c:v", if plan.hevc { plan.encoder.hevc_codec() } else { plan.encoder.codec() }]);
     match plan.encoder {
         VideoEncoder::Nvenc => {
-            push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
-            // Spend the bits where the eye looks (edges, faces, text) and on
-            // what stays on screen; B-frames for more detail per bit. Left out
-            // in compatibility mode, in case an older card refuses them.
-            if !plan.compat {
-                push(&mut a, &["-spatial-aq", "1", "-temporal-aq", "1", "-aq-strength", "8", "-bf", "3"]);
+            // Higher-quality preset, looking a few frames ahead so fast motion
+            // gets the bits, and keeping detail on what stays on screen. No
+            // spatial AQ: it takes bits from busy textures (walls, foliage,
+            // skins), which looks soft in moving game footage. All left out in
+            // compatibility mode, in case an older card refuses them.
+            if plan.compat {
+                push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
+            } else {
+                push(&mut a, &["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
+                push(&mut a, &["-rc-lookahead", "16", "-temporal-aq", "1", "-bf", "3"]);
             }
         }
         VideoEncoder::Amf => {
@@ -518,7 +522,7 @@ mod tests {
         let p = RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let a = joined(&Settings::default(), &p);
         assert!(a.contains("-c:v hevc_nvenc"), "{a}");
-        assert!(a.contains("-spatial-aq 1"), "{a}");
+        assert!(a.contains("-preset p5") && a.contains("-rc-lookahead 16") && !a.contains("spatial-aq"), "{a}");
         let compat = joined(&Settings::default(), &RecordPlan { compat: true, ..p });
         assert!(!compat.contains("-bf 3"), "compatibility mode keeps to basic options");
         let amd = joined(&Settings::default(), &RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Amf, false) });

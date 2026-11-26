@@ -321,7 +321,15 @@ impl Recorder {
                 encoder = VideoEncoder::Cpu;
             }
             let compat = inner.fallback >= 1;
-            crate::trail(&format!("recording: starting ({})", encoder.label()));
+            crate::trail(&format!(
+                "recording: starting ({}{}) {:?}, {} fps, {} Mbps, {:?}",
+                encoder.label(),
+                if compat { ", compatibility mode" } else { "" },
+                settings.resolution,
+                settings.fps,
+                ffmpeg::bitrate_kbps(&settings) / 1000,
+                settings.codec,
+            ));
             let g = game.clone().unwrap_or_default();
             match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
                 Ok(running) => {
