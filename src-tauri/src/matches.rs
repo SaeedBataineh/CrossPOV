@@ -359,7 +359,9 @@ impl MatchWatcher {
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn find_me<'a>(m: &'a MatchSummary, riot_id: &str) -> Option<&'a MatchPlayer> {
     let (name, tag) = split_riot_id(riot_id)?;
-    m.players.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && p.tag.eq_ignore_ascii_case(&tag))
+    // Riot names can have accents and other non-English letters: compare them case-blind too.
+    let (name, tag) = (name.to_lowercase(), tag.to_lowercase());
+    m.players.iter().find(|p| p.name.to_lowercase() == name && p.tag.to_lowercase() == tag)
 }
 
 #[cfg(test)]

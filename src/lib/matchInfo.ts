@@ -30,6 +30,7 @@ export function streamerLabel(s: StreamerPlayer, teammate = false): { text: stri
   const eta = s.status === "working" && s.etaSec ? ` · ${timeLeft(s.etaSec)}` : "";
   if (s.status === "failed" && s.message?.includes("different game")) return { text: "was in a different game", tone: "bad" };
   if (s.status === "failed" && s.message?.includes("other team")) return { text: "wrong player picked", tone: "bad" };
+  if (s.status === "failed" && s.message?.includes("Riot ID in Settings")) return { text: "match is from another Riot ID", tone: "muted" };
   switch (s.status) {
     case "working":
       if (!s.fights) return { text: s.vod?.live ? "live · waits for VOD" : "looking for your fights", tone: "purple" };

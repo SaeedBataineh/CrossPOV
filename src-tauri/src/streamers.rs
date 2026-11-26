@@ -613,12 +613,20 @@ pub fn player_label(player: &crate::matches::MatchPlayer, me: Option<&crate::mat
     format!("{side} · {}", player.agent)
 }
 
+/// Shown when the match was played on a Riot ID other than the one in Settings.
+pub const NOT_YOUR_MATCH: &str = "Your Riot ID in Settings isn't one of the players in this match.";
+
 /// Settles streamers that can't make progress, so none shows "downloading 0/0"
 /// for ever: no fights with you means nothing to clip, and a match that ran out
 /// of time keeps what it got.
 pub fn settle_stuck(state: &mut MatchStreamers, me_known: bool) {
     for p in state.players.iter_mut().filter(|p| p.status == StreamerStatus::Working && !p.checking) {
-        if me_known && p.fights == 0 {
+        if !me_known {
+            // Your Riot ID isn't one of this match's players (another account,
+            // or it changed): there's no way to find your fights, so don't wait.
+            p.status = StreamerStatus::Failed;
+            p.message = Some(NOT_YOUR_MATCH.into());
+        } else if p.fights == 0 {
             p.status = StreamerStatus::NoFights;
         } else if state.finished {
             if p.clips > 0 {
@@ -1461,6 +1469,9 @@ mod tests {
             checking: false,
             eta_sec: Some(30),
         };
+        let mut other = MatchStreamers { players: vec![mk("x", 0, 0)], ..Default::default() };
+        settle_stuck(&mut other, false);
+        assert_eq!(other.players[0].status, StreamerStatus::Failed, "not your match: don't wait for ever");
         state.players = vec![mk("a", 0, 0), mk("b", 2, 1), mk("c", 2, 0)];
         settle_stuck(&mut state, true);
         assert_eq!(state.players[0].status, StreamerStatus::NoFights);
