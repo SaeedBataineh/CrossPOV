@@ -130,7 +130,7 @@ export default function SettingsPage({ settings, onSaved }: { settings: S; onSav
           <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </nav>
-      <div className="settings-body">
+      <div key={tab} className="settings-body">
         {tab === "audio" ? (
           <Suspense fallback={<p className="muted">Loading…</p>}>
             <div className="settings-audio"><Audio settings={settings} onSaved={onSaved} /></div>

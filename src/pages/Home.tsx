@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Clapperboard, Play, RefreshCw, Settings as SettingsIcon, Swords, Target, Trophy } from "lucide-react";
+import { Clapperboard, Play, RefreshCw, Settings as SettingsIcon, Swords } from "lucide-react";
 import { MatchCard, type Show } from "../components/MatchCard";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
@@ -20,7 +20,6 @@ import {
   type MatchSummary,
   type WebStreamer,
 } from "../lib/backend";
-import { result } from "../lib/matchInfo";
 import { findPairs, matchOf } from "../lib/pairs";
 import { REGIONS, type Settings } from "../lib/settings";
 import type { useMatches } from "../lib/useMatches";
@@ -255,7 +254,7 @@ export default function Home({
       {/* Narrower windows: the summary sits above the matches; wide ones show it in the side panel. */}
       {matches.length > 0 && (
         <div className="min-[1280px]:hidden">
-          <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} />
+          <Summary matches={matches} clips={clips} streamers={streamers} />
         </div>
       )}
 
@@ -283,7 +282,7 @@ export default function Home({
         />
       )}
       {all.length ? (
-        <div className="flex flex-col gap-3">
+        <div key={show} className="stagger flex flex-col gap-3">
           {all.map((m) =>
             m.id === looked?.match.id ? (
               <MatchCard key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
@@ -326,7 +325,7 @@ export default function Home({
       </div>
 
       <aside className="sticky top-0 hidden flex-col gap-4 min-[1280px]:flex" aria-label="Overview">
-        {matches.length > 0 && <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} compact />}
+        {matches.length > 0 && <Summary matches={matches} clips={clips} streamers={streamers} />}
         <RecorderCard status={recorder.status} settings={settings} onSaving={() => recorder.notify("Saving clip…", "info")} onSettings={() => onNavigate("settings")} />
         <RecentClips clips={clips} onOpen={onOpen} onAll={() => onNavigate("clips")} />
       </aside>
@@ -352,47 +351,13 @@ function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; val
 }
 
 /** Recent form at a glance: win rate, K/D, saved clips, streamer matches. */
-function Summary({ matches, riotId, clips, streamers, compact }: { matches: MatchSummary[]; riotId: string; clips: ClipInfo[]; streamers: Record<string, MatchStreamers>; compact?: boolean }) {
-  const recent = matches.slice(0, 20);
-  const played = recent.flatMap((m) => {
-    const me = findMe(m, riotId);
-    const r = result(m, me);
-    return me && r ? [{ me, letter: r.letter }] : [];
-  });
-  const wins = played.filter((p) => p.letter === "W").length;
-  const losses = played.filter((p) => p.letter === "L").length;
-  const rate = played.length ? Math.round((wins / played.length) * 100) : null;
-  const kills = played.reduce((n, p) => n + p.me.kills, 0);
-  const deaths = played.reduce((n, p) => n + p.me.deaths, 0);
+function Summary({ matches, clips, streamers }: { matches: MatchSummary[]; clips: ClipInfo[]; streamers: Record<string, MatchStreamers> }) {
   const theirs = clips.filter((c) => c.kind === "theirs").length;
   const withStreamers = matches.filter((m) => streamers[m.id]?.players.length).length;
   const met = new Set(Object.values(streamers).flatMap((s) => s.players.map((p) => p.channel.login))).size;
 
   return (
-    <div className={compact ? "grid grid-cols-2 gap-3" : "grid grid-cols-2 gap-3 xl:grid-cols-4"}>
-      <Tile
-        icon={<Trophy size={13} strokeWidth={2.2} aria-hidden />}
-        label="Win rate"
-        value={rate == null ? "–" : <>{rate}<span className="text-[16px] text-zinc-500">%</span></>}
-        sub={
-          played.length ? (
-            <span className="flex items-center gap-2">
-              <span>{wins}W · {losses}L</span>
-              <span className="flex gap-[3px]" aria-hidden>
-                {played.slice(0, 10).reverse().map((p, i) => (
-                  <i key={i} className={`h-2.5 w-1 rounded-sm ${p.letter === "W" ? "bg-[#30D158]/70" : p.letter === "L" ? "bg-[#FF453A]/70" : "bg-zinc-600"}`} />
-                ))}
-              </span>
-            </span>
-          ) : "Add your Riot ID to see it"
-        }
-      />
-      <Tile
-        icon={<Target size={13} strokeWidth={2.2} aria-hidden />}
-        label="K/D ratio"
-        value={played.length ? (kills / Math.max(1, deaths)).toFixed(2) : "–"}
-        sub={played.length ? `${kills} kills · ${deaths} deaths` : undefined}
-      />
+    <div className="grid grid-cols-2 gap-3">
       <Tile
         icon={<Clapperboard size={13} strokeWidth={2.2} aria-hidden />}
         label="Saved clips"

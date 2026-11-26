@@ -100,18 +100,18 @@ export type Show = "all" | "streamers" | "mine";
 // ---------- Header pieces ----------
 
 const RESULT = {
-  W: { label: "Win", cls: "text-[#4ADE80] bg-[#30D158]/[0.08] ring-[#30D158]/20" },
-  L: { label: "Loss", cls: "text-[#FB7185] bg-[#FF453A]/[0.08] ring-[#FF453A]/20" },
-  D: { label: "Draw", cls: "text-zinc-200 bg-white/[0.07] ring-white/10" },
+  W: { label: "Win", cls: "text-[#4ADE80]" },
+  L: { label: "Loss", cls: "text-[#FB7185]" },
+  D: { label: "Draw", cls: "text-zinc-300" },
 } as const;
 
-/** The score, tinted by the result. */
+/** The score in plain numbers, with "Win" or "Loss" under it in the result's colour. */
 function ResultPill({ letter, score }: { letter?: "W" | "L" | "D"; score: string }) {
-  const r = letter ? RESULT[letter] : { label: "", cls: "text-zinc-300 bg-white/[0.06] ring-white/10" };
+  const r = letter ? RESULT[letter] : null;
   return (
-    <span className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 ring-1 ring-inset ${r.cls}`}>
-      {r.label && <span className="text-[10.5px] font-bold tracking-[0.08em] uppercase opacity-80">{r.label}</span>}
-      <b className="text-[15px] font-bold tracking-[-0.01em] tabular-nums">{score}</b>
+    <span className="flex w-[64px] shrink-0 flex-col items-end gap-0.5">
+      <b className="text-[17px] leading-tight font-semibold tracking-[-0.01em] text-white tabular-nums">{score}</b>
+      {r && <span className={`text-[10px] font-semibold tracking-[0.08em] uppercase ${r.cls}`}>{r.label}</span>}
     </span>
   );
 }
@@ -266,7 +266,6 @@ export function MatchCard({
     tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} onPlay={() => onOpen(c)} />);
   }
 
-  const kd = me ? (me.kills / Math.max(1, me.deaths)).toFixed(2) : null;
   const minutes = match.lengthMs ? Math.round(match.lengthMs / 60000) : 0;
   const brief = web === "checking" ? "checking who was live…"
     : !checked ? "streamers checked after the match"
@@ -301,7 +300,6 @@ export function MatchCard({
         {me && (
           <div className="hidden shrink-0 items-center gap-6 border-x border-white/[0.06] px-6 @[60rem]:flex">
             <Stat value={<>{me.kills}<span className="text-zinc-600"> / </span>{me.deaths}<span className="text-zinc-600"> / </span>{me.assists}</>} label="K / D / A" className="w-[92px]" />
-            <Stat value={kd} label="KD Ratio" className="w-[60px]" dim={Number(kd) < 1} />
             <Stat value={saved} label="Clips" className="w-[34px]" dim={!saved} />
           </div>
         )}
@@ -314,7 +312,7 @@ export function MatchCard({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96] hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           {open ? "Hide" : "Details"}
           <ChevronDown size={15} strokeWidth={2.2} aria-hidden className={`transition-transform duration-200 ease-out ${open ? "rotate-180" : ""}`} />

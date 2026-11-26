@@ -13,7 +13,7 @@ const NAV: { id: Page; label: string; Icon: LucideIcon }[] = [
 /** Labels show from 1100px; narrower windows get an icon rail. */
 const wide = "hidden min-[1100px]:inline";
 const item =
-  "relative flex h-10 w-full items-center justify-center gap-3 rounded-xl border-0 bg-transparent px-3 text-[14px] font-medium no-underline transition-colors duration-150 ease-out outline-none min-[1100px]:justify-start focus-visible:ring-2 focus-visible:ring-white/60";
+  "relative flex h-10 w-full items-center justify-center gap-3 rounded-xl border-0 bg-transparent px-3 text-[14px] font-medium no-underline transition-[background-color,color,transform] duration-150 ease-out outline-none active:scale-[0.97] min-[1100px]:justify-start focus-visible:ring-2 focus-visible:ring-white/60";
 const idle = "text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100";
 const active = "bg-violet-500/[0.14] text-white";
 

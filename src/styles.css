@@ -674,3 +674,22 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 
 /* The sidebar sizes itself (220px, or a 68px rail below 1100px). */
 .app { grid-template-columns: auto minmax(0, 1fr); }
+
+/* ---------- Motion you can feel when clicking ---------- */
+/* Pages and clips rise in; lists (matches, clips) follow one after another; buttons press in. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.page-enter { animation: rise-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.details-enter { animation: rise-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > *, .gallery > * { animation: rise-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > :nth-child(2), .gallery > :nth-child(2) { animation-delay: 40ms; }
+.stagger > :nth-child(3), .gallery > :nth-child(3) { animation-delay: 80ms; }
+.stagger > :nth-child(4), .gallery > :nth-child(4) { animation-delay: 120ms; }
+.stagger > :nth-child(5), .gallery > :nth-child(5) { animation-delay: 160ms; }
+.stagger > :nth-child(n+6), .gallery > :nth-child(n+6) { animation-delay: 200ms; }
+.btn, .b, .seg button, .settings-nav button, .chips button { transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out, transform 0.12s ease-out; }
+.btn:active:not(:disabled), .b:active:not(:disabled), .seg button:active, .settings-nav button:active { transform: scale(0.96); }
+.settings-body { animation: rise-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, .details-enter, .stagger > *, .gallery > *, .settings-body { animation: none; }
+  .btn:active:not(:disabled), .b:active:not(:disabled), .seg button:active, .settings-nav button:active { transform: none; }
+}
