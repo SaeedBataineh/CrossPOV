@@ -20,7 +20,6 @@
 # Intel GPUs encode through Media Foundation (h264_mf), so there is no QSV.
 set -euo pipefail
 
-HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$(realpath -m "${1:?output path}")
 WORK=$(realpath -m "${2:-$(mktemp -d)}")
 FFMPEG_TAG=n8.1.3
@@ -43,9 +42,6 @@ fi
 PREFIX="$WORK/prefix"
 make -s -C nv-codec-headers PREFIX="$PREFIX" install
 mkdir -p "$PREFIX/include/AMF" && cp -r amf/amf/public/include/* "$PREFIX/include/AMF/"
-# Window capture (gfxcapture) needs two Windows headers that Ubuntu's MinGW
-# (11.x) doesn't have yet; these come from newer mingw-w64.
-cp "$HERE/winrt-headers/"*.h "$PREFIX/include/"
 
 cd ffmpeg
 PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
@@ -70,6 +66,10 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,h264_metadata \
   --enable-protocol=file,pipe,http,https,tcp,tls,crypto,hls,data,concat \
   --enable-swscale --enable-swresample
+
+# Window capture needs MinGW 13+ (Windows' capture headers); say so plainly
+# instead of quietly building without it.
+grep -q "CONFIG_GFXCAPTURE_FILTER 1" config_components.h || { echo "gfxcapture (window capture) was not enabled: MinGW 13 or newer is needed" >&2; exit 1; }
 
 make -s -j"$(nproc)"
 mkdir -p "$(dirname "$OUT")"

@@ -32,18 +32,22 @@ jobs:
     # A small FFmpeg with only what CrossPOV uses (~7 MB instead of ~130 MB).
     # Cached: it only rebuilds when scripts/build-ffmpeg.sh changes.
     runs-on: ubuntu-latest
+    # Debian testing for MinGW 14: Ubuntu's MinGW 11 is too old for Windows'
+    # window capture (gfxcapture), which records just the game's window.
+    container: debian:forky
     steps:
       - uses: actions/checkout@v4
       - id: cache
         uses: actions/cache@v4
         with:
           path: ffmpeg-out/ffmpeg.exe
-          key: ffmpeg-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+          key: ffmpeg-mingw14-${{ hashFiles('scripts/build-ffmpeg.sh') }}
       - name: Build FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mingw-w64 nasm pkg-config
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends mingw-w64 g++-mingw-w64-x86-64 nasm pkg-config git make ca-certificates
+          x86_64-w64-mingw32-gcc --version | head -1
           scripts/build-ffmpeg.sh ffmpeg-out/ffmpeg.exe "$RUNNER_TEMP/ffbuild"
       - uses: actions/upload-artifact@v4
         with:
@@ -124,7 +128,7 @@ jobs:
           Copy-Item ffmpeg-small/ffmpeg.exe src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
           $ff = "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
           "FFmpeg size: {0:N1} MB" -f ((Get-Item $ff).Length / 1MB)
-          $need = @{ "-filters" = "ddagrab","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
+          $need = @{ "-filters" = "ddagrab","gfxcapture","fps","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
           foreach ($k in $need.Keys) {
             $list = & $ff -hide_banner $k 2>&1 | Out-String
             foreach ($n in $need[$k]) { if ($list -notmatch "\b$n\b") { throw "FFmpeg is missing $n ($k)" } }
