@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
 import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
 import { findPairs } from "../lib/pairs";
@@ -76,14 +77,8 @@ export default function Clips({
   return (
     <section className="page wide" aria-label="Clips">
       <div className="tabs-row">
-        <div className="tabs" role="tablist" aria-label="Show">
-          {tabs.map((t) => (
-            <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}>
-              {t.label} <span className="count">{t.n}</span>
-            </button>
-          ))}
-        </div>
-        <span className="row" style={{ gap: 8, marginBottom: 8 }}>
+        <SegmentedControl label="Show" value={tab} segments={tabs.map((t) => ({ id: t.value, label: t.label, n: t.n }))} onChange={setTab} />
+        <span className="row" style={{ gap: 8 }}>
         {games.length > 1 && (
           <label className="field">
             <span className="sr-only">Game</span>

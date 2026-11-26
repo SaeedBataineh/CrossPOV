@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactElement, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from "react";
+import { ChevronsLeft, ChevronsRight, Maximize, Pause, Play, Scissors, Volume2, VolumeX } from "lucide-react";
 import { formatDuration } from "../lib/useRecorder";
 
 /** A start and end in seconds. */
@@ -12,19 +13,17 @@ const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 /** "1:05.3": seconds with a tenth, for trim points. */
 export const fine = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
+// Lucide glyphs; play and pause filled like a media player's.
 const Icon = {
-  play: <path d="M8 5l11 7-11 7z" fill="currentColor" />,
-  pause: <path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" />,
-  back: <path d="M11 7l-5 5 5 5M18 7l-5 5 5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />,
-  fwd: <path d="M13 7l5 5-5 5M6 7l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />,
-  sound: <path d="M4 10v4h4l5 4V6L8 10zM16.5 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />,
-  muted: <path d="M4 10v4h4l5 4V6L8 10zM16 10l4 4M20 10l-4 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />,
-  full: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />,
-  cut: <path d="M6 6a2.5 2.5 0 1 0 0 .01M6 18a2.5 2.5 0 1 0 0 .01M8 7.5L20 18M8 16.5L20 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />,
+  play: <Play size={18} fill="currentColor" strokeWidth={0} aria-hidden />,
+  pause: <Pause size={18} fill="currentColor" strokeWidth={0} aria-hidden />,
+  back: <ChevronsLeft size={18} aria-hidden />,
+  fwd: <ChevronsRight size={18} aria-hidden />,
+  sound: <Volume2 size={18} aria-hidden />,
+  muted: <VolumeX size={18} aria-hidden />,
+  full: <Maximize size={18} aria-hidden />,
+  cut: <Scissors size={18} aria-hidden />,
 };
-const Svg = ({ d }: { d: ReactElement }) => (
-  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">{d}</svg>
-);
 
 /**
  * CrossPOV's own player controls for a <video>: a timeline with the fights
@@ -227,9 +226,9 @@ export function PlayerControls({
       </div>
 
       <div className="pc-bar">
-        <button type="button" className="pc-btn" onClick={toggle} aria-label={paused ? "Play" : "Pause"} title={paused ? "Play (Space)" : "Pause (Space)"}><Svg d={paused ? Icon.play : Icon.pause} /></button>
-        <button type="button" className="pc-btn" onClick={() => seek(time - 5)} aria-label="Back 5 seconds" title="Back 5 s (←)"><Svg d={Icon.back} /></button>
-        <button type="button" className="pc-btn" onClick={() => seek(time + 5)} aria-label="Forward 5 seconds" title="Forward 5 s (→)"><Svg d={Icon.fwd} /></button>
+        <button type="button" className="pc-btn" onClick={toggle} aria-label={paused ? "Play" : "Pause"} title={paused ? "Play (Space)" : "Pause (Space)"}>{paused ? Icon.play : Icon.pause}</button>
+        <button type="button" className="pc-btn" onClick={() => seek(time - 5)} aria-label="Back 5 seconds" title="Back 5 s (←)">{Icon.back}</button>
+        <button type="button" className="pc-btn" onClick={() => seek(time + 5)} aria-label="Forward 5 seconds" title="Forward 5 s (→)">{Icon.fwd}</button>
         <span className="pc-time">{formatDuration(time)} <span>/ {formatDuration(dur)}</span></span>
         <span className="spacer" />
         <label className="pc-speed" title="Speed">
@@ -238,7 +237,7 @@ export function PlayerControls({
             {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
           </select>
         </label>
-        <button type="button" className="pc-btn" onClick={() => { if (video.current) video.current.muted = !video.current.muted; }} aria-label={muted ? "Unmute" : "Mute"} title="Mute (M)"><Svg d={muted || volume === 0 ? Icon.muted : Icon.sound} /></button>
+        <button type="button" className="pc-btn" onClick={() => { if (video.current) video.current.muted = !video.current.muted; }} aria-label={muted ? "Unmute" : "Mute"} title="Mute (M)">{muted || volume === 0 ? Icon.muted : Icon.sound}</button>
         <input
           className="pc-vol"
           type="range"
@@ -268,11 +267,11 @@ export function PlayerControls({
               onTrim(marks.length ? { start: Math.max(0, first - 5), end: Math.min(dur, last + 5) } : { start: 0, end: dur });
             }}
           >
-            <Svg d={Icon.cut} />
+            {Icon.cut}
             <span>Cut</span>
           </button>
         )}
-        <button type="button" className="pc-btn" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen (F)"><Svg d={Icon.full} /></button>
+        <button type="button" className="pc-btn" onClick={fullscreen} aria-label="Fullscreen" title="Fullscreen (F)">{Icon.full}</button>
       </div>
     </div>
   );

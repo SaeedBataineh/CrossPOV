@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import "@fontsource-variable/figtree";
+import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
-import "./styles.css";
-import { Rail, TopBar, type Page } from "./components/Shell";
+import "./app.css";
+import { Sidebar, type Page } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
@@ -80,7 +81,7 @@ export default function App() {
   return (
     <>
     <div className="app" inert={blocked}>
-      <Rail page={page} update={update} onNavigate={setPage} />
+      <Sidebar page={page} update={update} onNavigate={setPage} />
       <div className="frame">
         <TopBar
           settings={settings}

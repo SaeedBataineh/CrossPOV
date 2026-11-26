@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Page } from "../components/Shell";
+import type { Page } from "../components/Sidebar";
 import { Avatar, Notice } from "../components/ui";
 import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
 import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";

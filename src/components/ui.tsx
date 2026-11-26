@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { appIcon, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { Check, CirclePlay, FolderOpen, Play, Trash2 } from "lucide-react";
 import { ini } from "../lib/matchInfo";
+import { TwitchIcon } from "./Icons";
 import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
 
@@ -157,7 +159,7 @@ export function ClipThumb({ clip, label, big }: { clip: ClipInfo; label?: string
       {src ? (
         <img src={src} alt="" loading="lazy" decoding="async" />
       ) : (
-        <svg width={big ? 40 : 28} height={big ? 40 : 28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M10 8l6 4-6 4z" /></svg>
+        <CirclePlay size={big ? 40 : 28} strokeWidth={1.5} aria-hidden />
       )}
       <span className="tag" style={big ? { fontSize: 10 } : undefined}>{label ?? (isTheirs(clip) ? "THEM" : "YOU")}</span>
       {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
@@ -199,17 +201,6 @@ export function cardMeta(c: ClipInfo): string {
   return [c.map ?? c.game, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
 }
 
-const FolderIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-);
-const TrashIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
-);
-
-const TwitchMark = () => (
-  <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path fill="#9146ff" d="M2.15 0 .58 4.1v16.8h5.71V24h3.22l3.04-3.1h4.6l6.25-6.2V0z" /></svg>
-);
-
 function Half({ clip }: { clip: ClipInfo }) {
   const src = thumbSrc(clip.thumb);
   return <span className={isTheirs(clip) ? "half theirs" : "half"}>{src && <img src={src} alt="" loading="lazy" decoding="async" />}</span>;
@@ -245,17 +236,17 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
         ) : src ? (
           <img src={src} alt="" loading="lazy" decoding="async" />
         ) : (
-          <svg width="36" height="36" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#ffffff14" /><path d="M10 8l6 4-6 4z" fill="#ffffffb3" /></svg>
+          <CirclePlay size={36} strokeWidth={1.5} color="rgba(255,255,255,0.6)" aria-hidden />
         )}
-        <span className="hover-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor" /></svg></span>
+        <span className="hover-play" aria-hidden="true"><Play size={20} fill="currentColor" strokeWidth={0} /></span>
         {mine && <span className="tag you">YOU</span>}
-        {theirs && <span className="tag them"><TwitchMark />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
+        {theirs && <span className="tag them"><TwitchIcon size={10} color="#a970ff" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
         {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
       </button>
       {(onReveal || onDelete) && (
         <span className="gactions">
-          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderIcon /></button>}
-          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><TrashIcon /></button>}
+          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
+          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><Trash2 size={16} aria-hidden /></button>}
         </span>
       )}
       <b className="gtitle">{t}</b>
@@ -281,7 +272,7 @@ export function SaveState({ d }: { d: Draft }) {
   return (
     <span className={bad ? "save-state bad" : "save-state"} role="status">
       {!bad && !d.saving && (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--win)" strokeWidth="2.5" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" /></svg>
+        <Check size={14} strokeWidth={2.5} color="var(--win)" aria-hidden />
       )}
       {d.saving || d.dirty ? "Saving…" : bad ? d.status : "Saved automatically"}
     </span>

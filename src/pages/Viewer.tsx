@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
 import { Avatar, cardMeta, cardTitle } from "../components/ui";
 import { clipVideoSrc, copyForDiscord, deleteClip, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
@@ -216,7 +217,7 @@ export default function Viewer({
     <section className="viewer" aria-label={cardTitle(clip)}>
       <header className="viewer-head">
         <button type="button" className="back" onClick={onBack}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          <ChevronLeft size={16} aria-hidden />
           {match ? <>{match.map} {r && <b style={{ color: resultColor(r.letter) }}>{r.score}</b>}</> : "Back"}
         </button>
         <span className="sep" aria-hidden="true">/</span>
@@ -338,7 +339,7 @@ export default function Viewer({
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => revealClip(clip.path))}>Show in folder</button>}
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => openClip((shownClip ?? clip).path))}>Open in player</button>}
             <button type="button" className="btn quiet danger" onClick={() => void remove()} aria-label="Delete this clip" title="Delete this clip">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+              <Trash2 size={16} aria-hidden />
             </button>
           </div>
         </aside>

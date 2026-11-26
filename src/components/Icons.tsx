@@ -1,44 +1,11 @@
-// Inline stroke icons: no icon font or library, so nothing extra to load.
+// Brand marks. UI glyphs come from lucide-react directly.
 type P = { size?: number };
 
-const base = (size: number) => ({
-  width: size,
-  height: size,
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 2,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-  "aria-hidden": true,
-});
-
-export const HomeIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></svg>
-);
-export const MatchesIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6" /></svg>
-);
-export const AudioIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><path d="M4 10v4h4l5 4V6L8 10z" /><path d="M16.5 9a4 4 0 0 1 0 6" /></svg>
-);
-export const ClipsIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9l5 3-5 3z" /></svg>
-);
-export const StreamIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}><circle cx="12" cy="12" r="3" /><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>
-);
-export const GearIcon = ({ size = 18 }: P) => (
-  <svg {...base(size)}>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+/** Twitch glyph, from Simple Icons (CC0). */
+export const TwitchIcon = ({ size = 14, color = "currentColor" }: P & { color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true">
+    <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z" />
   </svg>
-);
-export const PlayIcon = ({ size = 36 }: P) => (
-  <svg {...base(size)} strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><path d="M10 8l6 4-6 4z" /></svg>
-);
-export const SearchIcon = ({ size = 16 }: P) => (
-  <svg {...base(size)}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
 );
 
 /**
