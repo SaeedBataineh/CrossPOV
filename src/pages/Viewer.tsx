@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { CaretLeft, Trash } from "@phosphor-icons/react";
 import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
 import { Avatar, cardMeta, cardTitle } from "../components/ui";
 import { clipVideoSrc, copyForDiscord, deleteClip, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
@@ -217,7 +217,7 @@ export default function Viewer({
     <section className="viewer" aria-label={cardTitle(clip)}>
       <header className="viewer-head">
         <button type="button" className="back" onClick={onBack}>
-          <ChevronLeft size={16} aria-hidden />
+          <CaretLeft size={16} aria-hidden />
           {match ? <>{match.map} {r && <b style={{ color: resultColor(r.letter) }}>{r.score}</b>}</> : "Back"}
         </button>
         <span className="sep" aria-hidden="true">/</span>
@@ -339,7 +339,7 @@ export default function Viewer({
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => revealClip(clip.path))}>Show in folder</button>}
             {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => openClip((shownClip ?? clip).path))}>Open in player</button>}
             <button type="button" className="btn quiet danger" onClick={() => void remove()} aria-label="Delete this clip" title="Delete this clip">
-              <Trash2 size={16} aria-hidden />
+              <Trash size={16} aria-hidden />
             </button>
           </div>
         </aside>

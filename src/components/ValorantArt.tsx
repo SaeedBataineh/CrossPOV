@@ -63,6 +63,15 @@ const MAPS: Record<string, string> = {
   sunset: "92584fbe-486a-b1b2-9faa-39b0f486b498",
 };
 
+/** Full 16:9 art for a map (valorant-api.com splash), used as a clip's picture when it has no thumbnail. */
+export function mapArt(map?: string | null): string | null {
+  const id = map ? MAPS[key(map)] : undefined;
+  return id ? `${CDN}/maps/${id}/splash.png` : null;
+}
+
+/** Whether there's real art for this agent. */
+export const hasAgentArt = (agent?: string | null) => Boolean(agent && AGENTS[key(agent)]);
+
 /** A stable hue per name, for the drawn fallback. */
 function hue(name: string): number {
   let h = 0;

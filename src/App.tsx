@@ -76,7 +76,7 @@ export default function App() {
 
   const closeViewer = useCallback(() => setViewing(null), []);
   const search = !viewing && page === "home" ? "Search maps, agents, players, streamers" : !viewing && page === "clips" ? "Search clips" : undefined;
-  const title = viewing ? undefined : page === "streamers" ? "Streamers you played against" : page === "settings" ? "Settings" : undefined;
+  const title = viewing ? "Clip" : { home: "Home", clips: "Clips", streamers: "Streamers", settings: "Settings" }[page];
 
   return (
     <>
@@ -91,17 +91,13 @@ export default function App() {
           searchLabel={search}
           title={title}
           onSaving={() => recorder.notify("Saving clip…", "info")}
+          onLength={(bufferSeconds) => saveSettings({ ...settings, bufferSeconds }).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"))}
           onIgnore={(exe) => {
             const next = { ...settings, ignoredGames: [...settings.ignoredGames, exe] };
             saveSettings(next).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"));
           }}
         />
         <main className="main" ref={mainRef}>
-          {!isDesktop && (
-            <p className="notice info" role="note">
-              <b>Website demo with sample data.</b> Recording and streamer clips need the Windows app. <a href="/">About CrossPOV</a>
-            </p>
-          )}
           {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
           {status?.hotkeyError && <Notice tone="warn">{status.hotkeyError}</Notice>}
           {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}

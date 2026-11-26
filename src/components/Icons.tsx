@@ -1,12 +1,9 @@
-// Brand marks. UI glyphs come from lucide-react directly.
+// Brand marks. UI glyphs come from @phosphor-icons/react directly.
+import { TwitchLogo } from "@phosphor-icons/react";
 type P = { size?: number };
 
-/** Twitch glyph, from Simple Icons (CC0). */
-export const TwitchIcon = ({ size = 14, color = "currentColor" }: P & { color?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true">
-    <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z" />
-  </svg>
-);
+/** Twitch glyph (Phosphor). */
+export const TwitchIcon = ({ size = 14, color = "currentColor" }: P & { color?: string }) => <TwitchLogo size={size} color={color} weight="fill" aria-hidden="true" />;
 
 /**
  * CrossPOV mark: a play button inside a ring of three arcs, coloured for

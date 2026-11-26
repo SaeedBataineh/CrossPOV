@@ -1,9 +1,11 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Clapperboard, Play, RefreshCw, Settings as SettingsIcon, Swords } from "lucide-react";
+import { Select } from "../components/Select";
+import { ArrowsClockwise, FilmStrip, GearSix, Play, Sword } from "@phosphor-icons/react";
 import { MatchCard, type Show } from "../components/MatchCard";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
 import { Keycap } from "../components/TopBar";
+import { mapArt } from "../components/ValorantArt";
 import { cardTitle, Notice } from "../components/ui";
 import {
   addStreamerChannel,
@@ -53,15 +55,7 @@ function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId
         <span className="muted">was on {side} (found by their scoreboard). Which player were they?</span>
         {error && <span className="small bad" style={{ display: "block" }}>{error}</span>}
       </span>
-      <label className="field">
-        <span className="sr-only">Which player was {s.login}</span>
-        <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
-          <option value="">Choose player</option>
-          {team.map((p) => (
-            <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {p.agent}</option>
-          ))}
-        </select>
-      </label>
+      <Select label={`Which player was ${s.login}`} placeholder="Choose player" value={puuid} onChange={setPuuid} options={team.map((p) => ({ value: p.puuid, label: `${p.name}#${p.tag} · ${p.agent}` }))} />
       <button type="button" className="btn primary" disabled={!puuid || busy} onClick={() => void link()}>{busy ? "Checking…" : "Link"}</button>
     </div>
   );
@@ -101,15 +95,7 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
         a wrong channel or player gets no clips. The link is kept on this PC only.
       </span>
       <div className="row-wrap" style={{ gap: 8 }}>
-        <label className="field">
-          <span className="sr-only">Player</span>
-          <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
-            <option value="">Which player?</option>
-            {others.map((p) => (
-              <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · {p.agent}</option>
-            ))}
-          </select>
-        </label>
+        <Select label="Player" placeholder="Which player?" value={puuid} onChange={setPuuid} options={others.map((p) => ({ value: p.puuid, label: `${p.name}#${p.tag} · ${me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · ${p.agent}` }))} />
         <label className="field grow">
           <span className="sr-only">Twitch channel</span>
           <input placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />
@@ -157,14 +143,7 @@ function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, we
         <span className="sr-only">Riot ID</span>
         <input placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
       </label>
-      <label className="field">
-        <span className="sr-only">Region</span>
-        <select value={region} onChange={(e) => setRegion(e.target.value)}>
-          {REGIONS.map((r) => (
-            <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
-          ))}
-        </select>
-      </label>
+      <Select label="Region" value={region} onChange={setRegion} options={REGIONS.map((r) => ({ value: r.value, label: r.value.toUpperCase() }))} className="dd-narrow" />
       <button type="submit" className="btn primary" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
       {error && <span className="small bad" role="alert" style={{ flexBasis: "100%" }}>{error}</span>}
     </form>
@@ -268,7 +247,7 @@ export default function Home({
             title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}
             className="inline-flex h-9 items-center gap-2 rounded-[10px] border-0 bg-white/[0.05] px-3.5 text-[13px] font-medium text-zinc-200 ring-1 ring-white/[0.07] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none disabled:opacity-50"
           >
-            <RefreshCw size={14} strokeWidth={2.2} aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
+            <ArrowsClockwise size={14} weight="bold" aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
             {checking ? "Checking…" : "Check for new matches"}
           </button>
         )}
@@ -291,6 +270,7 @@ export default function Home({
                 key={m.id}
                 match={m}
                 riotId={settings.riotId}
+                notify={recorder.notify}
                 clips={clips}
                 myClips={mineByMatch.get(m.id)}
                 pairs={pairs}
@@ -310,7 +290,7 @@ export default function Home({
       ) : (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.08] bg-zinc-900/40 px-6 py-16 text-center">
           <span className="mb-2 grid size-12 place-items-center rounded-2xl bg-gradient-to-b from-white/[0.10] to-white/[0.03] text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] ring-1 ring-white/[0.06]">
-            <Swords size={22} strokeWidth={1.8} aria-hidden />
+            <Sword size={22} weight="bold" aria-hidden />
           </span>
           <b className="text-[17px] font-semibold tracking-[-0.02em] text-white">{matches.length ? "Nothing matches" : "No matches yet"}</b>
           <span className="max-w-sm text-[13.5px] text-zinc-400">
@@ -341,7 +321,7 @@ function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; val
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]">
       <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
-        <span className="grid size-6 place-items-center rounded-lg bg-violet-500/10 text-violet-300">{icon}</span>
+        <span className="grid size-6 place-items-center rounded-lg bg-[#3b9eff]/[0.12] text-[#6ab7ff]">{icon}</span>
         {label}
       </div>
       <div className="mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.03em] text-white tabular-nums">{value}</div>
@@ -359,13 +339,13 @@ function Summary({ matches, clips, streamers }: { matches: MatchSummary[]; clips
   return (
     <div className="grid grid-cols-2 gap-3">
       <Tile
-        icon={<Clapperboard size={13} strokeWidth={2.2} aria-hidden />}
+        icon={<FilmStrip size={13} weight="bold" aria-hidden />}
         label="Saved clips"
         value={clips.length}
         sub={`${clips.length - theirs} yours · ${theirs} from streamers`}
       />
       <Tile
-        icon={<Swords size={13} strokeWidth={2.2} aria-hidden />}
+        icon={<Sword size={13} weight="bold" aria-hidden />}
         label="Streamer matches"
         value={withStreamers}
         sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}
@@ -390,7 +370,7 @@ function RecorderCard({ status, settings, onSaving, onSettings }: { status: Reco
       <div className="flex items-center justify-between gap-2">
         <h2 className="m-0 text-[14px] font-semibold text-white">Recorder</h2>
         <button type="button" onClick={onSettings} title="Recording settings" aria-label="Recording settings" className="grid size-7 place-items-center rounded-lg border-0 bg-transparent text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
-          <SettingsIcon size={15} strokeWidth={1.75} aria-hidden />
+          <GearSix size={15} weight="bold" aria-hidden />
         </button>
       </div>
       <p className="m-0 mt-2 flex items-center gap-2 text-[13px] text-zinc-200">
@@ -432,12 +412,12 @@ function RecentClips({ clips, onOpen, onAll }: { clips: ClipInfo[]; onOpen: (c: 
       {recent.length ? (
         <ul className="m-0 mt-2 flex list-none flex-col p-0">
           {recent.map((c) => {
-            const src = thumbSrc(c.thumb);
+            const src = thumbSrc(c.thumb) ?? mapArt(c.map);
             return (
               <li key={c.path}>
                 <button type="button" onClick={() => onOpen(c)} className="group flex w-full items-center gap-3 rounded-xl border-0 bg-transparent p-1.5 text-left transition-colors hover:bg-white/[0.05] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
                   <span className="relative grid h-10 w-[70px] shrink-0 place-items-center overflow-hidden rounded-lg bg-zinc-800 text-zinc-500">
-                    {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" /> : <Play size={14} strokeWidth={1.75} aria-hidden />}
+                    {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" /> : <Play size={14} weight="bold" aria-hidden />}
                     {c.durationSec != null && <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 text-[10px] leading-4 text-white tabular-nums">{formatDuration(c.durationSec)}</span>}
                   </span>
                   <span className="flex min-w-0 flex-col">

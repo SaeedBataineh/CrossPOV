@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown, Clock, LoaderCircle } from "lucide-react";
+import { CaretDown, Clock, SpinnerGap } from "@phosphor-icons/react";
 import { findMe, type ClipInfo, type MatchPlayer, type MatchStreamers, type MatchSummary, type WebStreamer } from "../lib/backend";
 import { progress, result, streamerLabel } from "../lib/matchInfo";
 import type { Pair } from "../lib/pairs";
@@ -11,6 +11,7 @@ import { MapThumb } from "./ValorantArt";
 /** What we know about one player being a streamer, from the app or the website demo. */
 interface Live {
   login: string;
+  agent: string;
   name: string;
   avatar?: string | null;
   text: string;
@@ -21,12 +22,12 @@ function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefin
   const st = streamers?.players.find((s) => s.puuid === p.puuid);
   if (st) {
     const l = streamerLabel(st, Boolean(me && p.team === me.team));
-    return { login: st.channel.login, name: st.channel.displayName, avatar: st.channel.avatar, text: l.text, tone: l.tone };
+    return { login: st.channel.login, agent: p.agent, name: st.channel.displayName, avatar: st.channel.avatar, text: l.text, tone: l.tone };
   }
   const ws = Array.isArray(web) ? web.find((w) => w.puuid === p.puuid) : undefined;
   if (ws) {
     const fights = me ? match.kills.filter((k) => (k.killer === me.puuid && k.victim === p.puuid) || (k.killer === p.puuid && k.victim === me.puuid)).length : 0;
-    return { login: ws.channel.login, name: ws.channel.displayName, avatar: ws.channel.avatar, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
+    return { login: ws.channel.login, agent: p.agent, name: ws.channel.displayName, avatar: ws.channel.avatar, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
   }
   return null;
 }
@@ -137,7 +138,7 @@ function StreamerBadge({ live, checking, checked }: { live: Live[]; checking: bo
         <span className="flex shrink-0 -space-x-1">
           {live.slice(0, 3).map((l) => (
             <span key={l.login} className="overflow-hidden rounded-md ring-2 ring-zinc-900 [&>*]:rounded-md">
-              <Avatar name={l.name} avatar={l.avatar} size={24} />
+              <Avatar name={l.name} avatar={l.avatar} agent={l.agent} size={24} />
             </span>
           ))}
         </span>
@@ -146,7 +147,7 @@ function StreamerBadge({ live, checking, checked }: { live: Live[]; checking: bo
       </span>
     );
   }
-  const Icon = checking ? LoaderCircle : !checked ? Clock : null;
+  const Icon = checking ? SpinnerGap : !checked ? Clock : null;
   return (
     <span className="inline-flex h-8 items-center gap-1.5 px-1 text-[12px] font-medium text-zinc-400">
       {Icon && <Icon size={13} className={checking ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden />}
@@ -169,6 +170,7 @@ export function MatchCard({
   onOpen,
   actions,
   children,
+  notify,
 }: {
   match: MatchSummary;
   riotId: string;
@@ -182,6 +184,8 @@ export function MatchCard({
   onOpen: (c: ClipInfo) => void;
   actions?: ReactNode;
   children?: ReactNode;
+  /** Shows "Copy for Discord" on the clip cards when given. */
+  notify?: (text: string, tone: "good" | "bad" | "info") => void;
 }) {
   const me = findMe(match, riotId);
   const r = result(match, me);
@@ -248,7 +252,7 @@ export function MatchCard({
       const p = pairOf(c);
       if (p) paired.add(p.mine.path);
       saved++;
-      tiles.push(<GalleryCard key={c.path} clip={c} other={p?.mine} title={title} meta={p ? `Both sides · ${f.name}` : `Their side · ${f.name}`} onPlay={() => onOpen(c)} />);
+      tiles.push(<GalleryCard key={c.path} clip={c} other={p?.mine} title={title} meta={p ? `Both sides · ${f.name}` : `Their side · ${f.name}`} notify={notify} onPlay={() => onOpen(c)} />);
     }
   } else {
     for (const c of myClips) {
@@ -256,14 +260,14 @@ export function MatchCard({
       if (!p) continue;
       paired.add(c.path);
       saved++;
-      tiles.push(<GalleryCard key={c.path} clip={c} other={p.theirs} title={cardTitle(c)} meta={`Both sides · ${p.theirs.streamer ?? "streamer"}`} onPlay={() => onOpen(c)} />);
+      tiles.push(<GalleryCard key={c.path} clip={c} other={p.theirs} title={cardTitle(c)} meta={`Both sides · ${p.theirs.streamer ?? "streamer"}`} notify={notify} onPlay={() => onOpen(c)} />);
     }
   }
   for (const c of myClips) {
     if (paired.has(c.path)) continue;
     saved++;
     const into = Math.max(0, Math.round((c.createdMs - (c.durationSec ?? 0) * 1000 - Date.parse(match.startedAt)) / 1000));
-    tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} onPlay={() => onOpen(c)} />);
+    tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} notify={notify} onPlay={() => onOpen(c)} />);
   }
 
   const minutes = match.lengthMs ? Math.round(match.lengthMs / 60000) : 0;
@@ -315,7 +319,7 @@ export function MatchCard({
           className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96] hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           {open ? "Hide" : "Details"}
-          <ChevronDown size={15} strokeWidth={2.2} aria-hidden className={`transition-transform duration-200 ease-out ${open ? "rotate-180" : ""}`} />
+          <CaretDown size={14} weight="bold" aria-hidden className={`transition-transform duration-200 ease-out ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
 
@@ -330,7 +334,7 @@ export function MatchCard({
                 const pct = progressOf(p.puuid);
                 return (
                   <div key={p.puuid} className="streamer-card">
-                    <Avatar name={l.name} avatar={l.avatar} size={44} />
+                    <Avatar name={l.name} avatar={l.avatar} agent={l.agent} size={44} />
                     <span className="grow stack" style={{ gap: 3 }}>
                       <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
                       <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>

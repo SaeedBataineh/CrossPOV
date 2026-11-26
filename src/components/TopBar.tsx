@@ -1,19 +1,20 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Search, X } from "lucide-react";
+import { MagnifyingGlass, Record, X } from "@phosphor-icons/react";
 import { isDesktop, saveClipNow, type RecorderStatus } from "../lib/backend";
 import type { Settings } from "../lib/settings";
+import { Select } from "./Select";
 
-/** A physical-looking keycap. */
+/** A keyboard key, Medal-style: a flat key box. */
 export function Keycap({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-[20px] min-w-[22px] items-center justify-center rounded-[6px] border-0 bg-gradient-to-b from-zinc-700/90 to-zinc-800/90 px-1.5 font-sans text-[11px] leading-none font-semibold text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_1px_0_rgba(0,0,0,0.6),0_2px_4px_-1px_rgba(0,0,0,0.5)] ring-1 ring-black/40">
+    <kbd className="inline-flex h-[20px] min-w-[22px] items-center justify-center rounded-[5px] border border-[#2b2b2f] bg-[#1c1c1f] px-1.5 font-sans text-[11px] leading-none font-bold text-white">
       {children}
     </kbd>
   );
 }
 
-/** Spotlight-style search. Ctrl+K (Windows) focuses it from anywhere; Esc clears it. */
-function Spotlight({ label, query, onQuery }: { label: string; query: string; onQuery: (q: string) => void }) {
+/** Search. Ctrl+K focuses it from anywhere; Esc clears it. */
+function SearchBox({ label, query, onQuery }: { label: string; query: string; onQuery: (q: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -28,8 +29,8 @@ function Spotlight({ label, query, onQuery }: { label: string; query: string; on
   }, []);
 
   return (
-    <label className="group relative flex h-10 w-full max-w-[420px] min-w-0 items-center gap-2.5 rounded-xl bg-zinc-900/60 px-3 text-zinc-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_8px_24px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/[0.08] backdrop-blur-2xl transition-all duration-200 focus-within:bg-zinc-900/80 focus-within:text-zinc-300 focus-within:ring-2 focus-within:ring-white/25 hover:ring-white/[0.14]">
-      <Search size={16} strokeWidth={2.2} aria-hidden className="shrink-0" />
+    <label className="group relative flex h-9 w-full max-w-[380px] min-w-0 items-center gap-2 rounded-lg border border-[#2b2b2f] bg-[#111113] px-3 text-[#85858e] transition-colors duration-150 focus-within:border-[#3b9eff] focus-within:text-[#d9d9de] hover:border-[#3a3a40]">
+      <MagnifyingGlass size={16} weight="bold" aria-hidden className="shrink-0" />
       <span className="sr-only">{label}</span>
       <input
         ref={input}
@@ -44,16 +45,16 @@ function Spotlight({ label, query, onQuery }: { label: string; query: string; on
           }
         }}
         spellCheck={false}
-        className="h-full min-w-0 flex-1 border-0 bg-transparent text-[14px] tracking-[-0.01em] text-zinc-100 outline-none placeholder:text-zinc-500 [&::-webkit-search-cancel-button]:hidden"
+        className="h-full min-w-0 flex-1 border-0 bg-transparent text-[13.5px] text-white outline-none placeholder:text-[#85858e] [&::-webkit-search-cancel-button]:hidden"
       />
       {query ? (
         <button
           type="button"
           aria-label="Clear search"
           onClick={() => onQuery("")}
-          className="grid size-5 place-items-center rounded-full border-0 bg-white/10 text-zinc-300 transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
+          className="grid size-5 place-items-center rounded border-0 bg-white/10 text-[#d9d9de] transition-colors hover:bg-white/20"
         >
-          <X size={12} strokeWidth={2.6} aria-hidden />
+          <X size={11} weight="bold" aria-hidden />
         </button>
       ) : (
         <span className="flex shrink-0 items-center gap-1 transition-opacity group-focus-within:opacity-0" aria-hidden>
@@ -65,58 +66,14 @@ function Spotlight({ label, query, onQuery }: { label: string; query: string; on
   );
 }
 
-type Tone = "rec" | "ready" | "bad" | "idle";
+const LENGTHS = [15, 30, 60, 120, 300];
+const lengthLabel = (s: number) => (s > 60 ? `Clip ${s / 60}m` : `Clip ${s}s`);
 
-const DOT: Record<Tone, string> = {
-  rec: "bg-[#FF453A] shadow-[0_0_10px_2px_rgba(255,69,58,0.55)]",
-  ready: "bg-[#30D158] shadow-[0_0_10px_2px_rgba(48,209,88,0.5)]",
-  bad: "bg-[#FFD60A] shadow-[0_0_8px_1px_rgba(255,214,10,0.4)]",
-  idle: "bg-zinc-500",
-};
-
-/** A Dynamic Island-like capsule: what the recorder is doing, and the hotkey. */
-function StatusIsland({ status, settings, children }: { status: RecorderStatus | null; settings: Settings; children?: ReactNode }) {
-  const state = status?.state;
-  const recording = state === "recording";
-  const bad = state === "error" || state === "noFfmpeg";
-  const tone: Tone = !isDesktop ? "idle" : recording ? "rec" : bad ? "bad" : state === "waiting" ? "ready" : "idle";
-  const line = !isDesktop
-    ? "Website demo"
-    : recording ? "Recording"
-    : bad ? "Recorder stopped"
-    : state === "waiting" ? "Waiting for a game"
-    : "Starting…";
-  const game = recording ? status?.game : null;
-
-  return (
-    <div
-      role="status"
-      title={status?.message ?? undefined}
-      className="flex h-10 max-w-full min-w-0 items-center gap-2.5 rounded-full bg-black/70 py-1 pr-1.5 pl-3.5 text-[13px] whitespace-nowrap text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_10px_30px_-10px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.08] backdrop-blur-2xl"
-    >
-      <span className="relative grid size-2.5 shrink-0 place-items-center" aria-hidden>
-        {(tone === "ready" || tone === "rec") && (
-          <span className={`absolute inset-0 animate-ping rounded-full opacity-60 motion-reduce:animate-none ${tone === "rec" ? "bg-[#FF453A]" : "bg-[#30D158]"}`} />
-        )}
-        <span className={`relative size-2.5 rounded-full ${DOT[tone]}`} />
-      </span>
-      <span className="min-w-0 truncate font-semibold tracking-[-0.01em]">
-        {line}
-        {game?.name ? <span className="font-medium text-zinc-300"> · {game.name}</span> : null}
-      </span>
-      {isDesktop && (
-        <span className="hidden min-w-0 items-center gap-1.5 truncate text-zinc-400 lg:flex">
-          <span aria-hidden className="text-zinc-600">·</span>
-          press <Keycap>{settings.hotkey}</Keycap> to save the last <span className="tabular-nums">{settings.bufferSeconds}</span>s
-        </span>
-      )}
-      {children}
-      {!children && <span className="w-1" />}
-    </div>
-  );
-}
-
-/** Top bar: Spotlight search (where it applies), and the recorder island with Save clip. */
+/**
+ * The capture bar (SteelSeries GG-style), across the top of every page:
+ * the page title and search on the left; on the right what the recorder is
+ * doing, the hotkey with the clip length (click to change it), and Save clip.
+ */
 export function TopBar({
   settings,
   status,
@@ -125,6 +82,7 @@ export function TopBar({
   searchLabel,
   onSaving,
   onIgnore,
+  onLength,
   title,
 }: {
   settings: Settings;
@@ -136,47 +94,64 @@ export function TopBar({
   onSaving: () => void;
   /** "Not a game?": stop recording this program for good. */
   onIgnore: (exe: string) => void;
-  /** Shown instead of the search box. */
-  title?: ReactNode;
+  /** Change how many seconds a hotkey clip keeps. */
+  onLength: (seconds: number) => void;
+  title: ReactNode;
 }) {
-  const recording = status?.state === "recording";
+  const state = status?.state;
+  const recording = state === "recording";
+  const bad = state === "error" || state === "noFfmpeg";
   const game = recording ? status?.game : null;
+  const line = !isDesktop ? "Website demo" : recording ? `Recording${game?.name ? ` · ${game.name}` : ""}` : bad ? "Recorder stopped" : state === "waiting" ? "Waiting for a game" : "Starting…";
+  const tone = !isDesktop ? "text-[#a3a3ab]" : recording ? "text-[#ff5c5c]" : bad ? "text-[#e0b84c]" : "text-[#2fd9c4]";
+  const lengths = LENGTHS.includes(settings.bufferSeconds) ? LENGTHS : [...LENGTHS, settings.bufferSeconds].sort((a, b) => a - b);
 
-  // Lines up with the centred page column (max 1640px) below (main has 28px padding and a 10px scrollbar gutter).
   return (
-    <header className="relative z-10 flex h-[68px] shrink-0 items-center gap-4 pr-[max(38px,calc((100%-1630px)/2))] pl-[max(28px,calc((100%-1650px)/2))]">
-      {searchLabel ? (
-        <Spotlight label={searchLabel} query={query} onQuery={onQuery} />
-      ) : (
-        <h1 className="m-0 min-w-0 truncate text-[20px] font-semibold tracking-[-0.025em] text-white">{title}</h1>
-      )}
+    <header className="relative z-10 flex h-[60px] shrink-0 items-center gap-4 border-b border-[#222225] px-6">
+      <h1 className="m-0 shrink-0 text-[17px] font-bold tracking-[-0.01em] text-white">{title}</h1>
+      {searchLabel && <SearchBox label={searchLabel} query={query} onQuery={onQuery} />}
       <span className="flex-1" />
-      <StatusIsland status={status} settings={settings}>
-        {game?.found === "fullscreen" && game.exe && (
-          <button
-            type="button"
-            title={`CrossPOV is recording ${game.exe} because it's fullscreen. Stop recording it?`}
-            onClick={() => {
-              if (window.confirm(`Stop recording ${game.name}? It won't be recorded again. You can undo this in Settings › Games.`)) onIgnore(game.exe);
-            }}
-            className="h-7 rounded-full border-0 bg-white/[0.08] px-3 text-[12px] font-medium text-zinc-200 transition-colors hover:bg-white/[0.14] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
-          >
-            Not a game?
-          </button>
-        )}
-        {recording && (
-          <button
-            type="button"
-            onClick={() => {
-              onSaving();
-              void saveClipNow();
-            }}
-            className="h-7 rounded-full border-0 bg-white px-3.5 text-[12.5px] font-semibold text-zinc-950 shadow-[0_1px_0_rgba(255,255,255,0.4)_inset,0_4px_12px_-4px_rgba(255,255,255,0.35)] transition-all hover:bg-zinc-100 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
-          >
-            Save clip
-          </button>
-        )}
-      </StatusIsland>
+
+      <span role="status" title={status?.message ?? (game?.exe || undefined)} className={`flex min-w-0 items-center gap-2 text-[11.5px] font-bold tracking-[0.06em] whitespace-nowrap uppercase ${tone}`}>
+        <span className="relative grid size-2 shrink-0 place-items-center" aria-hidden>
+          {isDesktop && !bad && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-50" />}
+          {recording ? <Record size={10} weight="fill" className="relative" /> : <span className="relative size-2 rounded-full bg-current" />}
+        </span>
+        <span className="truncate">{line}</span>
+      </span>
+
+      <Select
+        label="Clip length"
+        className="capture-chip"
+        value={settings.bufferSeconds}
+        onChange={onLength}
+        options={lengths.map((s) => ({ value: s, label: lengthLabel(s), icon: <Keycap>{settings.hotkey}</Keycap> }))}
+      />
+
+      {game?.found === "fullscreen" && game.exe && (
+        <button
+          type="button"
+          title={`CrossPOV is recording ${game.exe} because it's fullscreen. Stop recording it?`}
+          onClick={() => {
+            if (window.confirm(`Stop recording ${game.name}? It won't be recorded again. You can undo this in Settings › Games.`)) onIgnore(game.exe);
+          }}
+          className="h-8 shrink-0 rounded-lg border border-[#2b2b2f] bg-[#1c1c1f] px-3 text-[12.5px] font-semibold text-[#d9d9de] transition-colors hover:bg-[#26262a] active:scale-[0.97]"
+        >
+          Not a game?
+        </button>
+      )}
+      {recording && (
+        <button
+          type="button"
+          onClick={() => {
+            onSaving();
+            void saveClipNow();
+          }}
+          className="h-8 shrink-0 rounded-lg border-0 bg-[#3b9eff] px-3.5 text-[12.5px] font-bold text-white transition-[background-color,transform] hover:bg-[#6ab7ff] active:scale-[0.97]"
+        >
+          Save clip
+        </button>
+      )}
     </header>
   );
 }

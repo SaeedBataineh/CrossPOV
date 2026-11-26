@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Page } from "../components/Sidebar";
 import { Avatar, Notice } from "../components/ui";
 import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
-import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";
+import { allStreamers, progress, streamerLabel } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
 import type { useRecorder } from "../lib/useRecorder";
@@ -28,7 +28,7 @@ function LinkedChannels({ notify }: { notify: (text: string, tone: "good" | "bad
       <div className="list boxed">
         {links.map((l) => (
           <div key={l.puuid} className="list-row">
-            <span className="avatar sq" aria-hidden="true">{ini(l.login)}</span>
+            <Avatar agent={l.label.split(" · ").pop()} size={36} />
             <span className="grow stack" style={{ gap: 2 }}>
               <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.login}</b></a>
               <span className="muted small">{l.label}{l.seen ? ` · found again ${l.seen}×` : ""}</span>
@@ -95,7 +95,7 @@ export default function Streamers({
             return (
               <div key={`${matchId}-${p.puuid}`} className="table-row" role="row">
                 <span role="cell" className="row" style={{ gap: 12, minWidth: 0 }}>
-                  <Avatar name={p.channel.displayName} avatar={p.channel.avatar} />
+                  <Avatar name={p.channel.displayName} avatar={p.channel.avatar} agent={who?.agent} size={36} />
                   <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <a href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b></a>
                     <span className="muted small ellipsis">{["Twitch", mate ? "Teammate" : me && who ? "Enemy" : null, who?.agent].filter(Boolean).join(" · ")}</span>

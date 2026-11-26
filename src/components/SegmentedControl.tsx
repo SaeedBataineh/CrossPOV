@@ -61,12 +61,12 @@ export function SegmentedControl<T extends string>({
       role="tablist"
       aria-label={label}
       onKeyDown={onKey}
-      className="relative inline-flex h-9 items-center rounded-[10px] bg-zinc-900/70 p-[3px] ring-1 ring-white/[0.06]"
+      className="relative inline-flex h-9 items-center rounded-[10px] bg-[#111113] p-[3px] ring-1 ring-[#2b2b2f]"
     >
       {thumb && (
         <span
           aria-hidden
-          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-violet-500/[0.18] shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
+          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-[#3b9eff]/[0.16] ring-1 ring-[#3b9eff]/40 shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
           style={{ width: thumb.w, transform: `translateX(${thumb.x}px)` }}
         />
       )}
@@ -85,7 +85,7 @@ export function SegmentedControl<T extends string>({
           >
             {s.label}
             {s.n != null && !(hideZero && s.n === 0) && (
-              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-violet-400/25 text-violet-100" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
+              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-[#3b9eff]/25 text-white" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
             )}
           </button>
         );

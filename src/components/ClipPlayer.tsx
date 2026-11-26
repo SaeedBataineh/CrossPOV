@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from "react";
-import { ChevronsLeft, ChevronsRight, Maximize, Pause, Play, Scissors, Volume2, VolumeX } from "lucide-react";
+import { Select } from "./Select";
+import { CornersOut, FastForward, Pause, Play, Rewind, Scissors, SpeakerHigh, SpeakerSlash } from "@phosphor-icons/react";
 import { formatDuration } from "../lib/useRecorder";
 
 /** A start and end in seconds. */
@@ -13,16 +14,16 @@ const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 /** "1:05.3": seconds with a tenth, for trim points. */
 export const fine = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
-// Lucide glyphs; play and pause filled like a media player's.
+// Phosphor glyphs, filled like a media player's.
 const Icon = {
-  play: <Play size={18} fill="currentColor" strokeWidth={0} aria-hidden />,
-  pause: <Pause size={18} fill="currentColor" strokeWidth={0} aria-hidden />,
-  back: <ChevronsLeft size={18} aria-hidden />,
-  fwd: <ChevronsRight size={18} aria-hidden />,
-  sound: <Volume2 size={18} aria-hidden />,
-  muted: <VolumeX size={18} aria-hidden />,
-  full: <Maximize size={18} aria-hidden />,
-  cut: <Scissors size={18} aria-hidden />,
+  play: <Play size={18} weight="fill" aria-hidden />,
+  pause: <Pause size={18} weight="fill" aria-hidden />,
+  back: <Rewind size={18} weight="fill" aria-hidden />,
+  fwd: <FastForward size={18} weight="fill" aria-hidden />,
+  sound: <SpeakerHigh size={18} weight="fill" aria-hidden />,
+  muted: <SpeakerSlash size={18} weight="fill" aria-hidden />,
+  full: <CornersOut size={18} weight="bold" aria-hidden />,
+  cut: <Scissors size={18} weight="bold" aria-hidden />,
 };
 
 /**
@@ -231,12 +232,13 @@ export function PlayerControls({
         <button type="button" className="pc-btn" onClick={() => seek(time + 5)} aria-label="Forward 5 seconds" title="Forward 5 s (→)">{Icon.fwd}</button>
         <span className="pc-time">{formatDuration(time)} <span>/ {formatDuration(dur)}</span></span>
         <span className="spacer" />
-        <label className="pc-speed" title="Speed">
-          <span className="sr-only">Speed</span>
-          <select value={rate} onChange={(e) => { if (video.current) video.current.playbackRate = Number(e.target.value); }}>
-            {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
-          </select>
-        </label>
+        <Select
+          label="Speed"
+          className="pc-speed"
+          value={rate}
+          onChange={(v) => { if (video.current) video.current.playbackRate = v; }}
+          options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))}
+        />
         <button type="button" className="pc-btn" onClick={() => { if (video.current) video.current.muted = !video.current.muted; }} aria-label={muted ? "Unmute" : "Mute"} title="Mute (M)">{muted || volume === 0 ? Icon.muted : Icon.sound}</button>
         <input
           className="pc-vol"

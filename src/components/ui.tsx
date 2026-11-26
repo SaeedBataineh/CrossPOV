@@ -1,8 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { appIcon, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
-import { Check, CirclePlay, FolderOpen, Play, Trash2 } from "lucide-react";
-import { ini } from "../lib/matchInfo";
+import { appIcon, copyForDiscord, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { Check, Clock, DiscordLogo, FolderOpen, GameController, Info, Play, Star, Trash, Warning, WarningCircle } from "@phosphor-icons/react";
+import { toggleFavourite, useFavourites } from "../lib/favourites";
+import { BrandLogo, brandFor } from "./Brand";
 import { TwitchIcon } from "./Icons";
+import { Select } from "./Select";
+import { AgentIcon, hasAgentArt, mapArt } from "./ValorantArt";
 import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
 
@@ -34,7 +37,8 @@ export function Panel({
 export function Notice({ tone, children }: { tone: "warn" | "bad" | "info"; children: ReactNode }) {
   return (
     <p className={`notice s12 ${tone === "warn" ? "" : tone}`} role={tone === "info" ? "status" : "alert"}>
-      {children}
+      {tone === "bad" ? <WarningCircle size={18} weight="fill" aria-hidden /> : tone === "warn" ? <Warning size={18} weight="fill" aria-hidden /> : <Info size={18} weight="fill" aria-hidden />}
+      <span>{children}</span>
     </p>
   );
 }
@@ -60,6 +64,8 @@ export function Seg<T extends string | number>({
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
 }) {
+  // Long lists (frame rate, clip length…) are a dropdown, like other clipping apps; short ones stay buttons.
+  if (options.length > 3) return <Select label={label} value={value} options={options} onChange={onChange} />;
   return (
     <div className="seg" role="radiogroup" aria-label={label}>
       {options.map((o) => (
@@ -72,7 +78,12 @@ export function Seg<T extends string | number>({
 }
 
 export function Toggle({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return <button type="button" role="switch" aria-checked={checked} aria-label={label} className="tg" disabled={disabled} onClick={() => onChange(!checked)} />;
+  return (
+    <span className="tg-wrap">
+      <span className={checked ? "tg-state on" : "tg-state"} aria-hidden="true">{checked ? "ON" : "OFF"}</span>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} className="tg" disabled={disabled} onClick={() => onChange(!checked)} />
+    </span>
+  );
 }
 
 /** One settings line: label and help on the left, control on the right. */
@@ -91,8 +102,8 @@ export function Row({ label, help, icon, children }: { label: string; help?: Rea
   );
 }
 
-/** A program's own icon (taken from its .exe), or its first letter until we have it. */
-export function AppIcon({ exe, name, color = "#8a8f98" }: { exe: string; name: string; color?: string }) {
+/** A program's own icon (taken from its .exe), else its brand logo, else a game controller. */
+export function AppIcon({ exe, name }: { exe: string; name: string; color?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -103,7 +114,8 @@ export function AppIcon({ exe, name, color = "#8a8f98" }: { exe: string; name: s
     };
   }, [exe]);
   if (src) return <img className="src-ic app-ic" src={src} alt="" />;
-  return <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }} aria-hidden="true">{name[0]?.toUpperCase()}</span>;
+  const brand = brandFor(exe) ?? brandFor(name);
+  return <span className="src-ic" aria-hidden="true">{brand ? <BrandLogo icon={brand} size={18} /> : <GameController size={18} weight="duotone" />}</span>;
 }
 
 /** 0-200 % volume slider. */
@@ -159,7 +171,7 @@ export function ClipThumb({ clip, label, big }: { clip: ClipInfo; label?: string
       {src ? (
         <img src={src} alt="" loading="lazy" decoding="async" />
       ) : (
-        <CirclePlay size={big ? 40 : 28} strokeWidth={1.5} aria-hidden />
+        <Play size={big ? 32 : 22} weight="fill" aria-hidden />
       )}
       <span className="tag" style={big ? { fontSize: 10 } : undefined}>{label ?? (isTheirs(clip) ? "THEM" : "YOU")}</span>
       {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
@@ -201,17 +213,33 @@ export function cardMeta(c: ClipInfo): string {
   return [c.map ?? c.game, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
 }
 
+/** A clip's picture: its own thumbnail, else its map's art. */
+function picture(c: ClipInfo): string | null {
+  return thumbSrc(c.thumb) ?? mapArt(c.map);
+}
+
 function Half({ clip }: { clip: ClipInfo }) {
-  const src = thumbSrc(clip.thumb);
+  const src = picture(clip);
   return <span className={isTheirs(clip) ? "half theirs" : "half"}>{src && <img src={src} alt="" loading="lazy" decoding="async" />}</span>;
 }
 
+/** Copies a Discord-sized version of the whole clip to the clipboard. */
+export async function copyClipForDiscord(c: ClipInfo, notify: (text: string, tone: "good" | "bad" | "info") => void) {
+  try {
+    notify("Making a Discord-sized copy…", "info");
+    const bytes = await copyForDiscord(c.path, 0, c.durationSec ?? 0);
+    notify(`Copied (${formatSize(bytes)}). Paste it into Discord with Ctrl+V.`, "good");
+  } catch (err) {
+    notify(String(err), "bad");
+  }
+}
+
 /**
- * A clip in a grid: click to open it. With `other` (the other side of the same
- * fight) the thumbnail is split: YOU on the left, THEM on the right.
- * Folder and delete appear on hover.
+ * A clip in a grid. The picture opens it; with `other` (the other side of the
+ * same fight) the picture is split: YOU on the left, THEM on the right.
+ * Star it, tick it to select several, or copy it for Discord.
  */
-export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDelete }: {
+export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDelete, selected, onSelect, notify }: {
   clip: ClipInfo;
   other?: ClipInfo;
   title?: string;
@@ -219,38 +247,62 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
   onPlay: () => void;
   onReveal?: () => void;
   onDelete?: () => void;
+  /** Selection (Clips page): ticked or not, and how to toggle it. */
+  selected?: boolean;
+  onSelect?: () => void;
+  /** Shows "Copy for Discord" when given. */
+  notify?: (text: string, tone: "good" | "bad" | "info") => void;
 }) {
-  const src = thumbSrc(clip.thumb);
+  const favs = useFavourites();
+  const fav = favs.has(clip.path);
+  const src = picture(clip);
   const t = title ?? cardTitle(clip);
   const mine = isTheirs(clip) ? other : clip;
   const theirs = isTheirs(clip) ? clip : other;
   const both = Boolean(mine && theirs);
   return (
-    <div className="gcard">
-      <button type="button" className={both ? "gthumb split" : isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Open ${t}`}>
-        {both ? (
-          <>
-            <Half clip={mine!} />
-            <Half clip={theirs!} />
-          </>
-        ) : src ? (
-          <img src={src} alt="" loading="lazy" decoding="async" />
-        ) : (
-          <CirclePlay size={36} strokeWidth={1.5} color="rgba(255,255,255,0.6)" aria-hidden />
+    <div className={selected ? "gcard selected" : "gcard"}>
+      <div className="gpic">
+        <button type="button" className={both ? "gthumb split" : isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Open ${t}`}>
+          {both ? (
+            <>
+              <Half clip={mine!} />
+              <Half clip={theirs!} />
+            </>
+          ) : src ? (
+            <img src={src} alt="" loading="lazy" decoding="async" />
+          ) : (
+            <Play size={26} weight="fill" color="rgba(255,255,255,0.55)" aria-hidden />
+          )}
+          <span className="hover-play" aria-hidden="true"><Play size={20} weight="fill" /></span>
+          {mine && <span className="tag you">YOU</span>}
+          {theirs && <span className={both ? "tag them split" : "tag them"}><TwitchIcon size={11} color="#a970ff" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
+          {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
+        </button>
+        {onSelect && (
+          <button type="button" role="checkbox" aria-checked={Boolean(selected)} aria-label={`Select ${t}`} className="gsel" onClick={onSelect}>
+            {selected && <Check size={13} weight="bold" aria-hidden />}
+          </button>
         )}
-        <span className="hover-play" aria-hidden="true"><Play size={20} fill="currentColor" strokeWidth={0} /></span>
-        {mine && <span className="tag you">YOU</span>}
-        {theirs && <span className="tag them"><TwitchIcon size={10} color="#a78bfa" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
-        {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
-      </button>
-      {(onReveal || onDelete) && (
-        <span className="gactions">
-          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
-          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><Trash2 size={16} aria-hidden /></button>}
+        <button type="button" className={fav ? "gstar on" : "gstar"} aria-pressed={fav} aria-label={fav ? `Unstar ${t}` : `Star ${t}`} title={fav ? "Remove from favourites" : "Add to favourites"} onClick={() => toggleFavourite(clip.path)}>
+          <Star size={15} weight={fav ? "fill" : "bold"} aria-hidden />
+        </button>
+      </div>
+      <div className="gbody">
+        <span className="gtext">
+          <b className="gtitle">{t}</b>
+          <span className="gmeta"><Clock size={13} aria-hidden />{meta ?? cardMeta(clip)}</span>
         </span>
-      )}
-      <b className="gtitle">{t}</b>
-      <span className="gmeta">{meta ?? cardMeta(clip)}</span>
+        <span className="gbtns">
+          {notify && (
+            <button type="button" className="gbtn discord" title="Copy for Discord" aria-label={`Copy ${t} for Discord`} onClick={() => void copyClipForDiscord(clip, notify)}>
+              <DiscordLogo size={16} weight="fill" aria-hidden />
+            </button>
+          )}
+          {onReveal && <button type="button" className="gbtn" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
+          {onDelete && <button type="button" className="gbtn danger" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><Trash size={16} aria-hidden /></button>}
+        </span>
+      </div>
     </div>
   );
 }
@@ -259,9 +311,13 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
 export function PendingCard({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
   return (
     <div className="gcard">
-      <div className="gthumb pending">{children}</div>
-      <b className="gtitle">{title}</b>
-      {meta && <span className="gmeta">{meta}</span>}
+      <div className="gpic"><div className="gthumb pending">{children}</div></div>
+      <div className="gbody">
+        <span className="gtext">
+          <b className="gtitle">{title}</b>
+          {meta && <span className="gmeta">{meta}</span>}
+        </span>
+      </div>
     </div>
   );
 }
@@ -272,7 +328,7 @@ export function SaveState({ d }: { d: Draft }) {
   return (
     <span className={bad ? "save-state bad" : "save-state"} role="status">
       {!bad && !d.saving && (
-        <Check size={14} strokeWidth={2.5} color="var(--win)" aria-hidden />
+        <Check size={14} weight="bold" color="var(--win)" aria-hidden />
       )}
       {d.saving || d.dirty ? "Saving…" : bad ? d.status : "Saved automatically"}
     </span>
@@ -281,14 +337,25 @@ export function SaveState({ d }: { d: Draft }) {
 
 
 /**
- * A streamer's Twitch picture, loaded through crosspov.com (so your PC never
- * contacts Twitch), or their initials when there's no picture or it won't load.
+ * A streamer's picture: their Twitch picture (loaded through crosspov.com, so
+ * your PC never contacts Twitch), else the agent they played, else the Twitch logo.
  */
-export function Avatar({ name, avatar, size = 36 }: { name: string; avatar?: string | null; size?: number }) {
+export function Avatar({ avatar, agent, size = 36 }: { name?: string; avatar?: string | null; agent?: string | null; size?: number }) {
   const [failed, setFailed] = useState(false);
-  const style = { width: size, height: size, fontSize: Math.round(size / 3) };
+  const style = { width: size, height: size };
   if (!avatar || failed) {
-    return <span className="avatar sq" style={style} aria-hidden="true">{ini(name)}</span>;
+    if (agent && hasAgentArt(agent)) {
+      return (
+        <span className="avatar sq art" style={style} aria-hidden="true">
+          <AgentIcon agent={agent} className="size-full" />
+        </span>
+      );
+    }
+    return (
+      <span className="avatar sq" style={style} aria-hidden="true">
+        <TwitchIcon size={Math.round(size * 0.45)} color="#a970ff" />
+      </span>
+    );
   }
   const base = isDesktop ? "https://crosspov.com" : "";
   return (

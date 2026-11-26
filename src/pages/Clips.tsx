@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
+import { Select } from "../components/Select";
+import { BrandLogo, brandFor } from "../components/Brand";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
 import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
 import { findPairs } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
+import { useFavourites } from "../lib/favourites";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
+import { Trash, X } from "@phosphor-icons/react";
 
-type Tab = "all" | "theirs" | "mine";
+/** A game's logo, when we know it. */
+const brandLogo = (name: string) => {
+  const b = brandFor(name);
+  return b ? <BrandLogo icon={b} size={14} /> : undefined;
+};
+
+type Tab = "all" | "theirs" | "mine" | "fav";
 type Sort = "newest" | "longest" | "largest";
 const PAGE = 24;
 
@@ -39,6 +49,16 @@ export default function Clips({
   const [game, setGame] = useState("all");
   const games = useMemo(() => [...new Set(clips.map(gameOf))].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b))), [clips]);
   const [limit, setLimit] = useState(PAGE);
+  const favs = useFavourites();
+  /** Clips ticked for a bulk action. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const togglePick = (path: string) =>
+    setPicked((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
   const theirs = clips.filter((c) => c.kind === "theirs").length;
@@ -46,6 +66,7 @@ export default function Clips({
     { value: "all", label: "All", n: clips.length },
     { value: "theirs", label: "Streamer clips", n: theirs },
     { value: "mine", label: "My clips", n: clips.length - theirs },
+    { value: "fav", label: "Favourites", n: clips.filter((c) => favs.has(c.path)).length },
   ];
 
   const shown = useMemo(() => {
@@ -53,12 +74,12 @@ export default function Clips({
     return clips
       .filter(
         (c) =>
-          (tab === "all" || c.kind === tab) &&
+          (tab === "all" || (tab === "fav" ? favs.has(c.path) : c.kind === tab)) &&
           (game === "all" || gameOf(c) === game) &&
           (!q || [cardTitle(c), c.name, c.streamer, c.map, c.moment, c.game].filter(Boolean).join(" ").toLowerCase().includes(q)),
       )
       .sort(SORTS[sort]);
-  }, [clips, tab, query, sort, game]);
+  }, [clips, tab, query, sort, game, favs]);
   useEffect(() => setLimit(PAGE), [tab, query, sort, game]);
 
   const totalBytes = clips.reduce((n, c) => n + c.sizeBytes, 0);
@@ -74,35 +95,46 @@ export default function Clips({
     refreshClips();
   }
 
+  async function removePicked() {
+    const list = clips.filter((c) => picked.has(c.path));
+    if (!list.length || !window.confirm(`Delete ${list.length} clip${list.length === 1 ? "" : "s"}? This can't be undone.`)) return;
+    let failed = 0;
+    for (const c of list) {
+      try {
+        await deleteClip(c.path);
+      } catch {
+        failed++;
+      }
+    }
+    if (failed) notify(`Couldn't delete ${failed} of ${list.length} clips.`, "bad");
+    setPicked(new Set());
+    refreshClips();
+  }
+
   return (
     <section className="page wide" aria-label="Clips">
       <div className="tabs-row">
         <SegmentedControl label="Show" value={tab} segments={tabs.map((t) => ({ id: t.value, label: t.label, n: t.n }))} onChange={setTab} />
         <span className="row" style={{ gap: 8 }}>
         {games.length > 1 && (
-          <label className="field">
-            <span className="sr-only">Game</span>
-            <select value={game} onChange={(e) => setGame(e.target.value)}>
-              <option value="all">All games</option>
-              {games.map((g) => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
-          </label>
+          <Select label="Game" value={game} onChange={setGame} options={[{ value: "all", label: "All games" }, ...games.map((g) => ({ value: g, label: g, icon: brandLogo(g) }))]} />
         )}
-        <label className="field" style={{ marginBottom: 0 }}>
-          <span className="sr-only">Sort</span>
-          <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-            <option value="newest">Newest</option>
-            <option value="longest">Longest</option>
-            <option value="largest">Largest</option>
-          </select>
-        </label>
+        <Select<Sort> label="Sort" value={sort} onChange={setSort} options={[{ value: "newest", label: "Newest" }, { value: "longest", label: "Longest" }, { value: "largest", label: "Largest" }]} />
         </span>
       </div>
 
+      {picked.size > 0 && (
+        <div className="bulk-bar" role="region" aria-label="Selected clips">
+          <b>{picked.size} selected</b>
+          <button type="button" className="linkish" onClick={() => setPicked(new Set(shown.map((c) => c.path)))}>Select all {shown.length}</button>
+          <span className="spacer" />
+          <button type="button" className="btn danger sm-btn" onClick={() => void removePicked()}><Trash size={15} weight="bold" aria-hidden />Delete</button>
+          <button type="button" className="btn sm-btn" onClick={() => setPicked(new Set())}><X size={14} weight="bold" aria-hidden />Clear</button>
+        </div>
+      )}
+
       {shown.length ? (
-        <div className="gallery">
+        <div className="gallery" key={tab}>
           {shown.slice(0, limit).map((c) => {
             const p = pairs.find((x) => x.mine.path === c.path || x.theirs.path === c.path);
             return (
@@ -113,15 +145,20 @@ export default function Clips({
                 onPlay={() => onOpen(c)}
                 onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
                 onDelete={() => void remove(c)}
+                selected={picked.has(c.path)}
+                onSelect={() => togglePick(c.path)}
+                notify={notify}
               />
             );
           })}
         </div>
       ) : (
         <div className="empty-state">
-          <b>{clips.length ? "No clips match" : tab === "theirs" ? "No streamer clips yet" : "No clips yet"}</b>
+          <b>{tab === "fav" && clips.length ? "No favourites yet" : clips.length ? "No clips match" : tab === "theirs" ? "No streamer clips yet" : "No clips yet"}</b>
           <span>
-            {clips.length
+            {tab === "fav" && clips.length
+              ? "Hover a clip and click its star to keep it here."
+              : clips.length
               ? "Try another search or tab."
               : tab === "theirs"
                 ? "They appear here after you play against someone who was streaming."
