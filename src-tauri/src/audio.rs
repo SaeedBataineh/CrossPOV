@@ -244,14 +244,20 @@ fn start_app(pid: u32, src: &Shared, stop: &Arc<AtomicBool>) -> Result<(), Strin
             Ok(())
         }
         _ => {
+            // How it ended says why: a Windows error code if it crashed.
+            let exited = child.try_wait().ok().flatten();
             let _ = child.kill();
-            let _ = child.wait();
+            let status = exited.or_else(|| child.wait().ok());
             let mut why = String::new();
             if let Some(mut e) = child.stderr.take() {
                 let _ = e.read_to_string(&mut why);
             }
             let why = why.trim();
-            Err(if why.is_empty() { "audio capture did not start".to_string() } else { why.to_string() })
+            Err(match (why.is_empty(), exited.and_then(|s| s.code())) {
+                (false, _) => why.to_string(),
+                (true, Some(code)) => format!("audio helper stopped (exit code {:#010x})", code as u32),
+                (true, None) => format!("audio capture did not start{}", if status.is_some() { " in time" } else { "" }),
+            })
         }
     };
     crate::trail(&format!("app audio: process {pid}: {}", match &r { Ok(()) => "capturing".to_string(), Err(e) => format!("failed ({e})") }));
@@ -392,7 +398,7 @@ impl AudioPipe {
                                                 game_inputs.push((src, *vol));
                                             }
                                             if let Ok(mut w) = warn.lock() {
-                                                *w = Some("Per-app audio isn't available on this version of Windows, so all desktop sound is recorded.".into());
+                                                *w = Some("Couldn't record just the game's sound on this PC, so all desktop sound (including Discord and music) is recorded.".into());
                                             }
                                         }
                                     }
