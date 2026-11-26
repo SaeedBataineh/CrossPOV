@@ -50,13 +50,14 @@ function ProblemReport() {
 }
 
 type Section = "games" | "recording" | "hotkey" | "streamers" | "audio" | "account";
+// In the order other clipping apps use: recording first, then hotkeys and audio.
 const SECTIONS: { id: Section; label: string }[] = [
-  { id: "games", label: "Games" },
   { id: "recording", label: "Recording" },
-  { id: "hotkey", label: "Hotkey and replay" },
-  { id: "streamers", label: "Streamer clips" },
+  { id: "hotkey", label: "Hotkeys" },
   { id: "audio", label: "Audio" },
-  { id: "account", label: "Account and app" },
+  { id: "games", label: "Games" },
+  { id: "streamers", label: "Streamer clips" },
+  { id: "account", label: "Account" },
 ];
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
@@ -121,7 +122,7 @@ const h265Plays = (() => {
 })();
 
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
-  const [tab, setTab] = useState<Section>("games");
+  const [tab, setTab] = useState<Section>("recording");
   return (
     <section className="settings-layout" aria-label="Settings">
       <nav className="settings-nav" aria-label="Settings sections">

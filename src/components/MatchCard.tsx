@@ -141,7 +141,7 @@ function StreamerBadge({ live, checking, checked }: { live: Live[]; checking: bo
             </span>
           ))}
         </span>
-        <TwitchIcon size={12} color="#a1a1aa" />
+        <TwitchIcon size={12} color="#a78bfa" />
         <span className="truncate">{text}</span>
       </span>
     );

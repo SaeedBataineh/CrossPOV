@@ -1,15 +1,19 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Clapperboard, RefreshCw, Swords, Target, Trophy } from "lucide-react";
+import { Clapperboard, Play, RefreshCw, Settings as SettingsIcon, Swords, Target, Trophy } from "lucide-react";
 import { MatchCard, type Show } from "../components/MatchCard";
 import { SegmentedControl } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
-import { Notice } from "../components/ui";
+import { Keycap } from "../components/TopBar";
+import { cardTitle, Notice } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
   isDesktop,
   lookupLatestMatch,
   lookupStreamers,
+  saveClipNow,
+  thumbSrc,
+  type RecorderStatus,
   type ClipInfo,
   type MatchStreamers,
   type SuggestedStreamer,
@@ -20,7 +24,7 @@ import { result } from "../lib/matchInfo";
 import { findPairs, matchOf } from "../lib/pairs";
 import { REGIONS, type Settings } from "../lib/settings";
 import type { useMatches } from "../lib/useMatches";
-import { timeAgo, type useRecorder } from "../lib/useRecorder";
+import { formatDuration, timeAgo, type useRecorder } from "../lib/useRecorder";
 
 /** One stream the scoreboard scanner found in this match: the user picks which player it was. */
 function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId: string; s: SuggestedStreamer; onAdded: (m: MatchStreamers) => void }) {
@@ -246,7 +250,14 @@ export default function Home({
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
 
-      {matches.length > 0 && <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} />}
+      <div className="grid items-start gap-5 min-[1280px]:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="flex min-w-0 flex-col gap-4">
+      {/* Narrower windows: the summary sits above the matches; wide ones show it in the side panel. */}
+      {matches.length > 0 && (
+        <div className="min-[1280px]:hidden">
+          <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SegmentedControl label="Show" value={show} segments={tabs} onChange={setShow} hideZero />
@@ -312,6 +323,14 @@ export default function Home({
           </span>
         </div>
       )}
+      </div>
+
+      <aside className="sticky top-0 hidden flex-col gap-4 min-[1280px]:flex" aria-label="Overview">
+        {matches.length > 0 && <Summary matches={matches} riotId={settings.riotId} clips={clips} streamers={streamers} compact />}
+        <RecorderCard status={recorder.status} settings={settings} onSaving={() => recorder.notify("Saving clip…", "info")} onSettings={() => onNavigate("settings")} />
+        <RecentClips clips={clips} onOpen={onOpen} onAll={() => onNavigate("clips")} />
+      </aside>
+      </div>
     </section>
   );
 }
@@ -323,7 +342,7 @@ function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; val
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]">
       <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
-        <span className="grid size-6 place-items-center rounded-lg bg-white/[0.05] text-zinc-300">{icon}</span>
+        <span className="grid size-6 place-items-center rounded-lg bg-violet-500/10 text-violet-300">{icon}</span>
         {label}
       </div>
       <div className="mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.03em] text-white tabular-nums">{value}</div>
@@ -333,7 +352,7 @@ function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; val
 }
 
 /** Recent form at a glance: win rate, K/D, saved clips, streamer matches. */
-function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[]; riotId: string; clips: ClipInfo[]; streamers: Record<string, MatchStreamers> }) {
+function Summary({ matches, riotId, clips, streamers, compact }: { matches: MatchSummary[]; riotId: string; clips: ClipInfo[]; streamers: Record<string, MatchStreamers>; compact?: boolean }) {
   const recent = matches.slice(0, 20);
   const played = recent.flatMap((m) => {
     const me = findMe(m, riotId);
@@ -350,7 +369,7 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
   const met = new Set(Object.values(streamers).flatMap((s) => s.players.map((p) => p.channel.login))).size;
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className={compact ? "grid grid-cols-2 gap-3" : "grid grid-cols-2 gap-3 xl:grid-cols-4"}>
       <Tile
         icon={<Trophy size={13} strokeWidth={2.2} aria-hidden />}
         label="Win rate"
@@ -387,5 +406,87 @@ function Summary({ matches, riotId, clips, streamers }: { matches: MatchSummary[
         sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}
       />
     </div>
+  );
+}
+
+// ---------- Side panel ----------
+
+const card = "rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]";
+
+/** The recorder: what it's doing, the hotkey, and Save clip while recording. */
+function RecorderCard({ status, settings, onSaving, onSettings }: { status: RecorderStatus | null; settings: Settings; onSaving: () => void; onSettings: () => void }) {
+  const state = status?.state;
+  const recording = state === "recording";
+  const bad = state === "error" || state === "noFfmpeg";
+  const line = !isDesktop ? "Recording works in the Windows app" : recording ? `Recording${status?.game?.name ? ` ${status.game.name}` : ""}` : bad ? "Recorder stopped" : state === "waiting" ? "Waiting for a game" : "Starting…";
+  const dot = !isDesktop ? "bg-zinc-500" : recording ? "bg-[#FF453A]" : bad ? "bg-[#FFD60A]" : "bg-[#30D158]";
+  return (
+    <section className={card} aria-label="Recorder">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="m-0 text-[14px] font-semibold text-white">Recorder</h2>
+        <button type="button" onClick={onSettings} title="Recording settings" aria-label="Recording settings" className="grid size-7 place-items-center rounded-lg border-0 bg-transparent text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+          <SettingsIcon size={15} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
+      <p className="m-0 mt-2 flex items-center gap-2 text-[13px] text-zinc-200">
+        <span className={`size-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+        <span className="min-w-0 truncate">{line}</span>
+      </p>
+      <p className="m-0 mt-3 flex flex-wrap items-center gap-1.5 text-[13px] text-zinc-400">
+        Press <Keycap>{settings.hotkey}</Keycap> to save the last <span className="tabular-nums text-zinc-200">{settings.bufferSeconds} s</span>
+      </p>
+      {recording && (
+        <button
+          type="button"
+          onClick={() => {
+            onSaving();
+            void saveClipNow();
+          }}
+          className="mt-3 h-9 w-full rounded-[10px] border-0 bg-white text-[13px] font-semibold text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
+        >
+          Save clip now
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Your newest clips, so the last thing you saved is one click away. */
+function RecentClips({ clips, onOpen, onAll }: { clips: ClipInfo[]; onOpen: (c: ClipInfo) => void; onAll: () => void }) {
+  const recent = [...clips].sort((a, b) => b.createdMs - a.createdMs).slice(0, 5);
+  return (
+    <section className={card} aria-label="Recent clips">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="m-0 text-[14px] font-semibold text-white">Recent clips</h2>
+        {clips.length > 0 && (
+          <button type="button" onClick={onAll} className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12.5px] font-medium text-zinc-400 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+            See all
+          </button>
+        )}
+      </div>
+      {recent.length ? (
+        <ul className="m-0 mt-2 flex list-none flex-col p-0">
+          {recent.map((c) => {
+            const src = thumbSrc(c.thumb);
+            return (
+              <li key={c.path}>
+                <button type="button" onClick={() => onOpen(c)} className="group flex w-full items-center gap-3 rounded-xl border-0 bg-transparent p-1.5 text-left transition-colors hover:bg-white/[0.05] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+                  <span className="relative grid h-10 w-[70px] shrink-0 place-items-center overflow-hidden rounded-lg bg-zinc-800 text-zinc-500">
+                    {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" /> : <Play size={14} strokeWidth={1.75} aria-hidden />}
+                    {c.durationSec != null && <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 text-[10px] leading-4 text-white tabular-nums">{formatDuration(c.durationSec)}</span>}
+                  </span>
+                  <span className="flex min-w-0 flex-col">
+                    <b className="truncate text-[13px] font-medium text-zinc-100">{c.kind === "theirs" && c.round ? `R${c.round} · ` : ""}{cardTitle(c)}</b>
+                    <span className="truncate text-[12px] text-zinc-400">{[c.kind === "theirs" ? c.streamer : c.map ?? c.game, timeAgo(c.createdMs)].filter(Boolean).join(" · ")}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="m-0 mt-2 text-[13px] text-zinc-400">Clips you save show up here.</p>
+      )}
+    </section>
   );
 }

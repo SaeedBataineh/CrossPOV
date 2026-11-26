@@ -142,9 +142,9 @@ export function TopBar({
   const recording = status?.state === "recording";
   const game = recording ? status?.game : null;
 
-  // Lines up with the centred 1200px page column below (main has 28px padding and a 10px scrollbar gutter).
+  // Lines up with the centred page column (max 1640px) below (main has 28px padding and a 10px scrollbar gutter).
   return (
-    <header className="relative z-10 flex h-[68px] shrink-0 items-center gap-4 pr-[max(38px,calc((100%-1190px)/2))] pl-[max(28px,calc((100%-1210px)/2))]">
+    <header className="relative z-10 flex h-[68px] shrink-0 items-center gap-4 pr-[max(38px,calc((100%-1630px)/2))] pl-[max(28px,calc((100%-1650px)/2))]">
       {searchLabel ? (
         <Spotlight label={searchLabel} query={query} onQuery={onQuery} />
       ) : (

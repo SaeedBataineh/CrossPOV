@@ -637,9 +637,10 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 @media (prefers-reduced-motion: reduce) { .gthumb, .tg, .tg::after, .btn, .b { transition: none; } .gthumb:hover { transform: none; } }
 
 /* ---------- Centred column and light motion ---------- */
-/* Every page sits in one 1200px column, centred in the window. */
-.main > * { width: 100%; max-width: 1200px; margin-inline: auto; }
-.page, .page.wide, .settings-layout, .viewer { max-width: 1200px; margin-inline: auto; width: 100%; }
+/* Pages use the window's width up to 1640px, centred beyond that. */
+.main > * { width: 100%; max-width: 1640px; margin-inline: auto; }
+.page, .page.wide, .viewer { max-width: 1640px; margin-inline: auto; width: 100%; }
+.settings-layout { max-width: 1100px; margin-inline: auto; width: 100%; }
 
 /* A page or clip fades up a few pixels when opened; match details do the same when expanded. */
 @keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -659,3 +660,17 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .sw.streamer { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55); }
 .you-row td { background: rgba(255, 255, 255, 0.05); }
 .you-row td:first-child { box-shadow: none; }
+
+/* ---------- One accent: soft violet ---------- */
+/* Violet means "selected" or "streamer" (Twitch is where the other POVs come
+   from). Green and red stay for wins and losses only. */
+:root { --accent: #8b5cf6; --accent-soft: #a78bfa; --accent-bg: rgba(139, 92, 246, 0.14); }
+.settings-nav button[aria-current="true"] { background: var(--accent-bg); box-shadow: none; color: #fff; }
+.seg button[aria-checked="true"], .seg button[aria-selected="true"] { background: rgba(139, 92, 246, 0.2); box-shadow: none; color: #fff; }
+.tg[aria-checked="true"] { background: var(--accent); }
+.bar i { background: var(--accent-soft); }
+.rnd.streamer, .sw.streamer { box-shadow: inset 0 0 0 1.5px rgba(167, 139, 250, 0.8); }
+.btn.primary, .b.r { background: #f4f4f5; }
+
+/* The sidebar sizes itself (220px, or a 68px rail below 1100px). */
+.app { grid-template-columns: auto minmax(0, 1fr); }

@@ -66,7 +66,7 @@ export function SegmentedControl<T extends string>({
       {thumb && (
         <span
           aria-hidden
-          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-white/[0.09] shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
+          className="absolute top-[3px] bottom-[3px] left-0 rounded-[7px] bg-violet-500/[0.18] shadow-[0_1px_2px_rgba(0,0,0,0.35)] transition-[transform,width] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
           style={{ width: thumb.w, transform: `translateX(${thumb.x}px)` }}
         />
       )}
@@ -85,7 +85,7 @@ export function SegmentedControl<T extends string>({
           >
             {s.label}
             {s.n != null && !(hideZero && s.n === 0) && (
-              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-white/15 text-white" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
+              <span className={`min-w-[18px] rounded-md px-1.5 text-center text-[11px] leading-[18px] font-semibold tabular-nums ${on ? "bg-violet-400/25 text-violet-100" : "bg-white/[0.06] text-zinc-400"}`}>{s.n}</span>
             )}
           </button>
         );
