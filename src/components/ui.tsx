@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { thumbSrc, type ClipInfo } from "../lib/backend";
+import { useState, type ReactNode } from "react";
+import { isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { ini } from "../lib/matchInfo";
 import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
 
@@ -269,3 +270,27 @@ export function SaveState({ d }: { d: Draft }) {
   );
 }
 
+
+/**
+ * A streamer's Twitch picture, loaded through crosspov.com (so your PC never
+ * contacts Twitch), or their initials when there's no picture or it won't load.
+ */
+export function Avatar({ name, avatar, size = 36 }: { name: string; avatar?: string | null; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const style = { width: size, height: size, fontSize: Math.round(size / 3) };
+  if (!avatar || failed) {
+    return <span className="avatar sq" style={style} aria-hidden="true">{ini(name)}</span>;
+  }
+  const base = isDesktop ? "https://crosspov.com" : "";
+  return (
+    <img
+      className="avatar sq"
+      style={style}
+      src={`${base}/api/avatar?u=${encodeURIComponent(avatar)}`}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}

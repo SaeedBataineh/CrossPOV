@@ -14,7 +14,7 @@
 import { fromHenrikV4, type HMatch, type MatchSummary } from "./match.ts";
 import { scannerHealth, scannerLinks, scannerSaveLinks, scannerStreams, scannerVerify, type ScannerEnv } from "./scanner.ts";
 import { clientVersion, LATEST_JSON, outdated, parseLatest, type Latest } from "./appVersion.ts";
-import { checkChannel, findStreamers, isMainAccount, TwitchError, type TwitchEnv } from "./twitch.ts";
+import { checkChannel, findStreamers, isMainAccount, twitchAvatar, TwitchError, type TwitchEnv } from "./twitch.ts";
 
 export interface Env extends TwitchEnv, ScannerEnv {
   HENRIK_API_KEY?: string;
@@ -65,6 +65,9 @@ const MATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
  */
 let henrikPausedUntil = 0;
 const BUSY = "Match data is busy right now. CrossPOV will try again in a few minutes.";
+const HENRIK_TROUBLE = "VALORANT match data (HenrikDev) is having trouble right now. CrossPOV will try again in a few minutes.";
+const REGION_NAMES: Record<string, string> = { na: "North America", eu: "Europe", ap: "Asia Pacific", kr: "Korea", br: "Brazil", latam: "Latin America" };
+const ACCOUNT_TTL = 60 * 60 * 24; // an account rarely changes region
 
 export function resetHenrikPause(): void {
   henrikPausedUntil = 0;
@@ -83,7 +86,7 @@ async function henrik(env: Env, path: string): Promise<unknown> {
     throw new HttpError(429, BUSY);
   }
   if (res.status === 401 || res.status === 403) throw new HttpError(503, "The server's HenrikDev API key was rejected.");
-  throw new HttpError(502, `Match data service error (${res.status}).`);
+  throw new HttpError(502, HENRIK_TROUBLE);
 }
 
 /** Runs `load` once per cache key per TTL, using Cloudflare's edge cache. */
@@ -157,18 +160,32 @@ async function latestMatch(url: URL, env: Env, ctx?: ExecutionContext): Promise<
   if (!REGIONS.has(region)) throw new HttpError(400, "Region must be one of: na, eu, ap, kr, br, latam.");
   if (!validRiotId(name, tag)) throw new HttpError(400, "Enter a Riot ID like Name#TAG.");
 
-  const key = `latest/${region}/${encodeURIComponent(name.toLowerCase())}/${encodeURIComponent(tag.toLowerCase())}`;
-  const body = await cachedData(key, LATEST_TTL, ctx, async () => {
-    const path = `/valorant/v4/matches/${region}/pc/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=1`;
-    const res = (await henrik(env, path)) as { data?: HMatch[] };
-    const first = res.data?.[0];
-    if (!first) throw new HttpError(404, "No recent matches found.");
-    const match: MatchSummary = fromHenrikV4(first);
-    return { match };
-  });
+  const latestIn = (r: string) =>
+    cachedData(`latest/${r}/${encodeURIComponent(name.toLowerCase())}/${encodeURIComponent(tag.toLowerCase())}`, LATEST_TTL, ctx, async () => {
+      const path = `/valorant/v4/matches/${r}/pc/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=1`;
+      const res = (await henrik(env, path)) as { data?: HMatch[] };
+      const first = res.data?.[0];
+      if (!first) throw new HttpError(404, "No recent matches found.");
+      const match: MatchSummary = fromHenrikV4(first);
+      return { match };
+    });
+  let body: { match: MatchSummary; accountRegion?: string };
+  try {
+    body = await latestIn(region);
+  } catch (err) {
+    // Asking the wrong region gets "not found", or from HenrikDev sometimes
+    // an error. Ask which region the account is really on and try there.
+    if (!(err instanceof HttpError) || (err.status !== 404 && err.status !== 502)) throw err;
+    const real = await accountRegion(env, name, tag, ctx).catch(() => null);
+    if (!real || real === region) {
+      if (err.status === 404) throw new HttpError(404, `We couldn't find ${name}#${tag} in ${REGION_NAMES[region]}. Check your Riot ID and region in Settings.`);
+      throw err;
+    }
+    body = { ...(await latestIn(real)), accountRegion: real };
+  }
   // Start finding streamers and lining up their VODs now, in the background,
   // so the answer is ready (or nearly) when the app asks a moment later.
-  if (ctx && body.match) ctx.waitUntil(warmStreamers(region, body.match, env, ctx));
+  if (ctx && body.match) ctx.waitUntil(warmStreamers(body.accountRegion ?? region, body.match, env, ctx));
   return json(body, 200, LATEST_TTL);
 }
 
@@ -187,6 +204,15 @@ async function warmStreamers(region: string, match: MatchSummary, env: Env, ctx:
   } catch (err) {
     console.log(`warm-up for ${match.id} failed: ${err instanceof Error ? err.message : err}`);
   }
+}
+
+/** The region a Riot account plays on ("na", "eu"...), from HenrikDev, cached for a day. */
+async function accountRegion(env: Env, name: string, tag: string, ctx?: ExecutionContext): Promise<string | null> {
+  return cachedData(`account/${encodeURIComponent(name.toLowerCase())}/${encodeURIComponent(tag.toLowerCase())}`, ACCOUNT_TTL, ctx, async () => {
+    const res = (await henrik(env, `/valorant/v1/account/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`)) as { data?: { region?: string } };
+    const r = res.data?.region?.toLowerCase();
+    return r && REGIONS.has(r) ? r : null;
+  });
 }
 
 async function loadMatch(region: string, id: string, env: Env, ctx?: ExecutionContext): Promise<MatchSummary> {
@@ -317,8 +343,26 @@ async function latestRelease(env: Env, ctx?: ExecutionContext): Promise<Latest |
   }
 }
 
+/**
+ * A streamer's Twitch profile picture, passed through this server so the app
+ * and the website never contact Twitch directly. Only pictures from Twitch's
+ * image server; Cloudflare keeps each for a week.
+ */
+async function avatar(url: URL): Promise<Response> {
+  const src = twitchAvatar(url.searchParams.get("u") ?? undefined);
+  if (!src) return new Response(null, { status: 400 });
+  const res = await fetch(src, { cf: { cacheTtl: 7 * 24 * 3600, cacheEverything: true } } as RequestInit);
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || !/^image\/(png|jpeg|webp|gif)$/.test(type)) return new Response(null, { status: 404 });
+  return new Response(res.body, {
+    headers: { "content-type": type, "cache-control": "public, max-age=604800", "x-content-type-options": "nosniff", "access-control-allow-origin": "*" },
+  });
+}
+
 export async function handleApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  // Streamers' pictures load many at once and are cached: not rate limited.
+  if (url.pathname === "/api/avatar") return avatar(url);
   const ip = request.headers.get("cf-connecting-ip");
   if (ip && url.pathname !== "/api/health" && rateLimited(ip)) {
     return json({ error: "Too many requests. Wait a minute and try again." }, 429);

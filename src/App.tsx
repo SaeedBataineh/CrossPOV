@@ -7,7 +7,7 @@ import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { same } from "./lib/riotId";
-import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
+import { DEFAULT_SETTINGS, REGIONS, type Settings } from "./lib/settings";
 import { useMatches } from "./lib/useMatches";
 import { useRecorder } from "./lib/useRecorder";
 import Home from "./pages/Home";
@@ -106,6 +106,22 @@ export default function App() {
           {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}
           {status?.message && ["error", "noFfmpeg", "starting"].includes(status.state) && (
             <Notice tone={status.state === "starting" ? "info" : "bad"}>{status.message}</Notice>
+          )}
+          {matchesState.status?.regionHint && matchesState.status.regionHint !== settings.region && (
+            <Notice tone="info">
+              Your matches are played in {REGIONS.find((r) => r.value === matchesState.status?.regionHint)?.label ?? matchesState.status.regionHint}, but your region in Settings is{" "}
+              {REGIONS.find((r) => r.value === settings.region)?.label ?? settings.region}.{" "}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  const region = matchesState.status?.regionHint;
+                  if (region) saveSettings({ ...settings, region }).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"));
+                }}
+              >
+                Switch to {REGIONS.find((r) => r.value === matchesState.status?.regionHint)?.label}
+              </button>
+            </Notice>
           )}
           {isDesktop && !settings.riotId && page !== "settings" && (
             <Notice tone="warn">

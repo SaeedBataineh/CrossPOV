@@ -84,7 +84,7 @@ pub const DEFAULT_SERVER_URL: &str = "https://crosspov.com";
 const OLD_SERVER_URL: &str = "https://crosspov.batainehsaeed1.workers.dev";
 /// Longest lead-in / follow-through for a streamer clip, in seconds.
 pub const MAX_PADDING: u32 = 120;
-const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
+pub const REGIONS: [&str; 6] = ["na", "eu", "ap", "kr", "br", "latam"];
 
 /// A game you added: its program file name, and what to call it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

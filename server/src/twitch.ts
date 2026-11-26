@@ -28,7 +28,8 @@ export interface StreamerResult {
   puuid: string;
   name: string;
   tag: string;
-  channel: { id: string; login: string; displayName: string };
+  /** `avatar`: their Twitch profile picture (a small one, on Twitch's image server). */
+  channel: { id: string; login: string; displayName: string; avatar?: string };
   /** The VOD covering the match, or null if they were live but don't save VODs. */
   vod: StreamerVod | null;
   /** Game category if they're live right now. */
@@ -114,6 +115,21 @@ interface HUser {
   id: string;
   login: string;
   display_name: string;
+  profile_image_url?: string;
+}
+
+/** A small version of a Twitch profile picture, or undefined if it isn't one. */
+export function twitchAvatar(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" || u.hostname !== "static-cdn.jtvnw.net" || !u.pathname.startsWith("/jtv_user_pictures/")) return undefined;
+    // Pictures come in sizes named in the file: "...-300x300.png" -> "...-70x70.png".
+    u.pathname = u.pathname.replace(/-\d+x\d+(\.\w+)$/, "-70x70$1");
+    return u.toString();
+  } catch {
+    return undefined;
+  }
 }
 interface HStream {
   user_id: string;
@@ -190,7 +206,7 @@ async function checkChannels(env: TwitchEnv, match: MatchSummary, chosen: Map<st
       puuid,
       name: player.name,
       tag: player.tag,
-      channel: { id: user.id, login: user.login, displayName: user.display_name },
+      channel: { id: user.id, login: user.login, displayName: user.display_name, avatar: twitchAvatar(user.profile_image_url) },
       vod: vod
         ? {
             id: vod.v.id,

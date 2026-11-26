@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Page } from "../components/Shell";
-import { cardTitle, GalleryCard, Notice, PendingCard } from "../components/ui";
+import { Avatar, cardTitle, GalleryCard, Notice, PendingCard } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
@@ -24,6 +24,7 @@ import { timeAgo, type useRecorder } from "../lib/useRecorder";
 interface Live {
   login: string;
   name: string;
+  avatar?: string | null;
   text: string;
   tone: string;
 }
@@ -32,12 +33,12 @@ function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefin
   const st = streamers?.players.find((s) => s.puuid === p.puuid);
   if (st) {
     const l = streamerLabel(st, Boolean(me && p.team === me.team));
-    return { login: st.channel.login, name: st.channel.displayName, text: l.text, tone: l.tone };
+    return { login: st.channel.login, name: st.channel.displayName, avatar: st.channel.avatar, text: l.text, tone: l.tone };
   }
   const ws = Array.isArray(web) ? web.find((w) => w.puuid === p.puuid) : undefined;
   if (ws) {
     const fights = me ? match.kills.filter((k) => (k.killer === me.puuid && k.victim === p.puuid) || (k.killer === p.puuid && k.victim === me.puuid)).length : 0;
-    return { login: ws.channel.login, name: ws.channel.displayName, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
+    return { login: ws.channel.login, name: ws.channel.displayName, avatar: ws.channel.avatar, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
   }
   return null;
 }
@@ -243,7 +244,7 @@ function MatchView({
                 const pct = progressOf(p.puuid);
                 return (
                   <div key={p.puuid} className="streamer-card">
-                    <span className="avatar" aria-hidden="true">{l.name.slice(0, 2).toUpperCase()}</span>
+                    <Avatar name={l.name} avatar={l.avatar} size={44} />
                     <span className="grow stack" style={{ gap: 3 }}>
                       <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
                       <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>

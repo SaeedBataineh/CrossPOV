@@ -99,6 +99,9 @@ pub struct MatchesStatus {
     pub error: Option<String>,
     /// False until the user has entered their Riot ID.
     pub configured: bool,
+    /// The region your matches are really played on, when it isn't the one
+    /// in Settings (the server found them there instead), e.g. "na".
+    pub region_hint: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -261,10 +264,14 @@ impl MatchWatcher {
 
     pub fn update_settings(&self, s: Settings) {
         let configured = split_riot_id(&s.riot_id).is_some();
+        let region = s.region.clone();
         *self.settings.lock().unwrap_or_else(|e| e.into_inner()) = s;
         let status = {
             let mut st = self.status.lock().unwrap_or_else(|e| e.into_inner());
             st.configured = configured;
+            if st.region_hint.as_deref() == Some(region.as_str()) {
+                st.region_hint = None; // You switched to it.
+            }
             st.clone()
         };
         (self.listener)(MatchEvent::Status(status));
@@ -299,6 +306,10 @@ impl MatchWatcher {
             st.last_check_ms = Some(now_ms());
             st.error = result.as_ref().err().cloned();
             st.configured = split_riot_id(&s.riot_id).is_some();
+            if let Ok(m) = &result {
+                let r = m.region.to_lowercase();
+                st.region_hint = (!r.is_empty() && r != s.region && crate::settings::REGIONS.contains(&r.as_str())).then_some(r);
+            }
             st.clone()
         };
         (self.listener)(MatchEvent::Status(status));

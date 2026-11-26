@@ -33,6 +33,9 @@ pub struct Channel {
     pub id: String,
     pub login: String,
     pub display_name: String,
+    /// Their Twitch profile picture (on Twitch's image server), when the server sent one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -651,6 +654,9 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
         let nothing = me.is_some() && fights == 0;
         let shift = if nothing { None } else { hit.verify.clone() };
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == hit.puuid) {
+            if hit.channel.avatar.is_some() {
+                p.channel.avatar = hit.channel.avatar.clone(); // A later check can bring their picture.
+            }
             p.vod = hit.vod.or(p.vod.take());
             p.fights = fights;
             if nothing && p.status == StreamerStatus::Working {
@@ -1305,7 +1311,7 @@ mod tests {
         let mut p = PlayerState {
             puuid: "p".into(),
             name: "x".into(),
-            channel: Channel { id: "1".into(), login: "wtfslump".into(), display_name: "wtfslump".into() },
+            channel: Channel { id: "1".into(), login: "wtfslump".into(), display_name: "wtfslump".into(), avatar: None },
             vod: None,
             status: StreamerStatus::Working,
             clips: 0,
@@ -1457,7 +1463,7 @@ mod tests {
         let mk = |puuid: &str, fights: u32, clips: u32| PlayerState {
             puuid: puuid.into(),
             name: puuid.into(),
-            channel: Channel { id: "1".into(), login: puuid.into(), display_name: puuid.into() },
+            channel: Channel { id: "1".into(), login: puuid.into(), display_name: puuid.into(), avatar: None },
             status: StreamerStatus::Working,
             vod: None,
             clips,
@@ -1492,7 +1498,7 @@ mod tests {
             puuid: "st".into(),
             name: "streamer".into(),
             tag: "1".into(),
-            channel: Channel { id: "9".into(), login: "streamer".into(), display_name: "Streamer".into() },
+            channel: Channel { id: "9".into(), login: "streamer".into(), display_name: "Streamer".into(), avatar: None },
             vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
             live_game: Some("VALORANT".into()),
             verify: None,
@@ -1524,7 +1530,7 @@ mod tests {
             puuid: "mate".into(),
             name: "mate".into(),
             tag: "1".into(),
-            channel: Channel { id: "8".into(), login: "mate".into(), display_name: "Mate".into() },
+            channel: Channel { id: "8".into(), login: "mate".into(), display_name: "Mate".into(), avatar: None },
             vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
             live_game: Some("VALORANT".into()),
             verify: Some(VerifyInfo { verdict: "pending".into(), delay_sec: None }),

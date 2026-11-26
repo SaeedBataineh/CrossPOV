@@ -215,6 +215,8 @@ export interface MatchesStatus {
   lastCheckMs: number | null;
   error: string | null;
   configured: boolean;
+  /** Your matches' real region, when it isn't the one in Settings, e.g. "na". */
+  regionHint?: string | null;
 }
 
 export async function listMatches(): Promise<MatchSummary[]> {
@@ -263,7 +265,7 @@ export type StreamerStatus = "working" | "clipped" | "noFights" | "noVod" | "sub
 export interface StreamerPlayer {
   puuid: string;
   name: string;
-  channel: { id: string; login: string; displayName: string };
+  channel: { id: string; login: string; displayName: string; avatar?: string | null };
   vod: { id: string; url: string; startedAt: string; durationSec: number; offsetSec: number; live: boolean } | null;
   status: StreamerStatus;
   clips: number;
@@ -318,7 +320,7 @@ export const onStreamersUpdated = (cb: (s: MatchStreamers) => void) => listen("s
 /** A streamer found in a match, as the server reports it (website demo). */
 export interface WebStreamer {
   puuid: string;
-  channel: { login: string; displayName: string };
+  channel: { login: string; displayName: string; avatar?: string | null };
   vod: { url: string; offsetSec: number; durationSec: number; live: boolean } | null;
 }
 

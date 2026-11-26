@@ -118,6 +118,55 @@ test("latest-match explains bad input and upstream problems", async () => {
   assert.equal(noKey.calls.length, 0);
 });
 
+test("latest-match finds an account that's on another region", async () => {
+  // Asked for EU; HenrikDev errors there, the account is on NA, and NA has the match.
+  const r = await call("/api/latest-match?region=eu&name=Wanderer&tag=X%203", (url) => {
+    if (url.includes("/v4/matches/eu/")) return new Response("{}", { status: 500 });
+    if (url.includes("/v1/account/")) return Response.json({ status: 200, data: { region: "na" } });
+    if (url.includes("/v4/matches/na/")) return Response.json({ status: 200, data: [SAMPLE] });
+    return new Response("{}", { status: 404 });
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.accountRegion, "na");
+  assert.equal((r.body.match as { id: string }).id, MATCH_ID);
+  assert.ok(r.calls.some((c) => c.url.endsWith("/valorant/v1/account/Wanderer/X%203")));
+
+  // Same region, really not there: say so plainly.
+  const missing = await call("/api/latest-match?region=eu&name=Nobody&tag=000", (url) =>
+    url.includes("/v1/account/") ? Response.json({ status: 200, data: { region: "eu" } }) : new Response("{}", { status: 404 }),
+  );
+  assert.equal(missing.status, 404);
+  assert.match(String(missing.body.error), /couldn't find Nobody#000 in Europe/);
+});
+
+test("avatars pass only Twitch profile pictures through", async () => {
+  const pic = "https://static-cdn.jtvnw.net/jtv_user_pictures/abc-profile_image-70x70.png";
+  const ok = await fetchAvatar(`/api/avatar?u=${encodeURIComponent(pic)}`, () => new Response("png", { headers: { "content-type": "image/png" } }));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("content-type"), "image/png");
+  assert.equal(ok.calls[0], pic);
+  const other = await fetchAvatar(`/api/avatar?u=${encodeURIComponent("https://evil.test/x.png")}`, () => new Response("x"));
+  assert.equal(other.status, 400);
+  assert.equal(other.calls.length, 0, "never fetches anything else");
+  const notImage = await fetchAvatar(`/api/avatar?u=${encodeURIComponent(pic)}`, () => new Response("<html>", { headers: { "content-type": "text/html" } }));
+  assert.equal(notImage.status, 404);
+});
+
+async function fetchAvatar(path: string, upstream: (url: string) => Response) {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return upstream(String(input));
+  }) as typeof fetch;
+  try {
+    const res = await handleApi(new Request("https://crosspov.test" + path), {});
+    return { status: res.status, headers: res.headers, calls };
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 test("match by id validates the id", async () => {
   const bad = await call("/api/match/eu/not-an-id", () => new Response("{}"));
   assert.equal(bad.status, 400);

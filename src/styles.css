@@ -561,3 +561,4 @@ kbd { padding: 1px 6px; border: 1px solid var(--line-3); border-radius: 4px; fon
 a { color: var(--text); }
 :focus-visible { outline-color: #fff; }
 .toast { border-radius: 6px; border: 1px solid var(--line-2); }
+img.avatar { object-fit: cover; display: block; background: var(--raised); }

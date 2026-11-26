@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Page } from "../components/Shell";
-import { Notice } from "../components/ui";
+import { Avatar, Notice } from "../components/ui";
 import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
 import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
@@ -95,7 +95,7 @@ export default function Streamers({
             return (
               <div key={`${matchId}-${p.puuid}`} className="table-row" role="row">
                 <span role="cell" className="row" style={{ gap: 12, minWidth: 0 }}>
-                  <span className="avatar sq" aria-hidden="true">{ini(p.channel.displayName)}</span>
+                  <Avatar name={p.channel.displayName} avatar={p.channel.avatar} />
                   <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <a href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b></a>
                     <span className="muted small ellipsis">{["Twitch", mate ? "Teammate" : me && who ? "Enemy" : null, who?.agent].filter(Boolean).join(" · ")}</span>

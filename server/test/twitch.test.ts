@@ -1,6 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { findStreamers, isMainAccount, loginCandidates, parseTwitchDuration, resetTwitchToken, vodCovers } from "../src/twitch.ts";
+import { findStreamers, isMainAccount, loginCandidates, parseTwitchDuration, resetTwitchToken, twitchAvatar, vodCovers } from "../src/twitch.ts";
 import type { MatchSummary } from "../src/match.ts";
 
 const START = "2026-11-24T19:00:00.000Z";
@@ -176,4 +176,14 @@ test("a main account is one whose name is the channel", () => {
   assert.ok(isMainAccount("TTV Salt_Boran", "salt_boran"));
   assert.ok(isMainAccount("NaturE", "nature"));
   assert.ok(!isMainAccount("random guy", "nature"), "a smurf");
+});
+
+test("twitchAvatar keeps only Twitch profile pictures, at a small size", () => {
+  assert.equal(
+    twitchAvatar("https://static-cdn.jtvnw.net/jtv_user_pictures/abc-profile_image-300x300.png"),
+    "https://static-cdn.jtvnw.net/jtv_user_pictures/abc-profile_image-70x70.png",
+  );
+  assert.equal(twitchAvatar("https://example.com/jtv_user_pictures/a-300x300.png"), undefined);
+  assert.equal(twitchAvatar("http://static-cdn.jtvnw.net/jtv_user_pictures/a-300x300.png"), undefined);
+  assert.equal(twitchAvatar(undefined), undefined);
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cardMeta, cardTitle } from "../components/ui";
+import { Avatar, cardMeta, cardTitle } from "../components/ui";
 import { clipVideoSrc, deleteClip, findMe, isDesktop, openClip, revealClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
-import { ini, result, resultColor } from "../lib/matchInfo";
+import { result, resultColor } from "../lib/matchInfo";
 import { findPairs, fightMarks, matchOf, pairsWith, vodLink } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
 import { formatDuration } from "../lib/useRecorder";
@@ -240,7 +240,7 @@ export default function Viewer({
             <div className="side-box">
               <p className="eyebrow">The other side</p>
               <div className="row" style={{ gap: 12 }}>
-                <span className="avatar sq" aria-hidden="true">{ini(theirs.streamer ?? "?")}</span>
+                <Avatar name={theirs.streamer ?? "?"} avatar={st?.channel.avatar} size={40} />
                 <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                   <b className="ellipsis">{theirs.streamer ?? "Streamer"}</b>
                   <span className="muted small">
