@@ -1,6 +1,6 @@
 [package]
 name = "crosspov"
-version = "0.3.3"
+version = "0.3.4"
 description = "CrossPOV desktop app"
 edition = "2021"
 publish = false
