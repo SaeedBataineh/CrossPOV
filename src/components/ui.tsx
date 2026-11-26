@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { useEffect, useState, type ReactNode } from "react";
+import { appIcon, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
 import { ini } from "../lib/matchInfo";
 import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
@@ -74,16 +74,34 @@ export function Toggle({ label, checked, onChange, disabled }: { label: string; 
 }
 
 /** One settings line: label and help on the left, control on the right. */
-export function Row({ label, help, children }: { label: string; help?: ReactNode; children?: ReactNode }) {
+export function Row({ label, help, icon, children }: { label: string; help?: ReactNode; icon?: ReactNode; children?: ReactNode }) {
+  const text = (
+    <span>
+      <b>{label}</b>
+      {help && <small>{help}</small>}
+    </span>
+  );
   return (
     <div className="sr">
-      <span>
-        <b>{label}</b>
-        {help && <small>{help}</small>}
-      </span>
+      {icon ? <span className="row" style={{ gap: 10, minWidth: 0 }}>{icon}{text}</span> : text}
       {children}
     </div>
   );
+}
+
+/** A program's own icon (taken from its .exe), or its first letter until we have it. */
+export function AppIcon({ exe, name, color = "#8a8f98" }: { exe: string; name: string; color?: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSrc(null);
+    appIcon(exe).then((u) => live && setSrc(u));
+    return () => {
+      live = false;
+    };
+  }, [exe]);
+  if (src) return <img className="src-ic app-ic" src={src} alt="" />;
+  return <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }} aria-hidden="true">{name[0]?.toUpperCase()}</span>;
 }
 
 /** 0-200 % volume slider. */

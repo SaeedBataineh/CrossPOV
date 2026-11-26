@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
+import { AppIcon, Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
 import { isDesktop, listAudioApps, listMicDevices } from "../lib/backend";
 import type { AppAudio, Settings } from "../lib/settings";
 import { useDraft, type Draft } from "../lib/useDraft";
@@ -15,6 +15,7 @@ export function SaveBar({ d }: { d: Draft }) {
 
 function Channel({
   name,
+  exe,
   sub,
   color,
   on,
@@ -25,6 +26,8 @@ function Channel({
   extra,
 }: {
   name: string;
+  /** The program, for its icon; none for desktop sound. */
+  exe?: string;
   sub: string;
   color: string;
   on: boolean;
@@ -37,7 +40,7 @@ function Channel({
   return (
     <div className="mixer-row" style={on ? undefined : { opacity: 0.55 }}>
       <span className="row" style={{ gap: 10, minWidth: 0 }}>
-        <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }}>{name[0]}</span>
+        {exe ? <AppIcon exe={exe} name={name} color={color} /> : <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }}>{name[0]}</span>}
         <span className="stack" style={{ gap: 0, minWidth: 0 }}>
           <b style={{ fontSize: 12.5 }}>{name}</b>
           <span className="m dim ellipsis" style={{ fontSize: 9.5 }}>{sub}</span>
@@ -85,6 +88,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
           <div className="mixer-row head"><span>Source</span><span>Volume in clips</span><span /><span style={{ textAlign: "right" }}>Record · track</span></div>
           <Channel
             name={gameMode ? "VALORANT" : "Desktop audio"}
+            exe={gameMode ? "VALORANT-Win64-Shipping.exe" : undefined}
             sub={gameMode ? "VALORANT-Win64-Shipping.exe" : "everything you hear"}
             color="#e5332f"
             on={draft.gameAudio}
@@ -98,6 +102,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
               <Channel
                 key={app.exe}
                 name={appName(app.exe)}
+                exe={app.exe}
                 sub={app.exe}
                 color={COLORS[i % COLORS.length]}
                 on={app.enabled}
@@ -161,7 +166,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
             <div className="empty"><span>Whole desktop already records every app. Switch to Game + apps to pick them one by one.</span></div>
           ) : notAdded.length ? (
             notAdded.map((exe) => (
-              <Row key={exe} label={appName(exe)} help={exe}>
+              <Row key={exe} label={appName(exe)} help={exe} icon={<AppIcon exe={exe} name={appName(exe)} />}>
                 <button type="button" className="b sm" onClick={() => set("apps", [...draft.apps, { exe, enabled: true, volume: 100 }])}>+ Record</button>
               </Row>
             ))

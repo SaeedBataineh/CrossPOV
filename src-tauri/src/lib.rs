@@ -11,6 +11,7 @@ mod edit;
 mod fastvod;
 mod ffmpeg;
 mod games;
+mod icons;
 mod matches;
 mod net;
 mod procs;
@@ -591,6 +592,13 @@ async fn list_audio_apps() -> Vec<procs::AudioApp> {
     tauri::async_runtime::spawn_blocking(procs::audio_apps).await.unwrap_or_default()
 }
 
+/// A program's icon as PNG bytes (empty if unknown).
+#[tauri::command]
+async fn app_icon(exe: String, path: Option<String>) -> tauri::ipc::Response {
+    let png = tauri::async_runtime::spawn_blocking(move || icons::icon_png(&exe, path.map(PathBuf::from))).await.ok().flatten();
+    tauri::ipc::Response::new(png.unwrap_or_default())
+}
+
 #[tauri::command]
 async fn list_mic_devices() -> Vec<String> {
     tauri::async_runtime::spawn_blocking(audio::input_device_names).await.unwrap_or_default()
@@ -952,6 +960,7 @@ pub fn run() {
             reveal_clip,
             list_audio_apps,
             list_mic_devices,
+            app_icon,
             list_matches,
             matches_status,
             check_matches_now,

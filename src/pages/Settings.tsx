@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
-import { Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
+import { AppIcon, Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
 import { diagnostics, isDesktop, knownGames, pickFolder, pickGameExe } from "../lib/backend";
 import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
 import { same, validRiotId } from "../lib/riotId";
@@ -290,7 +290,7 @@ function Games({ draft, set }: { draft: S; set: <K extends keyof S>(key: K, valu
       <Panel title="Your games" right={<button type="button" className="b sm" onClick={() => void add()} disabled={!isDesktop}>Add a game</button>}>
         {draft.customGames.length ? (
           draft.customGames.map((g) => (
-            <Row key={g.exe} label={g.name} help={<span className="path">{g.exe}</span>}>
+            <Row key={g.exe} label={g.name} help={<span className="path">{g.exe}</span>} icon={<AppIcon exe={g.exe} name={g.name} />}>
               <button type="button" className="b sm" onClick={() => set("customGames", draft.customGames.filter((x) => x.exe !== g.exe))}>Remove</button>
             </Row>
           ))
@@ -302,7 +302,7 @@ function Games({ draft, set }: { draft: S; set: <K extends keyof S>(key: K, valu
       {draft.ignoredGames.length > 0 && (
         <Panel title="Never recorded">
           {draft.ignoredGames.map((exe) => (
-            <Row key={exe} label={exe.replace(/\.exe$/i, "")} help={<span className="path">{exe}</span>}>
+            <Row key={exe} label={exe.replace(/\.exe$/i, "")} help={<span className="path">{exe}</span>} icon={<AppIcon exe={exe} name={exe} />}>
               <button type="button" className="b sm" onClick={() => set("ignoredGames", draft.ignoredGames.filter((e) => e !== exe))}>Record it again</button>
             </Row>
           ))}

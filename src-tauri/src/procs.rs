@@ -104,6 +104,12 @@ impl Procs {
         sys.processes().values().map(|p| p.name().to_string_lossy().to_lowercase()).collect()
     }
 
+    /// Full path of a running program, by its exe name.
+    pub fn exe_path(&self, exe: &str) -> Option<std::path::PathBuf> {
+        let sys = self.sys.as_ref()?;
+        sys.processes().values().filter(|p| p.name().eq_ignore_ascii_case(exe)).find_map(|p| p.exe().map(|e| e.to_path_buf()))
+    }
+
     /// Exe names for the given process IDs.
     pub fn names(&self, pids: &[u32]) -> HashMap<u32, String> {
         let Some(sys) = &self.sys else { return HashMap::new() };

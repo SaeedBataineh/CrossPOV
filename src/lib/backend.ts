@@ -58,7 +58,30 @@ export async function pickGameExe(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({ multiple: false, filters: [{ name: "Games and programs", extensions: ["exe"] }] });
   if (typeof picked !== "string") return null;
-  return picked.split(/[\\/]/).pop() ?? null;
+  const exe = picked.split(/[\\/]/).pop() ?? null;
+  // Keep its icon now, while we know where the program is.
+  if (exe) void appIcon(exe, picked);
+  return exe;
+}
+
+const icons = new Map<string, Promise<string | null>>();
+
+/** A program's own icon (from its .exe) as an image URL, or null if unknown. */
+export function appIcon(exe: string, path?: string): Promise<string | null> {
+  if (!isDesktop) return Promise.resolve(null);
+  const key = exe.toLowerCase();
+  const cached = icons.get(key);
+  if (cached && !path) return cached;
+  const p = tauriInvoke<ArrayBuffer>("app_icon", { exe, path: path ?? null })
+    .then((buf) => (buf.byteLength ? URL.createObjectURL(new Blob([buf], { type: "image/png" })) : null))
+    .catch(() => null)
+    .then((url) => {
+      // Not found yet: ask again next time (the program may be open by then).
+      if (!url) icons.delete(key);
+      return url;
+    });
+  icons.set(key, p);
+  return p;
 }
 
 /** Names of the games CrossPOV knows without being told. */
