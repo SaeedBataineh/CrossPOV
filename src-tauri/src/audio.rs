@@ -147,8 +147,17 @@ pub fn input_device_names() -> Vec<String> {
 }
 
 /// Adds `frames` stereo frames from a source into `mix`, scaled by `volume`.
+/// Audio kept waiting beyond what's due right now, at most. Anything older is
+/// dropped: sound that sits in a queue plays that much after the picture.
+const MAX_BACKLOG_FRAMES: usize = (AUDIO_RATE / 1000 * 40) as usize;
+
 fn mix_in(src: &Shared, frames: usize, volume: f32, mix: &mut [f32]) {
     if let Ok(mut s) = src.lock() {
+        let keep = (frames + MAX_BACKLOG_FRAMES) * 2;
+        if s.queue.len() > keep {
+            let extra = s.queue.len() - keep;
+            s.queue.drain(..extra);
+        }
         let n = (frames * 2).min(s.queue.len());
         for (out, v) in mix.iter_mut().zip(s.queue.drain(..n)) {
             *out += v * volume;
@@ -418,6 +427,8 @@ impl AudioPipe {
                 let mut last_scan: Option<Instant> = None;
 
                 let mut denoiser = plan.denoise_mic.then(Denoiser::new);
+                // Whether the start-up skip (below) is done.
+                let mut synced = false;
                 let started = Instant::now();
                 let mut written: u64 = 0;
                 let (mut track1, mut track2) = (Vec::new(), Vec::new());
@@ -461,9 +472,24 @@ impl AudioPipe {
 
                     thread::sleep(TICK);
                     let due = (started.elapsed().as_secs_f64() * f64::from(AUDIO_RATE)) as u64;
-                    let frames = due.saturating_sub(written) as usize;
+                    let mut frames = due.saturating_sub(written) as usize;
                     if frames == 0 {
                         continue;
+                    }
+                    // At the start FFmpeg isn't reading yet (it's still starting
+                    // the video capture): don't push the audio that piled up
+                    // meanwhile, or the sound runs that far behind the picture
+                    // for the whole recording. Skip ahead to now, once. Later
+                    // gaps are caught up in full so sound keeps pace with the clock.
+                    let max_burst = (AUDIO_RATE / 1000 * 100) as usize;
+                    if started.elapsed() > Duration::from_secs(5) {
+                        synced = true;
+                    }
+                    if !synced && frames > max_burst {
+                        synced = true;
+                        let tick = (TICK.as_secs_f64() * f64::from(AUDIO_RATE)) as usize;
+                        written += (frames - tick) as u64;
+                        frames = tick;
                     }
                     track1.clear();
                     track1.resize(frames * 2, 0.0f32);
@@ -564,6 +590,36 @@ mod tests {
             }
         }
         assert!(after < before * 0.25, "hiss reduced: {after} vs {before}");
+    }
+
+    #[test]
+    fn audio_that_piles_up_while_ffmpeg_starts_is_dropped() {
+        // FFmpeg takes half a second to start reading (opening the video
+        // capture). The audio from that wait must not be pushed in after it,
+        // or the clip's sound runs half a second behind the picture.
+        struct SlowStart(Arc<Mutex<usize>>, bool);
+        impl Write for SlowStart {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                if !self.1 {
+                    self.1 = true;
+                    thread::sleep(Duration::from_millis(500));
+                }
+                *self.0.lock().unwrap() += b.len();
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let count = Arc::new(Mutex::new(0));
+        let s = Settings { game_audio: false, microphone: false, ..Settings::default() };
+        let pipe = AudioPipe::start(&s, "game.exe", SlowStart(count.clone(), false));
+        thread::sleep(Duration::from_millis(1200));
+        drop(pipe);
+        let seconds = *count.lock().unwrap() as f64 / (48_000.0 * 16.0);
+        // About 0.7 s from when FFmpeg started reading (plus the first tick), not 1.2 s.
+        assert!(seconds < 0.95, "{seconds} s of audio written: the start-up backlog went in");
+        assert!(seconds > 0.5, "{seconds} s: too little audio");
     }
 
     #[test]
