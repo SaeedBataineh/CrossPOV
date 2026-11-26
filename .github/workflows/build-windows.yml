@@ -81,9 +81,12 @@ jobs:
           $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           $isTag = "${{ github.ref }}".StartsWith("refs/tags/v")
           $asked = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release }}" -eq "true"
-          # A push of a version that has no release yet is a release.
+          # A push to the main branch of a version that has no release yet is a release.
+          # Only the main branch: two branches publishing the same version at once mix
+          # their files, and the update's signature no longer matches the download.
           $released = git ls-remote --tags origin "refs/tags/v$version"
-          $newVersion = "${{ github.event_name }}" -eq "push" -and -not $isTag -and -not $released
+          $onMain = "${{ github.ref_name }}" -eq "${{ github.event.repository.default_branch }}"
+          $newVersion = "${{ github.event_name }}" -eq "push" -and -not $isTag -and $onMain -and -not $released
           $release = $isTag -or $asked -or $newVersion
           if ($release -and (($isTag -and "v$version" -ne "${{ github.ref_name }}") -or $npm -ne $version -or $cargo -ne $version)) {
             throw "Tag ${{ github.ref_name }}, tauri.conf.json ($version), package.json ($npm) and Cargo.toml ($cargo) must match. Run: node scripts/bump-version.mjs <version>"
