@@ -162,13 +162,14 @@ fn save_clip_async(app: &AppHandle) {
     thread::spawn(move || {
         let state = app.state::<AppState>();
         let settings = state.get();
+        // Beep the moment the key is pressed, not once the file is written.
+        #[cfg(windows)]
+        if settings.clip_sound && state.recorder.is_recording() {
+            win_audio::beep();
+        }
         let result = state.recorder.save_clip(&clip_folder(&app, &settings));
         match &result {
             Ok(clip) => {
-                #[cfg(windows)]
-                if settings.clip_sound {
-                    win_audio::beep();
-                }
                 let _ = app.emit("clip-saved", clip);
                 if settings.notifications {
                     let _ = app.notification().builder().title("Clip saved").body(&clip.name).show();

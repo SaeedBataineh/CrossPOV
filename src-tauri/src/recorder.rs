@@ -195,6 +195,11 @@ impl Recorder {
         (self.listener)(&status);
     }
 
+    /// True while a game is being recorded (a clip can be saved).
+    pub fn is_recording(&self) -> bool {
+        self.lock().running.is_some()
+    }
+
     pub fn set_hotkey_error(&self, err: Option<String>) {
         self.set_status(|s| s.hotkey_error = err);
     }

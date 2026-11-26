@@ -25,7 +25,7 @@ use windows::{
             AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
             AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, AUDIOCLIENT_ACTIVATION_PARAMS,
             AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
-            PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, SND_ASYNC, SND_MEMORY, SND_NODEFAULT,
+            PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, SND_MEMORY, SND_NODEFAULT, SND_SYNC,
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
         },
         Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT,
@@ -271,9 +271,22 @@ fn beep_wav() -> &'static [u8] {
     })
 }
 
+/// Plays the clip beep. Never blocks: the sound plays on its own long-lived
+/// thread, so it isn't cut off when the thread that asked for it ends, and
+/// presses close together each get their beep.
 pub fn beep() {
-    let wav = beep_wav();
-    unsafe {
-        let _ = PlaySoundW(PCWSTR(wav.as_ptr() as *const u16), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
-    }
+    static PLAYER: OnceLock<std::sync::mpsc::Sender<()>> = OnceLock::new();
+    let tx = PLAYER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let _ = std::thread::Builder::new().name("clip-beep".into()).spawn(move || {
+            let wav = beep_wav();
+            while rx.recv().is_ok() {
+                unsafe {
+                    let _ = PlaySoundW(PCWSTR(wav.as_ptr() as *const u16), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
+                }
+            }
+        });
+        tx
+    });
+    let _ = tx.send(());
 }

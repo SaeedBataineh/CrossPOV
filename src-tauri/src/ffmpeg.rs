@@ -17,8 +17,9 @@ use serde::Serialize;
 
 use crate::settings::{Container, Encoder, Quality, Resolution, Settings};
 
-/// Length of each buffer segment. A hotkey clip is a whole number of these.
-pub const SEGMENT_SECONDS: u32 = 2;
+/// Length of each buffer segment. A hotkey clip is a whole number of these,
+/// and saving waits for the one being written to finish: short keeps it quick.
+pub const SEGMENT_SECONDS: u32 = 1;
 pub const AUDIO_RATE: u32 = 48_000;
 pub const AUDIO_CHANNELS: u16 = 4;
 
@@ -420,7 +421,7 @@ mod tests {
         assert!(!args.contains("hwdownload"), "{args}");
         assert!(args.contains("-map 0:v"));
         assert!(args.contains("-c:v h264_nvenc"));
-        assert!(args.contains("-g 120"));
+        assert!(args.contains("-g 60"), "a keyframe every segment");
     }
 
     #[test]
@@ -477,8 +478,8 @@ mod tests {
 
     #[test]
     fn ring_buffer_settings() {
-        assert_eq!(segment_count(60), 34);
-        assert_eq!(segment_count(15), 12);
+        assert_eq!(segment_count(60), 64);
+        assert_eq!(segment_count(15), 19);
         let a = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(a.contains("-segment_wrap 34 -segment_list_size 34"));
     }
