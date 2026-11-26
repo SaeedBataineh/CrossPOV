@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Page } from "../components/Sidebar";
-import { Avatar, Notice, Nums } from "../components/ui";
+import { Avatar, Notice } from "../components/ui";
 import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
-import { allStreamers, progress, streamerLabel } from "../lib/matchInfo";
+import { allStreamers, ini, progress, streamerLabel } from "../lib/matchInfo";
 import type { Settings } from "../lib/settings";
 import { matchTimeAgo, type useMatches } from "../lib/useMatches";
 import type { useRecorder } from "../lib/useRecorder";
@@ -28,12 +28,12 @@ function LinkedChannels({ notify }: { notify: (text: string, tone: "good" | "bad
       <div className="list boxed">
         {links.map((l) => (
           <div key={l.puuid} className="list-row">
-            <Avatar agent={l.label.split(" · ").pop()} size={32} />
+            <span className="avatar sq" aria-hidden="true">{ini(l.login)}</span>
             <span className="grow stack" style={{ gap: 2 }}>
               <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.login}</b></a>
-              <span className="muted small"><Nums>{`${l.label}${l.seen ? ` · found again ${l.seen}×` : ""}`}</Nums></span>
+              <span className="muted small">{l.label}{l.seen ? ` · found again ${l.seen}×` : ""}</span>
             </span>
-            <button type="button" className="btn sm-btn" onClick={() => void remove(l)}>Forget</button>
+            <button type="button" className="btn quiet" onClick={() => void remove(l)}>Forget</button>
           </div>
         ))}
       </div>
@@ -69,7 +69,7 @@ export default function Streamers({
       .sort((a, b) => (a.round ?? 0) - (b.round ?? 0))[0];
 
   return (
-    <section className="page wide" aria-label="Streamers">
+    <section className="page" aria-label="Streamers">
       <div className="tabs-row plain">
         <p className="muted" style={{ margin: 0 }}>Everyone who was live in your matches, and how their side is coming along.</p>
         <button type="button" className="btn quiet sm-btn" onClick={() => onNavigate("settings")}>Streamer clip settings</button>
@@ -95,19 +95,19 @@ export default function Streamers({
             return (
               <div key={`${matchId}-${p.puuid}`} className="table-row" role="row">
                 <span role="cell" className="row" style={{ gap: 12, minWidth: 0 }}>
-                  <Avatar name={p.channel.displayName} avatar={p.channel.avatar} agent={who?.agent} size={32} />
+                  <Avatar name={p.channel.displayName} avatar={p.channel.avatar} />
                   <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                     <a href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b></a>
                     <span className="muted small ellipsis">{["Twitch", mate ? "Teammate" : me && who ? "Enemy" : null, who?.agent].filter(Boolean).join(" · ")}</span>
                   </span>
                 </span>
-                <span role="cell" className="muted"><Nums>{`${match ? `${match.map} · ${matchTimeAgo(match.startedAt)}` : ""}${p.fights ? ` · ${p.fights} fight${p.fights === 1 ? "" : "s"}` : ""}`}</Nums></span>
+                <span role="cell" className="muted">{match ? `${match.map} · ${matchTimeAgo(match.startedAt)}` : ""}{p.fights ? ` · ${p.fights} fight${p.fights === 1 ? "" : "s"}` : ""}</span>
                 <span role="cell" className="stack" style={{ gap: 6 }}>
-                  <span className={`small ${l.tone}`} title={p.message ?? undefined}><Nums>{l.text}</Nums></span>
+                  <span className={`small ${l.tone}`} title={p.message ?? undefined}>{l.text}</span>
                   {pct != null && pct < 100 && <span className="bar" style={{ width: 160 }}><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
                 </span>
                 <span role="cell" style={{ justifySelf: "end" }}>
-                  {clip && <button type="button" className="btn sm-btn" onClick={() => onOpen(clip)}>Watch</button>}
+                  {clip && <button type="button" className="btn primary sm-btn" onClick={() => onOpen(clip)}>Watch</button>}
                 </span>
               </div>
             );

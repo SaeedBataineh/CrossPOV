@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { appIcon, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
-import { Check, CircleAlert, CirclePlay, FolderOpen, Info, Play, Trash2, TriangleAlert } from "lucide-react";
+import { Check, CirclePlay, FolderOpen, Play, Trash2 } from "lucide-react";
+import { ini } from "../lib/matchInfo";
 import { TwitchIcon } from "./Icons";
-import { AgentIcon, hasAgentArt } from "./ValorantArt";
 import type { Draft } from "../lib/useDraft";
 import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
 
@@ -34,21 +34,9 @@ export function Panel({
 export function Notice({ tone, children }: { tone: "warn" | "bad" | "info"; children: ReactNode }) {
   return (
     <p className={`notice s12 ${tone === "warn" ? "" : tone}`} role={tone === "info" ? "status" : "alert"}>
-      <NoticeIcon tone={tone} />
-      <span>{children}</span>
+      {children}
     </p>
   );
-}
-
-/** The icon that leads a notice: an error, a warning, or plain information. */
-export function NoticeIcon({ tone }: { tone: "warn" | "bad" | "info" }) {
-  const Icon = tone === "bad" ? CircleAlert : tone === "warn" ? TriangleAlert : Info;
-  return <Icon size={16} strokeWidth={1.75} aria-hidden />;
-}
-
-/** Plain text with every number in it set in Geist Mono ("R14", "37 min", "1/2", "9:00"). */
-export function Nums({ children }: { children: string }) {
-  return <>{children.split(/(\d+(?:[:./,]\d+)*)/).map((part, i) => (i % 2 ? <span key={i} className="nm">{part}</span> : part))}</>;
 }
 
 export function Stat({ label, value, purple }: { label: string; value: ReactNode; purple?: boolean }) {
@@ -103,8 +91,8 @@ export function Row({ label, help, icon, children }: { label: string; help?: Rea
   );
 }
 
-/** A program's own icon (taken from its .exe), or its first letter on a plain tile until we have it. */
-export function AppIcon({ exe, name }: { exe: string; name: string; color?: string }) {
+/** A program's own icon (taken from its .exe), or its first letter until we have it. */
+export function AppIcon({ exe, name, color = "#8a8f98" }: { exe: string; name: string; color?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -115,7 +103,7 @@ export function AppIcon({ exe, name }: { exe: string; name: string; color?: stri
     };
   }, [exe]);
   if (src) return <img className="src-ic app-ic" src={src} alt="" />;
-  return <span className="src-ic" aria-hidden="true">{name[0]?.toUpperCase()}</span>;
+  return <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }} aria-hidden="true">{name[0]?.toUpperCase()}</span>;
 }
 
 /** 0-200 % volume slider. */
@@ -171,7 +159,7 @@ export function ClipThumb({ clip, label, big }: { clip: ClipInfo; label?: string
       {src ? (
         <img src={src} alt="" loading="lazy" decoding="async" />
       ) : (
-        <CirclePlay size={big ? 40 : 28} strokeWidth={1.75} aria-hidden />
+        <CirclePlay size={big ? 40 : 28} strokeWidth={1.5} aria-hidden />
       )}
       <span className="tag" style={big ? { fontSize: 10 } : undefined}>{label ?? (isTheirs(clip) ? "THEM" : "YOU")}</span>
       {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
@@ -248,21 +236,21 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
         ) : src ? (
           <img src={src} alt="" loading="lazy" decoding="async" />
         ) : (
-          <CirclePlay size={32} strokeWidth={1.75} color="#a1a1aa" aria-hidden />
+          <CirclePlay size={36} strokeWidth={1.5} color="rgba(255,255,255,0.6)" aria-hidden />
         )}
         <span className="hover-play" aria-hidden="true"><Play size={20} fill="currentColor" strokeWidth={0} /></span>
         {mine && <span className="tag you">YOU</span>}
-        {theirs && <span className="tag them"><TwitchIcon size={11} />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
+        {theirs && <span className="tag them"><TwitchIcon size={10} color="#a970ff" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
         {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
       </button>
       {(onReveal || onDelete) && (
         <span className="gactions">
-          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} strokeWidth={1.75} aria-hidden /></button>}
-          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><Trash2 size={16} strokeWidth={1.75} aria-hidden /></button>}
+          {onReveal && <button type="button" className="icon-btn sm" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
+          {onDelete && <button type="button" className="icon-btn sm" aria-label={`Delete ${t}`} title="Delete" onClick={onDelete}><Trash2 size={16} aria-hidden /></button>}
         </span>
       )}
-      <b className="gtitle"><Nums>{t}</Nums></b>
-      <span className="gmeta"><Nums>{meta ?? cardMeta(clip)}</Nums></span>
+      <b className="gtitle">{t}</b>
+      <span className="gmeta">{meta ?? cardMeta(clip)}</span>
     </div>
   );
 }
@@ -272,8 +260,8 @@ export function PendingCard({ title, meta, children }: { title: string; meta?: s
   return (
     <div className="gcard">
       <div className="gthumb pending">{children}</div>
-      <b className="gtitle"><Nums>{title}</Nums></b>
-      {meta && <span className="gmeta"><Nums>{meta}</Nums></span>}
+      <b className="gtitle">{title}</b>
+      {meta && <span className="gmeta">{meta}</span>}
     </div>
   );
 }
@@ -284,7 +272,7 @@ export function SaveState({ d }: { d: Draft }) {
   return (
     <span className={bad ? "save-state bad" : "save-state"} role="status">
       {!bad && !d.saving && (
-        <Check size={14} strokeWidth={1.75} color="var(--win)" aria-hidden />
+        <Check size={14} strokeWidth={2.5} color="var(--win)" aria-hidden />
       )}
       {d.saving || d.dirty ? "Saving…" : bad ? d.status : "Saved automatically"}
     </span>
@@ -293,26 +281,14 @@ export function SaveState({ d }: { d: Draft }) {
 
 
 /**
- * A streamer's picture, square: their Twitch picture (loaded through
- * crosspov.com, so your PC never contacts Twitch), else the agent they played,
- * else the Twitch mark on a plain tile. Never initials.
+ * A streamer's Twitch picture, loaded through crosspov.com (so your PC never
+ * contacts Twitch), or their initials when there's no picture or it won't load.
  */
-export function Avatar({ avatar, agent, size = 36 }: { name?: string; avatar?: string | null; agent?: string | null; size?: number }) {
+export function Avatar({ name, avatar, size = 36 }: { name: string; avatar?: string | null; size?: number }) {
   const [failed, setFailed] = useState(false);
-  const style = { width: size, height: size };
+  const style = { width: size, height: size, fontSize: Math.round(size / 3) };
   if (!avatar || failed) {
-    if (agent && hasAgentArt(agent)) {
-      return (
-        <span className="avatar sq" style={{ ...style, overflow: "hidden" }} aria-hidden="true">
-          <AgentIcon agent={agent} className="size-full" />
-        </span>
-      );
-    }
-    return (
-      <span className="avatar sq" style={{ ...style, color: "var(--muted)" }} aria-hidden="true">
-        <TwitchIcon size={Math.round(size * 0.45)} />
-      </span>
-    );
+    return <span className="avatar sq" style={style} aria-hidden="true">{ini(name)}</span>;
   }
   const base = isDesktop ? "https://crosspov.com" : "";
   return (

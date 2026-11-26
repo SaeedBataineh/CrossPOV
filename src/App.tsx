@@ -1,12 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
-import { MotionConfig } from "framer-motion";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./app.css";
 import { Sidebar, type Page } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
-import { PageFade } from "./components/Motion";
-import { Notice, NoticeIcon, ToastView } from "./components/ui";
+import { Notice, ToastView } from "./components/ui";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { same } from "./lib/riotId";
@@ -81,7 +79,7 @@ export default function App() {
   const title = viewing ? undefined : page === "streamers" ? "Streamers you played against" : page === "settings" ? "Settings" : undefined;
 
   return (
-    <MotionConfig reducedMotion="user">
+    <>
     <div className="app" inert={blocked}>
       <Sidebar page={page} update={update} onNavigate={setPage} />
       <div className="frame">
@@ -101,8 +99,7 @@ export default function App() {
         <main className="main" ref={mainRef}>
           {!isDesktop && (
             <p className="notice info" role="note">
-              <NoticeIcon tone="info" />
-              <span><b>Website demo with sample data.</b> Recording and streamer clips need the Windows app. <a href="/">About CrossPOV</a></span>
+              <b>Website demo with sample data.</b> Recording and streamer clips need the Windows app. <a href="/">About CrossPOV</a>
             </p>
           )}
           {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
@@ -134,7 +131,6 @@ export default function App() {
             </Notice>
           )}
           <Suspense fallback={<p className="muted">Loading…</p>}>
-            <PageFade key={viewing ? `clip:${viewing.path}` : page} id={viewing ? `clip:${viewing.path}` : page}>
             {viewing ? (
               <Viewer
                 clip={viewing}
@@ -159,13 +155,12 @@ export default function App() {
                 {page === "settings" && <SettingsPage settings={settings} onSaved={onSaved} />}
               </>
             )}
-            </PageFade>
           </Suspense>
         </main>
       </div>
       <ToastView toast={recorder.toast} />
     </div>
     <UpdateGate status={update} />
-    </MotionConfig>
+    </>
   );
 }
