@@ -283,13 +283,14 @@ impl Recorder {
         // restarting, starts afresh); its screen if window capture failed.
         let window = game.as_ref().map(|g| g.hwnd).filter(|&h| h != 0 && !inner.window_failed);
         let key = format!(
-            "{}|{}|{}|{}|{:?}",
+            "{}|{}|{}|{}",
             recording_key(&inner.settings),
             game.as_ref().map_or("", |g| g.exe.as_str()).to_lowercase(),
             game.as_ref().map_or(0, |g| g.output_idx),
-            window.unwrap_or(0),
-            // A new game resolution (or stretched one) starts afresh at the right size.
-            game.as_ref().and_then(|g| if window.is_some() { g.window_size } else { g.screen_size })
+            // Not the window's size: it wobbles (VALORANT reports 1080, then
+            // 1079), and a restart empties the replay buffer. Window capture
+            // resizes every frame to the size it started with anyway.
+            window.unwrap_or(0)
         );
         inner.status.game = game.clone();
 
@@ -455,6 +456,9 @@ impl Recorder {
         let game = Some(game).filter(|g| !g.is_empty());
         let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
 
+        if let Some(h) = fs::read_to_string(plan.progress_file()).ok().as_deref().and_then(ffmpeg::recording_health) {
+            crate::trail(&format!("clip: recording {h}"));
+        }
         let before = read_segment_list(&plan);
         let deadline = Instant::now() + Duration::from_secs(u64::from(SEGMENT_SECONDS) + 2);
         let mut segments = before.clone();

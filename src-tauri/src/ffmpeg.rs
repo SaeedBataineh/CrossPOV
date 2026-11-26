@@ -291,6 +291,22 @@ impl RecordPlan {
     pub fn list_file(&self) -> PathBuf {
         self.segment_dir.join("segments.txt")
     }
+
+    pub fn progress_file(&self) -> PathBuf {
+        self.segment_dir.join("progress.txt")
+    }
+}
+
+/// "fps=118.9 dup=12 drop=0 speed=1x" from FFmpeg's latest -progress block.
+pub fn recording_health(progress: &str) -> Option<String> {
+    let last = |key: &str| progress.lines().rev().find_map(|l| l.strip_prefix(key).map(str::trim));
+    Some(format!(
+        "fps={} dup={} drop={} speed={}",
+        last("fps=")?,
+        last("dup_frames=").unwrap_or("?"),
+        last("drop_frames=").unwrap_or("?"),
+        last("speed=").unwrap_or("?")
+    ))
 }
 
 /// Number of ring-buffer files: enough for the clip length plus spare so
@@ -310,6 +326,10 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         a.extend(items.iter().map(|x| x.to_string()));
     }
     push(&mut a, &["-hide_banner", "-loglevel", "error", "-y"]);
+    // Live stats (frame rate, dropped and repeated frames) every 5 s, read
+    // when a clip is saved so the log shows whether recording keeps up.
+    push(&mut a, &["-stats_period", "5", "-progress"]);
+    a.push(plan.progress_file().to_string_lossy().into_owned());
 
     // Input 0: video.
     let fps = s.fps.to_string();
@@ -421,16 +441,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     push(&mut a, &["-c:v", if plan.hevc { plan.encoder.hevc_codec() } else { plan.encoder.codec() }]);
     match plan.encoder {
         VideoEncoder::Nvenc => {
-            // Higher-quality preset, looking a few frames ahead so fast motion
-            // gets the bits, and keeping detail on what stays on screen. No
+            // p4 without look-ahead: keeps up with 1440p at 120 fps alongside a
+            // game (p5 + look-ahead could fall behind and drop frames). No
             // spatial AQ: it takes bits from busy textures (walls, foliage,
-            // skins), which looks soft in moving game footage. All left out in
-            // compatibility mode, in case an older card refuses them.
-            if plan.compat {
-                push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
-            } else {
-                push(&mut a, &["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
-                push(&mut a, &["-rc-lookahead", "16", "-temporal-aq", "1", "-bf", "3"]);
+            // skins), which looks soft in moving game footage. B-frames are
+            // left out in compatibility mode, in case an older card refuses them.
+            push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
+            if !plan.compat {
+                push(&mut a, &["-bf", "3"]);
             }
         }
         VideoEncoder::Amf => {
@@ -584,7 +602,7 @@ mod tests {
         let p = RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let a = joined(&Settings::default(), &p);
         assert!(a.contains("-c:v hevc_nvenc"), "{a}");
-        assert!(a.contains("-preset p5") && a.contains("-rc-lookahead 16") && !a.contains("spatial-aq"), "{a}");
+        assert!(a.contains("-preset p4") && !a.contains("lookahead") && !a.contains("spatial-aq"), "{a}");
         let compat = joined(&Settings::default(), &RecordPlan { compat: true, ..p });
         assert!(!compat.contains("-bf 3"), "compatibility mode keeps to basic options");
         let amd = joined(&Settings::default(), &RecordPlan { hevc: true, ..plan(VideoSource::Desktop, VideoEncoder::Amf, false) });
@@ -633,6 +651,13 @@ mod tests {
         let screen = RecordPlan { source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let b = joined(&s, &screen);
         assert!(!b.contains("scale"), "{b}");
+    }
+
+    #[test]
+    fn reads_recording_health_from_progress() {
+        let p = "frame=100\nfps=60.0\ndup_frames=0\ndrop_frames=0\nspeed=1x\nprogress=continue\nframe=700\nfps=21.4\ndup_frames=480\ndrop_frames=3\nspeed=1.00x\nprogress=continue\n";
+        assert_eq!(recording_health(p).unwrap(), "fps=21.4 dup=480 drop=3 speed=1.00x");
+        assert_eq!(recording_health(""), None);
     }
 
     #[test]
