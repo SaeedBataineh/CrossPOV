@@ -663,7 +663,7 @@ impl Recorder {
             // Not used: OBS records full-screen games, and its fallback is window
             // capture, which can never show another window (monitor capture let
             // a full-screen Discord on top through).
-            let wgc_monitor = Some(g.hmonitor).filter(|_| false);
+            let wgc_monitor: Option<u64> = None;
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
