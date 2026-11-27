@@ -1,272 +1,32 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import type { Page } from "../components/Shell";
-import { Avatar, cardTitle, GalleryCard, Notice, PendingCard } from "../components/ui";
+import { Select } from "../components/Select";
+import { ArrowsClockwise, GearSix, Play, Sword, User } from "@phosphor-icons/react";
+import { TwitchTabIcon } from "../components/Icons";
+import { MatchCard, type Show } from "../components/MatchCard";
+import { SegmentedControl, type Segment } from "../components/SegmentedControl";
+import type { Page } from "../components/Sidebar";
+import { Keycap } from "../components/TopBar";
+import { mapArt } from "../components/ValorantArt";
+import { cardTitle, Notice } from "../components/ui";
 import {
   addStreamerChannel,
   findMe,
   isDesktop,
   lookupLatestMatch,
   lookupStreamers,
+  saveClipNow,
+  thumbSrc,
+  type RecorderStatus,
   type ClipInfo,
-  type MatchPlayer,
   type MatchStreamers,
   type SuggestedStreamer,
   type MatchSummary,
   type WebStreamer,
 } from "../lib/backend";
-import { progress, result, resultColor, streamerLabel } from "../lib/matchInfo";
-import { findPairs, matchOf, type Pair } from "../lib/pairs";
+import { findPairs, matchOf } from "../lib/pairs";
 import { REGIONS, type Settings } from "../lib/settings";
-import { matchTimeAgo, type useMatches } from "../lib/useMatches";
-import { timeAgo, type useRecorder } from "../lib/useRecorder";
-
-/** What we know about one player being a streamer, from the app or the website demo. */
-interface Live {
-  login: string;
-  name: string;
-  avatar?: string | null;
-  text: string;
-  tone: string;
-}
-
-function liveInfo(p: MatchPlayer, match: MatchSummary, me: MatchPlayer | undefined, streamers?: MatchStreamers, web?: WebStreamer[] | "checking"): Live | null {
-  const st = streamers?.players.find((s) => s.puuid === p.puuid);
-  if (st) {
-    const l = streamerLabel(st, Boolean(me && p.team === me.team));
-    return { login: st.channel.login, name: st.channel.displayName, avatar: st.channel.avatar, text: l.text, tone: l.tone };
-  }
-  const ws = Array.isArray(web) ? web.find((w) => w.puuid === p.puuid) : undefined;
-  if (ws) {
-    const fights = me ? match.kills.filter((k) => (k.killer === me.puuid && k.victim === p.puuid) || (k.killer === p.puuid && k.victim === me.puuid)).length : 0;
-    return { login: ws.channel.login, name: ws.channel.displayName, avatar: ws.channel.avatar, text: ws.vod ? (me ? `VOD found · ${fights} fights` : "VOD found") : "was live · no VOD saved", tone: ws.vod ? "good" : "bad" };
-  }
-  return null;
-}
-
-
-/** Every round as a coloured block: won, lost, and the ones with a streamer fight marked. */
-function Rounds({ match, me, fightRounds }: { match: MatchSummary; me?: MatchPlayer; fightRounds: Set<number> }) {
-  if (!match.rounds.length) return null;
-  const myKills = me ? match.kills.filter((k) => k.killer === me.puuid) : [];
-  return (
-    <div className="stack" style={{ gap: 8 }}>
-      <div className="rounds">
-        {match.rounds.map((round) => {
-          const kills = myKills.filter((k) => k.round === round.index).length;
-          const cls = ["rnd", !me || !round.winner ? "unknown" : round.winner === me.team ? "won" : "lost", fightRounds.has(round.index) ? "streamer" : ""].join(" ");
-          return (
-            <div key={round.index} className={cls} title={`Round ${round.index + 1}${kills ? `: ${kills} kill${kills === 1 ? "" : "s"}` : ""}${fightRounds.has(round.index) ? " · fought a streamer" : ""}`}>
-              <span>{round.index + 1}</span>
-              {kills > 0 && <i>{kills}</i>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/** Both teams, shown on request. */
-function Scoreboard({ match, me, live }: { match: MatchSummary; me?: MatchPlayer; live: Map<string, Live | null> }) {
-  const teams = [...new Set(match.players.map((p) => p.team))].sort((a, b) => (a === me?.team ? -1 : b === me?.team ? 1 : 0));
-  return (
-    <div className="teams">
-      {teams.map((team) => {
-        const t = match.teams.find((x) => x.id === team);
-        const mine = team === me?.team;
-        const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills);
-        return (
-          <div key={team} className="soft-box" style={{ padding: "6px 4px" }}>
-            <table className="tbl">
-              <thead><tr><th colSpan={2}>{mine ? "Your team" : me ? "Enemy team" : `Team ${team}`}{t ? ` · ${t.roundsWon}` : ""}</th><th style={{ textAlign: "right" }}>K / D / A</th></tr></thead>
-              <tbody>
-                {players.map((p) => {
-                  const l = live.get(p.puuid);
-                  return (
-                    <tr key={p.puuid} className={p.puuid === me?.puuid ? "you-row" : undefined}>
-                      <td className="ellipsis" style={{ maxWidth: 220 }}><b>{p.name}</b> <span className="dim">#{p.tag}</span><span className="muted small" style={{ display: "block" }}>{p.agent}{p.puuid === me?.puuid ? " · you" : ""}</span></td>
-                      <td>{l && <a className="streamer-link" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer">{l.name}</a>}</td>
-                      <td className="num" style={{ textAlign: "right" }}>{p.kills} / {p.deaths} / {p.assists}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** One fight (or trade) with a streamer: its clip when saved, otherwise where it's at. */
-interface Fight {
-  round: number;
-  login: string;
-  name: string;
-  killed: boolean;
-  died: boolean;
-  status: Live;
-}
-
-/** Which matches and cards the Home tabs show. */
-export type Show = "all" | "streamers" | "mine";
-
-function MatchView({
-  match,
-  riotId,
-  clips,
-  myClips = [],
-  pairs = [],
-  show = "all",
-  streamers,
-  web,
-  onOpen,
-  actions,
-  children,
-}: {
-  match: MatchSummary;
-  riotId: string;
-  clips: ClipInfo[];
-  /** Your own clips saved during this match. */
-  myClips?: ClipInfo[];
-  pairs?: Pair[];
-  show?: Show;
-  streamers?: MatchStreamers;
-  web?: WebStreamer[] | "checking";
-  onOpen: (c: ClipInfo) => void;
-  actions?: ReactNode;
-  children?: ReactNode;
-}) {
-  const me = findMe(match, riotId);
-  const r = result(match, me);
-  const checked = Boolean(streamers?.checkedMs) || Array.isArray(web);
-  const live = new Map(match.players.map((p) => [p.puuid, liveInfo(p, match, me, streamers, web)]));
-  const liveList = match.players.filter((p) => live.get(p.puuid) && p.puuid !== me?.puuid);
-
-  const fights: Fight[] = [];
-  if (me) {
-    for (const k of [...match.kills].sort((a, b) => a.atMs - b.atMs)) {
-      const them = k.killer === me.puuid ? k.victim : k.victim === me.puuid ? k.killer : null;
-      const l = them ? live.get(them) : null;
-      if (!them || !l) continue;
-      const f = fights.find((x) => x.round === k.round && x.login === l.login);
-      if (f) {
-        f.killed ||= k.killer === me.puuid;
-        f.died ||= k.victim === me.puuid;
-      } else {
-        fights.push({ round: k.round, login: l.login, name: l.name, killed: k.killer === me.puuid, died: k.victim === me.puuid, status: l });
-      }
-    }
-  }
-  const fightRounds = new Set(fights.map((f) => f.round));
-  const clipFor = (f: Fight) =>
-    clips.find(
-      (c) =>
-        c.kind === "theirs" &&
-        (c.matchId ? c.matchId === match.id : !c.map || c.map === match.map) &&
-        c.round === f.round + 1 &&
-        [f.login, f.name].some((n) => n.toLowerCase() === c.streamer?.toLowerCase()),
-    );
-  const pairOf = (c: ClipInfo) => pairs.find((p) => p.theirs.path === c.path || p.mine.path === c.path);
-  const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
-
-  const [open, setOpen] = useState(false);
-  const score = r ? r.score : match.teams.map((t) => t.roundsWon).join("–");
-  const progressOf = (puuid: string) => {
-    const st = streamers?.players.find((x) => x.puuid === puuid);
-    // A bar only while clips are actually downloading.
-    return st && st.status === "working" && !st.checking ? progress(st) : null;
-  };
-  // Cards only for clips saved or on their way; a streamer with no clips coming
-  // (sub-only VOD, no VOD) is one line in the header instead of empty boxes.
-  const cards = fights.filter((f) => clipFor(f) || f.status.tone === "warn" || f.status.tone === "purple");
-  const issues = liveList.map((p) => live.get(p.puuid)!).filter((l) => l.tone === "bad").map((l) => `${l.name}: ${l.text}`);
-  const why = web === "checking" ? "checking who was live…"
-    : !checked ? "streamers checked a minute or two after the match"
-    : !liveList.length ? "no streamers"
-    : issues.length ? issues.join(", ")
-    : !fights.length && me ? "you didn't fight the streamers"
-    : "";
-
-  // Cards: each fight with a streamer (both sides when you saved it too), then your other clips.
-  const paired = new Set<string>();
-  const tiles: ReactNode[] = [];
-  if (show !== "mine") {
-    for (const f of cards) {
-      const c = clipFor(f);
-      const title = `R${f.round + 1} · ${what(f)}`;
-      if (!c) {
-        tiles.push(
-          <PendingCard key={`${f.login}-${f.round}`} title={title} meta={f.name}>
-            <span className={`pending-text ${f.status.tone}`}>{f.status.tone === "good" ? "clip deleted" : f.status.text}</span>
-          </PendingCard>,
-        );
-        continue;
-      }
-      const p = pairOf(c);
-      if (p) paired.add(p.mine.path);
-      tiles.push(<GalleryCard key={c.path} clip={c} other={p?.mine} title={title} meta={p ? `Both sides · ${f.name}` : `Their side · ${f.name}`} onPlay={() => onOpen(c)} />);
-    }
-  } else {
-    for (const c of myClips) {
-      const p = pairOf(c);
-      if (!p) continue;
-      paired.add(c.path);
-      tiles.push(<GalleryCard key={c.path} clip={c} other={p.theirs} title={cardTitle(c)} meta={`Both sides · ${p.theirs.streamer ?? "streamer"}`} onPlay={() => onOpen(c)} />);
-    }
-  }
-  for (const c of myClips) {
-    if (paired.has(c.path)) continue;
-    const into = Math.max(0, Math.round((c.createdMs - (c.durationSec ?? 0) * 1000 - Date.parse(match.startedAt)) / 1000));
-    tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} onPlay={() => onOpen(c)} />);
-  }
-
-  return (
-    <article className={tiles.length || open ? "match-card" : "match-card compact"}>
-      <div className="match-card-head">
-        <b className="map">{match.map}</b>
-        <b style={{ color: resultColor(r?.letter) }}>{score}</b>
-        <span className="muted grow ellipsis">
-          {[me && `${me.agent} · ${me.kills} / ${me.deaths} / ${me.assists}`, matchTimeAgo(match.startedAt), why].filter(Boolean).join(" · ")}
-        </span>
-        <button type="button" className="linkish muted" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Hide" : "Details"}</button>
-      </div>
-
-      {tiles.length > 0 && <div className="gallery">{tiles}</div>}
-
-      {open && (
-        <div className="match-details">
-          {liveList.length > 0 && (
-            <div className="streamer-cards">
-              {liveList.map((p) => {
-                const l = live.get(p.puuid)!;
-                const pct = progressOf(p.puuid);
-                return (
-                  <div key={p.puuid} className="streamer-card">
-                    <Avatar name={l.name} avatar={l.avatar} size={44} />
-                    <span className="grow stack" style={{ gap: 3 }}>
-                      <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.name}</b></a>
-                      <span className="muted small">{me ? (p.team === me.team ? "Teammate" : "Enemy") : "Player"} · {p.agent}</span>
-                      <span className={`small ${l.tone}`}>{l.text}</span>
-                      {pct != null && pct < 100 && <span className="bar"><i style={{ width: `${Math.max(4, pct)}%` }} /></span>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {children}
-          <Rounds match={match} me={me} fightRounds={fightRounds} />
-          <Scoreboard match={match} me={me} live={live} />
-          {!me && <p className="muted" style={{ margin: 0 }}>Your Riot ID isn't in this match, so your fights can't be shown.</p>}
-          {actions}
-        </div>
-      )}
-      {streamers?.error && <p className="small bad" style={{ margin: 0 }}>{streamers.error}</p>}
-    </article>
-  );
-}
+import type { useMatches } from "../lib/useMatches";
+import { formatDuration, timeAgo, type useRecorder } from "../lib/useRecorder";
 
 /** One stream the scoreboard scanner found in this match: the user picks which player it was. */
 function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId: string; s: SuggestedStreamer; onAdded: (m: MatchStreamers) => void }) {
@@ -296,15 +56,7 @@ function Suggestion({ match, riotId, s, onAdded }: { match: MatchSummary; riotId
         <span className="muted">was on {side} (found by their scoreboard). Which player were they?</span>
         {error && <span className="small bad" style={{ display: "block" }}>{error}</span>}
       </span>
-      <label className="field">
-        <span className="sr-only">Which player was {s.login}</span>
-        <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
-          <option value="">Choose player</option>
-          {team.map((p) => (
-            <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {p.agent}</option>
-          ))}
-        </select>
-      </label>
+      <Select label={`Which player was ${s.login}`} placeholder="Choose player" value={puuid} onChange={setPuuid} options={team.map((p) => ({ value: p.puuid, label: `${p.name}#${p.tag} · ${p.agent}` }))} />
       <button type="button" className="btn primary" disabled={!puuid || busy} onClick={() => void link()}>{busy ? "Checking…" : "Link"}</button>
     </div>
   );
@@ -344,15 +96,7 @@ function AddChannel({ match, riotId, onAdded }: { match: MatchSummary; riotId: s
         a wrong channel or player gets no clips. The link is kept on this PC only.
       </span>
       <div className="row-wrap" style={{ gap: 8 }}>
-        <label className="field">
-          <span className="sr-only">Player</span>
-          <select value={puuid} onChange={(e) => setPuuid(e.target.value)}>
-            <option value="">Which player?</option>
-            {others.map((p) => (
-              <option key={p.puuid} value={p.puuid}>{p.name}#{p.tag} · {me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · {p.agent}</option>
-            ))}
-          </select>
-        </label>
+        <Select label="Player" placeholder="Which player?" value={puuid} onChange={setPuuid} options={others.map((p) => ({ value: p.puuid, label: `${p.name}#${p.tag} · ${me ? (p.team === me.team ? "teammate" : "enemy") : "player"} · ${p.agent}` }))} />
         <label className="field grow">
           <span className="sr-only">Twitch channel</span>
           <input placeholder="twitch.tv/channel" value={channel} onChange={(e) => setChannel(e.target.value)} spellCheck={false} />
@@ -400,14 +144,7 @@ function DemoLookup({ onFound }: { onFound: (m: MatchSummary, riotId: string, we
         <span className="sr-only">Riot ID</span>
         <input placeholder="Name#TAG" value={riotId} onChange={(e) => setRiotId(e.target.value)} spellCheck={false} />
       </label>
-      <label className="field">
-        <span className="sr-only">Region</span>
-        <select value={region} onChange={(e) => setRegion(e.target.value)}>
-          {REGIONS.map((r) => (
-            <option key={r.value} value={r.value}>{r.value.toUpperCase()}</option>
-          ))}
-        </select>
-      </label>
+      <Select label="Region" value={region} onChange={setRegion} options={REGIONS.map((r) => ({ value: r.value, label: r.value.toUpperCase() }))} className="dd-narrow" />
       <button type="submit" className="btn primary" disabled={busy || !riotId.includes("#")}>{busy ? "Loading…" : "Look up"}</button>
       {error && <span className="small bad" role="alert" style={{ flexBasis: "100%" }}>{error}</span>}
     </form>
@@ -475,10 +212,10 @@ export default function Home({
     }
   }
 
-  const tabs: { id: Show; label: string; n?: number }[] = [
-    { id: "all", label: "All matches" },
-    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length },
-    { id: "mine", label: "My clips only" },
+  const tabs: Segment<Show>[] = [
+    { id: "all", label: "All matches", Icon: Sword },
+    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length, Icon: TwitchTabIcon },
+    { id: "mine", label: "My clips only", Icon: User },
   ];
 
   return (
@@ -492,17 +229,26 @@ export default function Home({
       {status?.error && status.configured && <Notice tone="bad">{status.error}</Notice>}
       {recheckError && <Notice tone="bad">{recheckError}</Notice>}
 
-      <div className="tabs-row">
-        <div className="tabs" role="tablist" aria-label="Show">
-          {tabs.map((t) => (
-            <button key={t.id} type="button" role="tab" aria-selected={show === t.id} onClick={() => setShow(t.id)}>
-              {t.label}
-              {t.n ? <span className="count">{t.n}</span> : null}
-            </button>
-          ))}
+      <div className="grid items-start gap-5 min-[1280px]:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="flex min-w-0 flex-col gap-4">
+      {/* Narrower windows: the summary sits above the matches; wide ones show it in the side panel. */}
+      {matches.length > 0 && (
+        <div className="min-[1280px]:hidden">
+          <Summary matches={matches} clips={clips} streamers={streamers} />
         </div>
+      )}
+
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#222225]">
+        <SegmentedControl label="Show" value={show} segments={tabs} onChange={setShow} hideZero />
         {isDesktop && (
-          <button type="button" className="btn quiet sm-btn" onClick={() => void checkNow()} disabled={checking || !status?.configured} title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}>
+          <button
+            type="button"
+            onClick={() => void checkNow()}
+            disabled={checking || !status?.configured}
+            title={status?.lastCheckMs ? `Last checked ${timeAgo(status.lastCheckMs)}` : undefined}
+            className="mb-1.5 inline-flex h-9 items-center gap-2 rounded-[10px] border-0 bg-white/[0.05] px-3.5 text-[13px] font-medium text-zinc-200 ring-1 ring-white/[0.07] transition-colors duration-150 ease-out hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none disabled:opacity-50"
+          >
+            <ArrowsClockwise size={14} weight="bold" aria-hidden className={checking ? "animate-spin motion-reduce:animate-none" : undefined} />
             {checking ? "Checking…" : "Check for new matches"}
           </button>
         )}
@@ -516,15 +262,16 @@ export default function Home({
         />
       )}
       {all.length ? (
-        <div className="match-feed">
+        <div className="stagger flex flex-col gap-3">
           {all.map((m) =>
             m.id === looked?.match.id ? (
-              <MatchView key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
+              <MatchCard key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
             ) : (
-              <MatchView
+              <MatchCard
                 key={m.id}
                 match={m}
                 riotId={settings.riotId}
+                notify={recorder.notify}
                 clips={clips}
                 myClips={mineByMatch.get(m.id)}
                 pairs={pairs}
@@ -537,14 +284,14 @@ export default function Home({
                   <Suggestion key={s.login} match={m} riotId={settings.riotId} s={s} onAdded={putStreamers} />
                 ))}
                 {isDesktop && <AddChannel match={m} riotId={settings.riotId} onAdded={putStreamers} />}
-              </MatchView>
+              </MatchCard>
             ),
           )}
         </div>
       ) : (
-        <div className="empty-state">
-          <b>{matches.length ? "Nothing matches" : "No matches yet"}</b>
-          <span>
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.08] bg-zinc-900/40 px-6 py-16 text-center">
+          <b className="text-[17px] font-semibold tracking-[-0.02em] text-white">{matches.length ? "Nothing matches" : "No matches yet"}</b>
+          <span className="max-w-sm text-[13.5px] text-zinc-400">
             {matches.length
               ? "Try another search or tab."
               : settings.riotId
@@ -552,6 +299,131 @@ export default function Home({
                 : "Add your Riot ID in Settings first."}
           </span>
         </div>
+      )}
+      </div>
+
+      <aside className="sticky top-0 hidden flex-col gap-4 min-[1280px]:flex" aria-label="Overview">
+        {matches.length > 0 && <Summary matches={matches} clips={clips} streamers={streamers} />}
+        <RecorderCard status={recorder.status} settings={settings} onSaving={() => recorder.notify("Saving clip…", "info")} onSettings={() => onNavigate("settings")} />
+        <RecentClips clips={clips} onOpen={onOpen} onAll={() => onNavigate("clips")} />
+      </aside>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Summary strip ----------
+
+/** One figure: what it counts, the number, and the detail under it. */
+function Tile({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="min-w-0 px-5 py-4">
+      <div className="text-[11.5px] font-semibold tracking-[0.08em] text-zinc-500 uppercase">{label}</div>
+      <div className="mt-2 text-[34px] leading-none font-semibold tracking-[-0.04em] text-white tabular-nums">{value}</div>
+      {sub && <div className="mt-2 truncate text-[12.5px] text-zinc-400 tabular-nums">{sub}</div>}
+    </div>
+  );
+}
+
+/** Recent form at a glance: win rate, K/D, saved clips, streamer matches. */
+function Summary({ matches, clips, streamers }: { matches: MatchSummary[]; clips: ClipInfo[]; streamers: Record<string, MatchStreamers> }) {
+  const theirs = clips.filter((c) => c.kind === "theirs").length;
+  const withStreamers = matches.filter((m) => streamers[m.id]?.players.length).length;
+  const met = new Set(Object.values(streamers).flatMap((s) => s.players.map((p) => p.channel.login))).size;
+
+  return (
+    <div className="grid grid-cols-2 divide-x divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-zinc-900/60">
+      <Tile
+        label="Saved clips"
+        value={clips.length}
+        sub={`${clips.length - theirs} yours · ${theirs} from streamers`}
+      />
+      <Tile
+        label="Streamer matches"
+        value={withStreamers}
+        sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}
+      />
+    </div>
+  );
+}
+
+// ---------- Side panel ----------
+
+const card = "rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]";
+
+/** The recorder: what it's doing, the hotkey, and Save clip while recording. */
+function RecorderCard({ status, settings, onSaving, onSettings }: { status: RecorderStatus | null; settings: Settings; onSaving: () => void; onSettings: () => void }) {
+  const state = status?.state;
+  const recording = state === "recording";
+  const bad = state === "error" || state === "noFfmpeg";
+  const line = !isDesktop ? "Recording works in the Windows app" : recording ? `Recording${status?.game?.name ? ` ${status.game.name}` : ""}` : bad ? "Recorder stopped" : state === "waiting" ? "Waiting for a game" : "Starting…";
+  const dot = !isDesktop ? "bg-zinc-500" : recording ? "bg-[#FF453A]" : bad ? "bg-[#FFD60A]" : "bg-[#30D158]";
+  return (
+    <section className={card} aria-label="Recorder">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="m-0 text-[14px] font-semibold text-white">Recorder</h2>
+        <button type="button" onClick={onSettings} title="Recording settings" aria-label="Recording settings" className="grid size-7 place-items-center rounded-lg border-0 bg-transparent text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+          <GearSix size={15} weight="bold" aria-hidden />
+        </button>
+      </div>
+      <p className="m-0 mt-2 flex items-center gap-2 text-[13px] text-zinc-200">
+        <span className={`size-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+        <span className="min-w-0 truncate">{line}</span>
+      </p>
+      <p className="m-0 mt-3 flex flex-wrap items-center gap-1.5 text-[13px] text-zinc-400">
+        Press <Keycap>{settings.hotkey}</Keycap> to save the last <span className="tabular-nums text-zinc-200">{settings.bufferSeconds} s</span>
+      </p>
+      {recording && (
+        <button
+          type="button"
+          onClick={() => {
+            onSaving();
+            void saveClipNow();
+          }}
+          className="mt-3 h-9 w-full rounded-[10px] border-0 bg-white text-[13px] font-semibold text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
+        >
+          Save clip now
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Your newest clips, so the last thing you saved is one click away. */
+function RecentClips({ clips, onOpen, onAll }: { clips: ClipInfo[]; onOpen: (c: ClipInfo) => void; onAll: () => void }) {
+  const recent = [...clips].sort((a, b) => b.createdMs - a.createdMs).slice(0, 5);
+  return (
+    <section className={card} aria-label="Recent clips">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="m-0 text-[14px] font-semibold text-white">Recent clips</h2>
+        {clips.length > 0 && (
+          <button type="button" onClick={onAll} className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12.5px] font-medium text-zinc-400 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+            See all
+          </button>
+        )}
+      </div>
+      {recent.length ? (
+        <ul className="m-0 mt-2 flex list-none flex-col p-0">
+          {recent.map((c) => {
+            const src = thumbSrc(c.thumb) ?? mapArt(c.map);
+            return (
+              <li key={c.path}>
+                <button type="button" onClick={() => onOpen(c)} className="group flex w-full items-center gap-3 rounded-xl border-0 bg-transparent p-1.5 text-left transition-colors hover:bg-white/[0.05] focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none">
+                  <span className="relative grid h-10 w-[70px] shrink-0 place-items-center overflow-hidden rounded-lg bg-zinc-800 text-zinc-500">
+                    {src ? <img src={src} alt="" className="absolute inset-0 size-full object-cover" /> : <Play size={14} weight="bold" aria-hidden />}
+                    {c.durationSec != null && <span className="absolute right-1 bottom-1 rounded bg-black/70 px-1 text-[10px] leading-4 text-white tabular-nums">{formatDuration(c.durationSec)}</span>}
+                  </span>
+                  <span className="flex min-w-0 flex-col">
+                    <b className="truncate text-[13px] font-medium text-zinc-100">{c.kind === "theirs" && c.round ? `R${c.round} · ` : ""}{cardTitle(c)}</b>
+                    <span className="truncate text-[12px] text-zinc-400">{[c.kind === "theirs" ? c.streamer : c.map ?? c.game, timeAgo(c.createdMs)].filter(Boolean).join(" · ")}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="m-0 mt-2 text-[13px] text-zinc-400">Clips you save show up here.</p>
       )}
     </section>
   );

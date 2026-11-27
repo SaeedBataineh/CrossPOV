@@ -1,0 +1,22 @@
+/* The desktop app's styles. Tailwind's utilities sit in a layer above the
+   older hand-written stylesheet, so a utility always wins over a legacy rule
+   (including element rules like `a { color }`). No Tailwind preflight: the
+   legacy stylesheet already sets the base. */
+@layer theme, legacy, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "./styles.css" layer(legacy);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+/* Tailwind only reads the files written with it. The older pages use class
+   names such as "table" that are also Tailwind utilities, and the utility
+   would win over their own rule. Add a file here when it starts using Tailwind. */
+@source "./components/Sidebar.tsx";
+@source "./components/TopBar.tsx";
+@source "./components/MatchCard.tsx";
+@source "./components/SegmentedControl.tsx";
+@source "./components/ValorantArt.tsx";
+@source "./pages/Home.tsx";
+
+@theme {
+  --font-sans: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}

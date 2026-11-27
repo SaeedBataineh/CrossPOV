@@ -1,4 +1,6 @@
+import { Microphone, SpeakerHigh, X } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { Select } from "../components/Select";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
 import { isDesktop, listAudioApps, listMicDevices } from "../lib/backend";
 import type { AppAudio, Settings } from "../lib/settings";
@@ -40,10 +42,10 @@ function Channel({
   return (
     <div className="mixer-row" style={on ? undefined : { opacity: 0.55 }}>
       <span className="row" style={{ gap: 10, minWidth: 0 }}>
-        {exe ? <AppIcon exe={exe} name={name} color={color} /> : <span className="src-ic" style={{ background: `${color}22`, borderColor: `${color}66`, color }}>{name[0]}</span>}
-        <span className="stack" style={{ gap: 0, minWidth: 0 }}>
-          <b style={{ fontSize: 12.5 }}>{name}</b>
-          <span className="m dim ellipsis" style={{ fontSize: 9.5 }}>{sub}</span>
+        {exe ? <AppIcon exe={exe} name={name} color={color} /> : <span className="src-ic" aria-hidden="true">{/mic/i.test(name) ? <Microphone size={18} weight="fill" /> : <SpeakerHigh size={18} weight="fill" />}</span>}
+        <span className="stack" style={{ gap: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 13.5 }}>{name}</b>
+          <span className="m dim ellipsis" style={{ fontSize: 12 }}>{sub}</span>
         </span>
       </span>
       <Volume label={name} value={volume} onChange={onVolume} disabled={!on} />
@@ -110,7 +112,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
                 volume={app.volume}
                 onVolume={(v) => setApp(i, { volume: v })}
                 track="T1"
-                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}>✕</button>}
+                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}><X size={13} weight="bold" aria-hidden /></button>}
               />
             ))}
           <Channel
@@ -150,11 +152,17 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
         <Panel title="Microphone" color="var(--text)">
           <Row label="Record my mic"><Toggle label="Record my mic" checked={draft.microphone} onChange={(v) => set("microphone", v)} /></Row>
           <Row label="Device">
-            <select className="input" style={{ maxWidth: 200 }} aria-label="Microphone device" value={draft.micDevice} onChange={(e) => set("micDevice", e.target.value)}>
-              <option value="default">Default device</option>
-              {mics.map((m) => <option key={m} value={m}>{m}</option>)}
-              {draft.micDevice !== "default" && !mics.includes(draft.micDevice) && <option value={draft.micDevice}>{draft.micDevice} (not connected)</option>}
-            </select>
+            <Select
+              label="Microphone device"
+              className="dd-wide"
+              value={draft.micDevice}
+              onChange={(v) => set("micDevice", v)}
+              options={[
+                { value: "default", label: "Default device" },
+                ...mics.map((m) => ({ value: m, label: m })),
+                ...(draft.micDevice !== "default" && !mics.includes(draft.micDevice) ? [{ value: draft.micDevice, label: `${draft.micDevice} (not connected)` }] : []),
+              ]}
+            />
           </Row>
           <Row label="Noise suppression" help="removes keyboard, fans and background noise · uses a little CPU">
             <Toggle label="Noise suppression" checked={draft.micNoiseSuppression} disabled={!draft.microphone} onChange={(v) => set("micNoiseSuppression", v)} />

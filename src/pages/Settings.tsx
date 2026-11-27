@@ -1,7 +1,11 @@
-import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Broadcast, CheckCircle, GameController, Keyboard, SpeakerHigh, UserCircle, VideoCamera, type Icon } from "@phosphor-icons/react";
+import { confirmDialog } from "../components/Dialog";
+import { Keycap } from "../components/TopBar";
+import { Select } from "../components/Select";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
 import { diagnostics, isDesktop, knownGames, pickFolder, pickGameExe } from "../lib/backend";
-import { estimateClipMb, REGIONS, targetMbps, type Settings as S } from "../lib/settings";
+import { estimateClipMb, REGIONS, targetMbps, type Quality, type Resolution, type Settings as S } from "../lib/settings";
 import { same, validRiotId } from "../lib/riotId";
 import { useDraft } from "../lib/useDraft";
 
@@ -21,7 +25,7 @@ function shortcutFromEvent(e: KeyboardEvent): string | null {
 }
 
 const opts = <T extends string | number>(values: T[], label: (v: T) => string = String) => values.map((value) => ({ value, label: label(value) }));
-const PADS = opts([15, 30, 60, 90, 120]);
+const PADS = opts([15, 30, 60, 90, 120], (v) => `${v} seconds`);
 
 const Audio = lazy(() => import("./Audio"));
 
@@ -50,14 +54,37 @@ function ProblemReport() {
 }
 
 type Section = "games" | "recording" | "hotkey" | "streamers" | "audio" | "account";
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "games", label: "Games" },
-  { id: "recording", label: "Recording" },
-  { id: "hotkey", label: "Hotkey and replay" },
-  { id: "streamers", label: "Streamer clips" },
-  { id: "audio", label: "Audio" },
-  { id: "account", label: "Account and app" },
+// In the order other clipping apps use: recording first, then hotkeys and audio.
+const SECTIONS: { id: Section; label: string; Icon: Icon; about: string }[] = [
+  { id: "recording", label: "Recording", Icon: VideoCamera, about: "How your clips look: quality, resolution, frame rate and file type." },
+  { id: "hotkey", label: "Hotkeys", Icon: Keyboard, about: "Save the last moments of your game with one key, in any game." },
+  { id: "audio", label: "Audio", Icon: SpeakerHigh, about: "Which sounds go into your clips, how loud, and your microphone." },
+  { id: "games", label: "Games", Icon: GameController, about: "Which games and programs CrossPOV records." },
+  { id: "streamers", label: "Streamer clips", Icon: Broadcast, about: "Download the streamer's side of your fights from their Twitch VOD." },
+  { id: "account", label: "Account", Icon: UserCircle, about: "Your Riot ID, where clips are kept, and how the app starts." },
 ];
+
+/** Category header: the title and one line on what's inside. Type does the work, no icon tile. */
+function CategoryHead({ section, right }: { section: Section; right?: ReactNode }) {
+  const s = SECTIONS.find((x) => x.id === section)!;
+  return (
+    <header className="settings-head">
+      <span className="settings-title">
+        <h2>{s.label}</h2>
+        <p>{s.about}</p>
+      </span>
+      {right}
+    </header>
+  );
+}
+
+/** One-click quality, like Medal; Custom opens every option. */
+const PRESETS: { id: string; label: string; about: string; v: { resolution: Resolution; fps: number; quality: Quality; bitrateMbps: number } }[] = [
+  { id: "low", label: "Low", about: "720p · 30 FPS · for older PCs, small files", v: { resolution: "720p", fps: 30, quality: "low", bitrateMbps: 0 } },
+  { id: "standard", label: "Standard", about: "1080p · 60 FPS · the best balance", v: { resolution: "1080p", fps: 60, quality: "medium", bitrateMbps: 0 } },
+  { id: "high", label: "High", about: "1440p · 60 FPS · sharper, bigger files", v: { resolution: "1440p", fps: 60, quality: "high", bitrateMbps: 0 } },
+];
+const presetOf = (d: S) => PRESETS.find((p) => p.v.resolution === d.resolution && p.v.fps === d.fps && p.v.quality === d.quality && p.v.bitrateMbps === d.bitrateMbps)?.id ?? "custom";
 
 /** Settings: the topics in a list on the left, the chosen one on the right. Changes save by themselves. */
 const BITRATES = [10, 15, 20, 30, 40, 50, 75, 100, 150];
@@ -72,25 +99,20 @@ function BitratePicker({ value, auto, onChange }: { value: number; auto: number;
   };
   return (
     <span className="row" style={{ gap: 8 }}>
-      <select
-        className="input"
-        style={{ width: 150 }}
-        aria-label="Bitrate"
+      <Select
+        label="Bitrate"
         value={custom ? "custom" : String(value)}
-        onChange={(e) => {
-          if (e.target.value === "custom") {
+        onChange={(v) => {
+          if (v === "custom") {
             setCustom(true);
             setText(String(value || Math.round(auto)));
             return;
           }
           setCustom(false);
-          onChange(Number(e.target.value));
+          onChange(Number(v));
         }}
-      >
-        <option value="0">Auto ({Math.round(auto)} Mbps)</option>
-        {BITRATES.map((b) => <option key={b} value={b}>{b} Mbps</option>)}
-        <option value="custom">Custom…</option>
-      </select>
+        options={[{ value: "0", label: `Auto (${Math.round(auto)} Mbps)` }, ...BITRATES.map((b) => ({ value: String(b), label: `${b} Mbps` })), { value: "custom", label: "Custom…" }]}
+      />
       {custom && (
         <input
           className="input"
@@ -101,7 +123,7 @@ function BitratePicker({ value, auto, onChange }: { value: number; auto: number;
           aria-label="Custom bitrate in Mbps"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
+          onBlur={() => void commit()}
           onKeyDown={(e) => e.key === "Enter" && commit()}
         />
       )}
@@ -121,17 +143,21 @@ const h265Plays = (() => {
 })();
 
 export default function SettingsPage({ settings, onSaved }: { settings: S; onSaved: (s: S) => void }) {
-  const [tab, setTab] = useState<Section>("games");
+  const [tab, setTab] = useState<Section>("recording");
   return (
     <section className="settings-layout" aria-label="Settings">
       <nav className="settings-nav" aria-label="Settings sections">
         {SECTIONS.map((t) => (
-          <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} type="button" aria-current={tab === t.id ? "true" : undefined} onClick={() => setTab(t.id)}>
+            <t.Icon size={18} weight={tab === t.id ? "fill" : "regular"} aria-hidden />
+            {t.label}
+          </button>
         ))}
       </nav>
-      <div className="settings-body">
+      <div key={tab} className="settings-body">
         {tab === "audio" ? (
           <Suspense fallback={<p className="muted">Loading…</p>}>
+            <CategoryHead section="audio" />
             <div className="settings-audio"><Audio settings={settings} onSaved={onSaved} /></div>
           </Suspense>
         ) : (
@@ -151,10 +177,13 @@ function RiotIdField({ value, onCommit }: { value: string; onCommit: (id: string
   useEffect(() => setText(value), [value]);
   const ok = text.trim() === "" || validRiotId(text);
 
-  function commit() {
+  async function commit() {
     const id = text.trim();
     if (same(id, value) || !ok) return;
-    if (value.trim() && !window.confirm(`Switch to ${id || "no account"}? Your match history for ${value.trim()} will be cleared. Your clips stay.`)) {
+    if (
+      value.trim() &&
+      !(await confirmDialog({ title: `Switch to ${id || "no account"}?`, body: `Your match history for ${value.trim()} will be cleared. Your clips stay.`, confirm: "Switch account", danger: true }))
+    ) {
       setText(value);
       return;
     }
@@ -168,7 +197,7 @@ function RiotIdField({ value, onCommit }: { value: string; onCommit: (id: string
       placeholder="Name#TAG"
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
+      onBlur={() => void commit()}
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         if (e.key === "Escape") setText(value);
@@ -184,6 +213,8 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
   const d = useDraft(settings, onSaved);
   const { draft, set } = d;
   const [listening, setListening] = useState(false);
+  const preset = presetOf(draft);
+  const [customOpen, setCustomOpen] = useState(preset === "custom");
 
   async function browse() {
     const folder = await pickFolder(draft.clipFolder);
@@ -208,26 +239,48 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
 
   return (
     <>
-      <header className="settings-head">
-        <h2>{SECTIONS.find((x) => x.id === section)?.label}</h2>
-        <SaveState d={d} />
-      </header>
+      <CategoryHead section={section} right={<SaveState d={d} />} />
 
       {section === "games" && <Games draft={draft} set={set} />}
 
       {section === "recording" && (
         <>
-        <Panel title="Recording">
-          <Row label="Frame rate"><Seg label="Frame rate" value={draft.fps} onChange={(v) => set("fps", v)} options={opts([30, 60, 120, 144, 240])} /></Row>
-          <Row label="Resolution" help="native = your monitor">
-            <Seg label="Resolution" value={draft.resolution} onChange={(v) => set("resolution", v)} options={[{ value: "native", label: "Native" }, { value: "1440p", label: "1440p" }, { value: "1080p", label: "1080p" }, { value: "720p", label: "720p" }]} />
-          </Row>
-          <Row label="Bitrate" help="higher = sharper, bigger files">
-            <BitratePicker value={draft.bitrateMbps} auto={targetMbps({ ...draft, bitrateMbps: 0 })} onChange={(v) => set("bitrateMbps", v)} />
-          </Row>
-          <Row label="Encoder" help="GPU keeps your FPS up">
-            <Seg label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto" }, { value: "nvenc", label: "NVENC" }, { value: "amf", label: "AMF" }, { value: "qsv", label: "Intel" }, { value: "cpu", label: "CPU" }]} />
-          </Row>
+        <Panel title="Quality">
+          <div className="presets" role="radiogroup" aria-label="Quality preset">
+            {[...PRESETS, { id: "custom", label: "Custom", about: "Pick every setting yourself" }].map((p) => {
+              const on = (customOpen ? "custom" : preset) === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className="preset"
+                  onClick={() => {
+                    if (p.id === "custom") return setCustomOpen(true);
+                    setCustomOpen(false);
+                    const v = PRESETS.find((x) => x.id === p.id)!.v;
+                    for (const k of Object.keys(v) as (keyof typeof v)[]) set(k, v[k] as never);
+                  }}
+                >
+                  <b>{p.label}{on && <CheckCircle size={16} weight="fill" aria-hidden className="preset-check" />}</b>
+                  <span>{p.about}</span>
+                </button>
+              );
+            })}
+          </div>
+          {(customOpen || preset === "custom") && (
+            <div className="custom-grid">
+              <label><span>Resolution</span><Select label="Resolution" value={draft.resolution} onChange={(v) => set("resolution", v)} options={[{ value: "native", label: "Native (your monitor)" }, { value: "1440p", label: "1440p" }, { value: "1080p", label: "1080p" }, { value: "720p", label: "720p" }]} /></label>
+              <label><span>Frame rate</span><Select label="Frame rate" value={draft.fps} onChange={(v) => set("fps", v)} options={opts([30, 60, 120, 144, 240], (v) => `${v} FPS`)} /></label>
+              <label><span>Quality</span><Select<Quality> label="Quality" value={draft.quality} onChange={(v) => set("quality", v)} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "max", label: "Max" }]} /></label>
+              <label><span>Bitrate</span><BitratePicker value={draft.bitrateMbps} auto={targetMbps({ ...draft, bitrateMbps: 0 })} onChange={(v) => set("bitrateMbps", v)} /></label>
+              <label><span>Encoder</span><Select label="Encoder" value={draft.encoder} onChange={(v) => set("encoder", v)} options={[{ value: "auto", label: "Auto (GPU when possible)" }, { value: "nvenc", label: "NVIDIA (NVENC)" }, { value: "amf", label: "AMD (AMF)" }, { value: "qsv", label: "Intel (Quick Sync)" }, { value: "cpu", label: "CPU" }]} /></label>
+            </div>
+          )}
+          <p className="note">About {Math.round(targetMbps(draft))} Mbps, so a {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB.</p>
+        </Panel>
+        <Panel title="Video file">
           <Row
             label="Video format"
             help={
@@ -252,29 +305,30 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
 
       {section === "hotkey" && (
         <>
-        <Panel title="Hotkey and replay">
-          <Row label="Save clip" help={listening ? "press the new key or combo · Esc cancels" : "works while you're in game"}>
-            <span className="row">
-              <span className="pill"><b>{draft.hotkey}</b></span>
-              <button type="button" className={listening ? "b sm r" : "b sm"} onClick={() => setListening((l) => !l)} onKeyDown={captureHotkey} onBlur={() => setListening(false)}>
-                {listening ? "Press a key…" : "Change"}
-              </button>
-            </span>
-          </Row>
-          <Row label="Clip length" help="how far back a hotkey clip goes"><Seg label="Clip length" value={draft.bufferSeconds} onChange={(v) => set("bufferSeconds", v)} options={opts([15, 30, 60, 120, 300])} /></Row>
+        <Panel title="Hotkeys">
+          <div className="hotkey-row">
+            <span className="hotkey-name"><b>Save clip</b><small>{listening ? "Press the new key or combo · Esc cancels" : "Saves what just happened"}</small></span>
+            <button type="button" className={listening ? "keybox listening" : "keybox"} onClick={() => setListening((l) => !l)} onKeyDown={captureHotkey} onBlur={() => setListening(false)} title="Click, then press a key">
+              {listening ? "Press a key…" : draft.hotkey.split("+").map((k) => <Keycap key={k}>{k}</Keycap>)}
+            </button>
+            <Select label="Clip length" value={draft.bufferSeconds} onChange={(v) => set("bufferSeconds", v)} options={opts([15, 30, 60, 120, 300], (v) => (v > 60 ? `${v / 60} minutes` : `${v} seconds`))} />
+          </div>
           <Row label="Clip sound" help="a beep so you know it worked"><Toggle label="Clip sound" checked={draft.clipSound} onChange={(v) => set("clipSound", v)} /></Row>
-          <p className="note">About {Math.round(targetMbps(draft))} Mbps, so a {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB.</p>
+          <p className="note">A {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB at your quality setting.</p>
         </Panel>
         </>
       )}
 
       {section === "streamers" && (
-        <Panel title="Streamer clips">
+        <>
+        <Panel title="What to clip">
           <Row label="Auto-clip streamers" help="in your matches"><Toggle label="Auto-clip streamers" checked={draft.streamerAuto} onChange={(v) => set("streamerAuto", v)} /></Row>
           <Row label="When they killed you" help="turn off to skip every clip where the streamer killed you"><Toggle label="When they killed you" checked={draft.clipKilledYou} onChange={(v) => set("clipKilledYou", v)} /></Row>
           <Row label="When you killed them" help="their POV of your kill"><Toggle label="When you killed them" checked={draft.clipYouKilled} onChange={(v) => set("clipYouKilled", v)} /></Row>
           <Row label="Whole rounds" help="the full round instead of the fight"><Toggle label="Whole rounds" checked={draft.clipWholeRound} onChange={(v) => set("clipWholeRound", v)} /></Row>
           {nothingToClip && <p className="note warn">Everything above is off, so no streamer clips will be downloaded.</p>}
+        </Panel>
+        <Panel title="Timing and quality">
           <Row label="Seconds before" help="up to 2 minutes"><Seg label="Seconds before" value={draft.secondsBefore} onChange={(v) => set("secondsBefore", v)} options={PADS} /></Row>
           <Row label="Seconds after" help="up to 2 minutes"><Seg label="Seconds after" value={draft.secondsAfter} onChange={(v) => set("secondsAfter", v)} options={PADS} /></Row>
           <Row label="Download quality">
@@ -283,18 +337,17 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Grab right after the match" help="saves fights while they're still live"><Toggle label="Grab right after the match" checked={draft.grabAfterMatch} onChange={(v) => set("grabAfterMatch", v)} /></Row>
           <Row label="Wait for a VOD" help="some streamers publish late"><Seg label="Wait for a VOD" value={draft.vodWaitHours} onChange={(v) => set("vodWaitHours", v)} options={opts([12, 24, 48], (v) => `${v} h`)} /></Row>
         </Panel>
+        </>
       )}
 
       {section === "account" && (
         <>
-        <Panel title="Account">
+        <Panel title="Riot account">
           <Row label="Riot ID" help="only used to find your matches · switching accounts clears your match history">
             <RiotIdField value={draft.riotId} onCommit={(id) => set("riotId", id)} />
           </Row>
           <Row label="Region">
-            <select className="input" aria-label="Region" value={draft.region} onChange={(e) => set("region", e.target.value)}>
-              {REGIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
+            <Select label="Region" value={draft.region} onChange={(v) => set("region", v)} options={REGIONS.map((r) => ({ value: r.value, label: r.label }))} />
           </Row>
           <p className="note">Your PC never talks to Riot or the game. Match data comes from the CrossPOV server.</p>
         </Panel>
@@ -321,7 +374,7 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           className="linkish muted small"
           style={{ alignSelf: "flex-start" }}
           onClick={() => {
-            if (window.confirm("Reset all settings to their defaults? Your Riot ID, region and clips stay.")) void d.reset();
+            void confirmDialog({ title: "Reset all settings?", body: "Everything goes back to its default. Your Riot ID, region and clips stay.", confirm: "Reset settings", danger: true }).then((yes) => yes && void d.reset());
           }}
         >
           Reset all settings to defaults

@@ -1,9 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import "@fontsource-variable/figtree";
+import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
-import "./styles.css";
-import { Rail, TopBar, type Page } from "./components/Shell";
+import "./app.css";
+import { Sidebar, type Page } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { Notice, ToastView } from "./components/ui";
+import { ContextMenuHost } from "./components/ContextMenu";
+import { DialogHost } from "./components/Dialog";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { same } from "./lib/riotId";
@@ -44,7 +47,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const recorder = useRecorder();
+  // "Open" on a Clip saved toast opens it in the viewer.
+  const recorder = useRecorder(setViewing);
   const matchesState = useMatches();
   const update = useUpdateStatus();
   /** While updating, the app behind the update screen can't be clicked or tabbed into. */
@@ -75,12 +79,12 @@ export default function App() {
 
   const closeViewer = useCallback(() => setViewing(null), []);
   const search = !viewing && page === "home" ? "Search maps, agents, players, streamers" : !viewing && page === "clips" ? "Search clips" : undefined;
-  const title = viewing ? undefined : page === "streamers" ? "Streamers you played against" : page === "settings" ? "Settings" : undefined;
+  const title = viewing ? "Clip" : { home: "Home", clips: "Clips", streamers: "Streamers", settings: "Settings" }[page];
 
   return (
     <>
     <div className="app" inert={blocked}>
-      <Rail page={page} update={update} onNavigate={setPage} />
+      <Sidebar page={page} update={update} onNavigate={setPage} />
       <div className="frame">
         <TopBar
           settings={settings}
@@ -90,17 +94,13 @@ export default function App() {
           searchLabel={search}
           title={title}
           onSaving={() => recorder.notify("Saving clip…", "info")}
+          onLength={(bufferSeconds) => saveSettings({ ...settings, bufferSeconds }).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"))}
           onIgnore={(exe) => {
             const next = { ...settings, ignoredGames: [...settings.ignoredGames, exe] };
             saveSettings(next).then(onSaved, (err) => recorder.notify(`Could not save: ${String(err)}`, "bad"));
           }}
         />
         <main className="main" ref={mainRef}>
-          {!isDesktop && (
-            <p className="notice info" role="note">
-              <b>Website demo with sample data.</b> Recording and streamer clips need the Windows app. <a href="/">About CrossPOV</a>
-            </p>
-          )}
           {loadError && <Notice tone="bad">Could not load settings, using defaults: {loadError}</Notice>}
           {status?.hotkeyError && <Notice tone="warn">{status.hotkeyError}</Notice>}
           {status?.audioWarning && <Notice tone="warn">{status.audioWarning}</Notice>}
@@ -130,6 +130,8 @@ export default function App() {
             </Notice>
           )}
           <Suspense fallback={<p className="muted">Loading…</p>}>
+            {/* Keyed by what's shown, so each page or clip fades in when you open it. */}
+            <div key={viewing ? `clip:${viewing.path}` : page} className="page-enter">
             {viewing ? (
               <Viewer
                 clip={viewing}
@@ -145,6 +147,7 @@ export default function App() {
                 }}
                 onChanged={recorder.refreshClips}
                 notify={recorder.notify}
+                show={recorder.show}
               />
             ) : (
               <>
@@ -154,10 +157,13 @@ export default function App() {
                 {page === "settings" && <SettingsPage settings={settings} onSaved={onSaved} />}
               </>
             )}
+            </div>
           </Suspense>
         </main>
       </div>
-      <ToastView toast={recorder.toast} />
+      <ToastView toast={recorder.toast} onAct={recorder.act} onHold={recorder.setHeld} />
+      <ContextMenuHost />
+      <DialogHost />
     </div>
     <UpdateGate status={update} />
     </>

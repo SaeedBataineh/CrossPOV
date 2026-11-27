@@ -414,14 +414,37 @@ fn save_clip_now(app: AppHandle) {
 
 #[tauri::command]
 fn list_clips(app: AppHandle, state: State<'_, AppState>) -> Vec<ClipInfo> {
-    clips::list(&clip_folder(&app, &state.get()))
+    let root = clip_folder(&app, &state.get());
+    // The first listing after start: clips deleted right before the app last closed go to the Recycle Bin.
+    static SWEPT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !SWEPT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        let r = root.clone();
+        thread::spawn(move || clips::recycle_leftovers(&r));
+    }
+    clips::list(&root)
 }
 
+/// Deleting hides the clip at once; `restore_clip` (Undo) brings it back, and
+/// `recycle_clip` moves it to the Recycle Bin once Undo has run out.
 #[tauri::command]
 fn delete_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let root = clip_folder(&app, &state.get());
     let clip = clips::validate(&root, &path)?;
-    clips::delete(&root, &clip)
+    clips::hide(&root, &clip)
+}
+
+#[tauri::command]
+fn restore_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let root = clip_folder(&app, &state.get());
+    let clip = clips::validate_hidden(&root, &path)?;
+    clips::unhide(&root, &clip)
+}
+
+#[tauri::command]
+async fn recycle_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let root = clip_folder(&app, &state.get());
+    let clip = clips::validate_hidden(&root, &path)?;
+    tauri::async_runtime::spawn_blocking(move || clips::recycle(&root, &clip)).await.map_err(|e| e.to_string())?
 }
 
 /// Runs FFmpeg with `args` and waits; the error says what went wrong.
@@ -956,6 +979,8 @@ pub fn run() {
             save_clip_now,
             list_clips,
             delete_clip,
+            restore_clip,
+            recycle_clip,
             open_clip,
             play_clip_in_app,
             reveal_clip,
