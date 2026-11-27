@@ -70,8 +70,11 @@ fn swap_exe(bytes: &[u8]) -> Result<PathBuf, String> {
     Ok(exe)
 }
 
-/// How often a running app looks for a new version.
-const RECHECK: Duration = Duration::from_secs(3 * 60 * 60);
+/// How often a running app looks for a new version. Closing the window only
+/// hides CrossPOV in the tray, so it can run for days: check often.
+const RECHECK: Duration = Duration::from_secs(30 * 60);
+/// After a check that couldn't reach the server (no internet yet), try again this soon.
+const RETRY_OFFLINE: Duration = Duration::from_secs(2 * 60);
 /// While VALORANT is open, how often to see whether it has closed.
 const GAME_POLL: Duration = Duration::from_secs(60);
 /// A launch check that takes longer than this lets the user in (e.g. no internet).
@@ -144,20 +147,55 @@ impl Updates {
                 Ok(Some(update)) => me.install(&app, update).await,
                 Ok(None) => me.set(&app, UpdateStatus::UpToDate { offline: false }),
                 Err(err) => {
-                    eprintln!("update check failed: {err}");
+                    crate::trail(&format!("update: check at launch failed ({err}); trying again in 2 min"));
                     me.set(&app, UpdateStatus::UpToDate { offline: true });
                 }
             }
             drop(done);
+            let mut wait = if matches!(me.status(), UpdateStatus::UpToDate { offline: true }) { RETRY_OFFLINE } else { RECHECK };
             loop {
-                tokio_sleep(RECHECK).await;
-                if let Ok(Some(update)) = me.find(&app).await {
-                    me.set(&app, UpdateStatus::Waiting { version: update.version.clone() });
-                    while game_running() {
-                        tokio_sleep(GAME_POLL).await;
-                    }
-                    me.install(&app, update).await;
+                tokio_sleep(wait).await;
+                wait = RECHECK;
+                if !me.idle() {
+                    continue; // An opening of the window is already checking or installing.
                 }
+                match me.find(&app).await {
+                    Ok(Some(update)) => {
+                        me.set(&app, UpdateStatus::Waiting { version: update.version.clone() });
+                        while game_running() {
+                            tokio_sleep(GAME_POLL).await;
+                        }
+                        me.install(&app, update).await;
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        crate::trail(&format!("update: check failed ({err}); trying again in 2 min"));
+                        wait = RETRY_OFFLINE;
+                    }
+                }
+            }
+        });
+    }
+
+    /// Not checking, downloading or installing right now.
+    fn idle(&self) -> bool {
+        matches!(self.status(), UpdateStatus::UpToDate { .. } | UpdateStatus::Waiting { .. })
+    }
+
+    /// Opening CrossPOV again (from the Start menu or desktop while it sits in
+    /// the tray) shows the copy already running, which may be old: look for a
+    /// new version now and install it straight away, as a fresh start would.
+    pub fn check_on_open(&self, app: &AppHandle) {
+        if !self.idle() {
+            return;
+        }
+        let me = self.clone();
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            match me.find(&app).await {
+                Ok(Some(update)) => me.install(&app, update).await,
+                Ok(None) => {}
+                Err(err) => crate::trail(&format!("update: check on opening failed ({err})")),
             }
         });
     }

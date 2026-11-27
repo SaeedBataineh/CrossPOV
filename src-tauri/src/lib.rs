@@ -902,7 +902,12 @@ pub fn run() {
     }
     let app = tauri::Builder::default()
         // Must be first: a second launch just brings the running app forward.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+            if let Some(state) = app.try_state::<AppState>() {
+                state.updates.check_on_open(app);
+            }
+        }))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
