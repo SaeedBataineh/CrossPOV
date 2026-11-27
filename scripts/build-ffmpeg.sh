@@ -72,7 +72,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-w32threads --enable-d3d11va --enable-ffnvcodec --enable-nvenc --enable-amf \
   --enable-mediafoundation --enable-schannel --enable-network \
   --enable-indev=lavfi \
-  --enable-filter=ddagrab,gfxcapture,fps,drawbox,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
+  --enable-filter=ddagrab,gfxcapture,fps,drawbox,setsar,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
   --enable-encoder=h264_nvenc,h264_amf,h264_mf,hevc_nvenc,hevc_amf,hevc_mf,aac,mjpeg,wrapped_avframe,rawvideo,pcm_s16le \
   --enable-decoder=h264,hevc,aac,aac_fixed,mp3float,pcm_f32le,pcm_s16le,mjpeg,png,rawvideo,wrapped_avframe \
   --enable-demuxer=concat,mpegts,mov,matroska,hls,aac,h264,pcm_f32le,flv,image2,mjpeg \
