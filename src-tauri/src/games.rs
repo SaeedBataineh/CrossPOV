@@ -353,7 +353,22 @@ mod window {
     fn monitor_of(hwnd: HWND) -> (HMONITOR, Option<u32>, RECT) {
         // SAFETY: `hwnd` came from Windows; MONITORINFO has cbSize set as required.
         unsafe {
-            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            // A minimised window sits off-screen (-32000,-32000): "nearest
+            // monitor" is then just whichever is closest to that, not the
+            // game's. Use where it goes back to when restored.
+            let monitor = if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
+                let mut place = windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT {
+                    length: std::mem::size_of::<windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT>() as u32,
+                    ..Default::default()
+                };
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowPlacement(hwnd, &mut place).is_ok() {
+                    windows::Win32::Graphics::Gdi::MonitorFromRect(&place.rcNormalPosition, MONITOR_DEFAULTTONEAREST)
+                } else {
+                    MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                }
+            } else {
+                MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+            };
             let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
             let ok = GetMonitorInfoW(monitor, &mut info).as_bool();
             let rect = info.rcMonitor;

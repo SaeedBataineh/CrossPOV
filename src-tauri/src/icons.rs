@@ -51,7 +51,7 @@ pub fn icon_png(exe: &str, path: Option<PathBuf>) -> Option<Vec<u8>> {
 /// Where a running program is. Asks Windows for the bare minimum ("limited
 /// information"), which works even for games protected by anti-cheat
 /// (VALORANT's Vanguard), where reading the full process details doesn't.
-pub(crate) fn running_path(exe: &str) -> Option<PathBuf> {
+fn running_path(exe: &str) -> Option<PathBuf> {
     if let Some(p) = crate::procs::shared(|p| p.exe_path(exe)) {
         return Some(p);
     }
@@ -78,7 +78,7 @@ pub(crate) fn running_path(exe: &str) -> Option<PathBuf> {
 
 /// Where an installed (not running) game is, for games whose launcher says
 /// where it put them. VALORANT: Riot's product settings name its folder.
-pub(crate) fn installed_path(exe: &str) -> Option<PathBuf> {
+fn installed_path(exe: &str) -> Option<PathBuf> {
     if !exe.eq_ignore_ascii_case("VALORANT-Win64-Shipping.exe") && !exe.eq_ignore_ascii_case("VALORANT.exe") {
         return None;
     }

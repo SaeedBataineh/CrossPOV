@@ -12,6 +12,7 @@
 # if new. With only_hwnd that is never taken: the last game picture repeats,
 # and after 3 s with the game in front and no new picture a warning says so,
 # so CrossPOV can switch to window capture.
+# The screen recorded is the one the game is on, found from its window.
 # Usage: perl ddagrab-game-only.pl libavfilter/vsrc_ddagrab.c
 use strict;
 use warnings;
@@ -151,6 +152,38 @@ my $check = <<'C';
     }
 C
 patch('frame check', qr/    \} else \{\n        cur_texture = dda->probed_texture;\n        dda->probed_texture = NULL;\n        ret = 0;\n    \}\n/, $check);
+
+my $pick = <<'C';
+    // Recording a game: capture the screen the game is on (by its monitor,
+    // not a number another program worked out; a minimised game counts as
+    // where it goes back to).
+    if (dda->only_hwnd) {
+        HWND game = (HWND)(intptr_t)dda->only_hwnd;
+        HMONITOR mon;
+        WINDOWPLACEMENT place = { sizeof(place) };
+        if (IsIconic(game) && GetWindowPlacement(game, &place))
+            mon = MonitorFromRect(&place.rcNormalPosition, MONITOR_DEFAULTTONEAREST);
+        else
+            mon = MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST);
+        for (UINT i = 0; ; i++) {
+            IDXGIOutput *o = NULL;
+            DXGI_OUTPUT_DESC d;
+            if (FAILED(IDXGIAdapter_EnumOutputs(dxgi_adapter, i, &o)))
+                break;
+            if (SUCCEEDED(IDXGIOutput_GetDesc(o, &d)) && d.Monitor == mon) {
+                if ((int)i != dda->output_idx)
+                    av_log(avctx, AV_LOG_WARNING, "The game is on screen %u (not %d): recording that one\n", i, dda->output_idx);
+                dda->output_idx = i;
+                IDXGIOutput_Release(o);
+                break;
+            }
+            IDXGIOutput_Release(o);
+        }
+    }
+
+    hr = IDXGIAdapter_EnumOutputs(dxgi_adapter, dda->output_idx, &dxgi_output);
+C
+patch('pick output', qr/    hr = IDXGIAdapter_EnumOutputs\(dxgi_adapter, dda->output_idx, &dxgi_output\);\n/, $pick);
 
 open my $out, '>', $path or die "$path: $!\n";
 print $out $src;

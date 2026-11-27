@@ -1062,9 +1062,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");
 
-    // Windows' windowed-game optimization off for VALORANT (from its next
-    // start). See win_graphics.
-    win_graphics::turn_off_for_games();
+    // Put back a Windows setting 0.6.8/0.6.9 changed for VALORANT. See win_graphics.
+    std::thread::spawn(win_graphics::restore);
     app.run(|app, event| {
         // `code: None` means the last window closed (not Quit from the tray).
         if let RunEvent::ExitRequested { code: None, api, .. } = event {
