@@ -20,6 +20,7 @@ mod settings;
 mod streamers;
 mod tools;
 mod updater;
+mod win_graphics;
 #[cfg(windows)]
 mod win_audio;
 
@@ -1055,12 +1056,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");
 
+    // Windows' windowed-game optimization off for VALORANT while we run
+    // (a game started now gets it); put back as we quit. See win_graphics.
+    win_graphics::turn_off_for_games();
     app.run(|app, event| {
         // `code: None` means the last window closed (not Quit from the tray).
-        if let RunEvent::ExitRequested { code: None, api, .. } = event {
-            if app.state::<AppState>().get().minimize_to_tray {
-                api.prevent_exit();
+        match event {
+            RunEvent::ExitRequested { code: None, api, .. } => {
+                if app.state::<AppState>().get().minimize_to_tray {
+                    api.prevent_exit();
+                }
             }
+            RunEvent::Exit => win_graphics::restore(),
+            _ => {}
         }
     });
 }
