@@ -10,6 +10,11 @@
 # - While the game sends nothing (hidden, minimised), the last frame is
 #   repeated every 100 ms at the real time, like whole-screen capture keeps
 #   going.
+# - The clock starts when capture starts, not at the first picture, and
+#   until that picture comes a black one stands in: FFmpeg starts each
+#   input's clock at its first frame, so a late first picture left the
+#   picture's clock that far behind the sound's, and FFmpeg then took in
+#   sound only in bursts (clips kept 300 ms of game sound every ~16 s).
 # Usage: perl gfxcapture-keep-going.pl libavfilter/vsrc_gfxcapture_winrt.cpp
 use strict;
 use warnings;
@@ -32,7 +37,7 @@ patch('uninit', qr/(\n    av_buffer_unref\(&ctx->frames_ref\);\n    av_buffer_un
       "\n    av_frame_free(&ctx->last_frame);\n    av_buffer_unref(&ctx->frames_ref);\n    av_buffer_unref(&ctx->device_ref);\n");
 
 patch('frame interval helper', qr/\nstatic int process_frame_if_exists\(AVFilterLink \*outlink\)\n/,
-      "\n// One frame's time at the chosen frame rate, in TIMESPAN_RES units.\nstatic int64_t frame_interval(GfxCaptureContext *cctx)\n{\n    return FFMAX(1, av_rescale_q(1, av_inv_q(cctx->frame_rate), AVRational{1, TIMESPAN_RES}));\n}\n\nstatic int process_frame_if_exists(AVFilterLink *outlink)\n");
+      "\n// One frame's time at the chosen frame rate, in TIMESPAN_RES units.\nstatic int64_t frame_interval(GfxCaptureContext *cctx)\n{\n    return FFMAX(1, av_rescale_q(1, av_inv_q(cctx->frame_rate), AVRational{1, TIMESPAN_RES}));\n}\n\n// Now, on the clock SystemRelativeTime uses (QPC), in TIMESPAN_RES units.\nstatic int64_t qpc_now(void)\n{\n    LARGE_INTEGER now, freq;\n    QueryPerformanceCounter(&now);\n    QueryPerformanceFrequency(&freq);\n    return av_rescale(now.QuadPart, TIMESPAN_RES, freq.QuadPart);\n}\n\nstatic int process_frame_if_exists(AVFilterLink *outlink)\n");
 
 my $drop = <<'C';
         CHECK_HR_RET(capture_frame->get_SystemRelativeTime(&frame_time));
@@ -50,11 +55,16 @@ C
 patch('frame time', qr/        CHECK_HR_RET\(capture_frame->get_SystemRelativeTime\(&frame_time\)\);\n/, $drop);
 patch('dropped frame', qr/(    \}\);\n)(    if \(ret < 0\)\n        return ret;\n\n    frame->sample_aspect_ratio)/,
       "    });\n    if (ret == 1)\n        return 1;\n    if (ret < 0)\n        return ret;\n\n    frame->sample_aspect_ratio");
+patch('clock start', qr/(    if \(!ff_outlink_frame_wanted\(outlink\)\)\n        return FFERROR_NOT_READY;\n)/,
+      "    if (!ff_outlink_frame_wanted(outlink))\n        return FFERROR_NOT_READY;\n\n    // The clock starts with capture (and the sound), not at the first picture.\n    if (!ctx->first_pts)\n        ctx->first_pts = qpc_now();\n");
+
 patch('activate retry', qr/        int ret = process_frame_if_exists\(outlink\);\n        if \(ret != AVERROR\(EAGAIN\)\)\n            return ret;\n/,
       "        int ret = process_frame_if_exists(outlink);\n        if (ret == 1)\n            continue;\n        if (ret != AVERROR(EAGAIN))\n            return ret;\n");
 
 my $repeat = <<'C';
     frame->pts -= ctx->first_pts;
+    if (frame->pts < 0)
+        frame->pts = 0;
     if (ctx->last_out_pts >= 0 && frame->pts < ctx->last_out_pts + frame_interval(cctx))
         frame->pts = ctx->last_out_pts + frame_interval(cctx);
     ctx->last_out_pts = frame->pts;
@@ -65,23 +75,61 @@ my $repeat = <<'C';
     return ff_filter_frame(outlink, frame);
 }
 
-// The last frame again, at the current time (the same clock as
-// SystemRelativeTime), while the window sends nothing new.
+// A black frame, until the window's first picture comes.
+static AVFrame *black_frame(AVFilterLink *outlink)
+{
+    AVFilterContext *avctx = outlink->src;
+    GfxCaptureContext *cctx = CCTX(avctx->priv);
+    GfxCaptureContextCpp *ctx = cctx->ctx;
+
+    AVFrame *frame = ff_get_video_buffer(outlink, cctx->canvas_width, cctx->canvas_height);
+    if (!frame)
+        return nullptr;
+    int ret = run_on_wgc_thread(avctx, [&]() {
+        ID3D11Texture2D *tex = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]);
+        D3D11_TEXTURE2D_DESC desc;
+        tex->GetDesc(&desc);
+        D3D11_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+        rtv_desc.Format = desc.Format;
+        if (desc.ArraySize > 1) {
+            rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtv_desc.Texture2DArray.ArraySize = 1;
+            rtv_desc.Texture2DArray.FirstArraySlice = (uintptr_t)frame->data[1];
+        } else {
+            rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        }
+        ComPtr<ID3D11RenderTargetView> rtv;
+        CHECK_HR_RET(ctx->device_hwctx->device->CreateRenderTargetView(tex, &rtv_desc, &rtv));
+        const float black[4] = { 0.f, 0.f, 0.f, 1.f };
+        ctx->device_hwctx->device_context->ClearRenderTargetView(rtv.Get(), black);
+        return 0;
+    });
+    if (ret < 0) {
+        av_frame_free(&frame);
+        return nullptr;
+    }
+    frame->sample_aspect_ratio = AVRational{1, 1};
+    frame->color_range     = AVCOL_RANGE_JPEG;
+    frame->color_primaries = AVCOL_PRI_BT709;
+    frame->color_trc       = ctx->frames_ctx->sw_format == AV_PIX_FMT_RGBAF16 ? AVCOL_TRC_LINEAR : AVCOL_TRC_IEC61966_2_1;
+    frame->colorspace      = AVCOL_SPC_RGB;
+    return frame;
+}
+
+// The last frame again (black before the first), at the current time (the
+// same clock as SystemRelativeTime), while the window sends nothing new.
 static int repeat_last_frame(AVFilterLink *outlink)
 {
     GfxCaptureContext *cctx = CCTX(outlink->src->priv);
     GfxCaptureContextCpp *ctx = cctx->ctx;
-    LARGE_INTEGER now, freq;
 
-    if (!ctx->last_frame || !ctx->first_pts)
+    if (!ctx->first_pts)
         return 0;
-    QueryPerformanceCounter(&now);
-    QueryPerformanceFrequency(&freq);
-    int64_t pts = av_rescale(now.QuadPart, TIMESPAN_RES, freq.QuadPart) - ctx->first_pts;
+    int64_t pts = qpc_now() - ctx->first_pts;
     if (pts < ctx->last_out_pts + frame_interval(cctx))
         return 0;
 
-    AVFrame *frame = av_frame_clone(ctx->last_frame);
+    AVFrame *frame = ctx->last_frame ? av_frame_clone(ctx->last_frame) : black_frame(outlink);
     if (!frame)
         return AVERROR(ENOMEM);
     frame->pts = pts;

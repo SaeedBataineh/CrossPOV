@@ -3,6 +3,9 @@
 # new pictures are taken only while that window is in front. While another
 # window is (alt-tabbed), the last game picture is repeated instead, so the
 # desktop never gets into the recording, and nothing is drawn over it.
+# Before the game's first picture, a black one stands in: the picture must
+# start with the sound (FFmpeg starts each input's clock at its first frame;
+# a late first picture left the sound coming in only in bursts).
 # Usage: perl ddagrab-game-only.pl libavfilter/vsrc_ddagrab.c
 use strict;
 use warnings;
@@ -26,6 +29,50 @@ patch('option', qr/(                                                   OFFSET\(d
     . "    { \"only_hwnd\",  \"take new pictures only while this window is in front\",\n"
     . "                                                   OFFSET(only_hwnd),  AV_OPT_TYPE_INT64,      { .i64 = 0    },       0, INT64_MAX, FLAGS },\n");
 
+patch('render target', qr/    if \(dda->draw_mouse\)\n        dda->frames_hwctx->BindFlags \|= D3D11_BIND_RENDER_TARGET;\n/,
+      "    if (dda->draw_mouse || dda->only_hwnd)\n        dda->frames_hwctx->BindFlags |= D3D11_BIND_RENDER_TARGET;\n");
+
+my $black = <<'C';
+// A black frame, for before the game's first picture.
+static AVFrame *black_frame(AVFilterLink *outlink)
+{
+    DdagrabContext *dda = outlink->src->priv;
+    D3D11_TEXTURE2D_DESC desc;
+    D3D11_RENDER_TARGET_VIEW_DESC rtv_desc = { 0 };
+    ID3D11RenderTargetView *rtv = NULL;
+    static const float black[4] = { 0.f, 0.f, 0.f, 1.f };
+    AVFrame *frame = ff_get_video_buffer(outlink, dda->width, dda->height);
+
+    if (!frame)
+        return NULL;
+    ID3D11Texture2D_GetDesc((ID3D11Texture2D*)frame->data[0], &desc);
+    rtv_desc.Format = desc.Format;
+    if (desc.ArraySize > 1) {
+        rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+        rtv_desc.Texture2DArray.ArraySize = 1;
+        rtv_desc.Texture2DArray.FirstArraySlice = (UINT)(intptr_t)frame->data[1];
+    } else {
+        rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    }
+    if (FAILED(ID3D11Device_CreateRenderTargetView(dda->device_hwctx->device, (ID3D11Resource*)frame->data[0], &rtv_desc, &rtv))) {
+        av_frame_free(&frame);
+        return NULL;
+    }
+    ID3D11DeviceContext_ClearRenderTargetView(dda->device_hwctx->device_context, rtv, black);
+    ID3D11RenderTargetView_Release(rtv);
+
+    frame->sample_aspect_ratio = (AVRational){1, 1};
+    frame->color_range     = AVCOL_RANGE_JPEG;
+    frame->color_primaries = AVCOL_PRI_BT709;
+    frame->color_trc       = dda->raw_format == DXGI_FORMAT_R16G16B16A16_FLOAT ? AVCOL_TRC_LINEAR : AVCOL_TRC_IEC61966_2_1;
+    frame->colorspace      = AVCOL_SPC_RGB;
+    return frame;
+}
+
+static int ddagrab_request_frame(AVFilterLink *outlink)
+C
+patch('black frame', qr/static int ddagrab_request_frame\(AVFilterLink \*outlink\)\n/, $black);
+
 my $check = <<'C';
     } else {
         cur_texture = dda->probed_texture;
@@ -34,11 +81,24 @@ my $check = <<'C';
     }
 
     // Another window in front of the game: keep the last game picture.
-    // Before the first one, wait for the game to come to the front.
-    if (ret == 0 && dda->only_hwnd && GetForegroundWindow() != (HWND)(intptr_t)dda->only_hwnd) {
-        release_resource(&cur_texture);
-        IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
-        ret = AVERROR(EAGAIN);
+    // Before the first one, black (also kept, so it repeats until then).
+    if (dda->only_hwnd && GetForegroundWindow() != (HWND)(intptr_t)dda->only_hwnd) {
+        if (ret == 0) {
+            release_resource(&cur_texture);
+            IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
+            ret = AVERROR(EAGAIN);
+        }
+        if (ret == AVERROR(EAGAIN) && !dda->last_frame->buf[0]) {
+            frame = black_frame(outlink);
+            if (!frame)
+                return AVERROR(ENOMEM);
+            ret = av_frame_replace(dda->last_frame, frame);
+            if (ret < 0) {
+                av_frame_free(&frame);
+                return ret;
+            }
+            goto frame_done;
+        }
     }
 C
 patch('frame check', qr/    \} else \{\n        cur_texture = dda->probed_texture;\n        dda->probed_texture = NULL;\n        ret = 0;\n    \}\n/, $check);
