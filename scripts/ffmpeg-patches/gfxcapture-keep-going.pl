@@ -1,6 +1,9 @@
 #!/usr/bin/perl
 # Keeps window capture's timeline on real time, so picture and sound stay
-# together:
+# together, and gets it every frame:
+# - Windows is asked for frames up to twice as often as needed (half a frame
+#   apart): at exactly one frame apart it skipped frames that came a hair
+#   early, which halved 144 fps to ~70. The extra ones are dropped below.
 # - Frames that come faster than the frame rate are dropped. Windows has sent
 #   thousands a second (e.g. while alt-tabbed); each one got its own 1/fps
 #   slot, so the picture's clock raced minutes ahead of the sound: clips were
@@ -57,6 +60,13 @@ patch('dropped frame', qr/(    \}\);\n)(    if \(ret < 0\)\n        return ret;\
       "    });\n    if (ret == 1)\n        return 1;\n    if (ret < 0)\n        return ret;\n\n    frame->sample_aspect_ratio");
 patch('clock start', qr/(    if \(!ff_outlink_frame_wanted\(outlink\)\)\n        return FFERROR_NOT_READY;\n)/,
       "    if (!ff_outlink_frame_wanted(outlink))\n        return FFERROR_NOT_READY;\n\n    // The clock starts with capture (and the sound), not at the first picture.\n    if (!ctx->first_pts)\n        ctx->first_pts = qpc_now();\n");
+
+# Windows hands over a new frame only if at least MinUpdateInterval passed
+# since the last one. At exactly one frame (1/fps), a frame arriving a hair
+# early is skipped, which halves the rate (~70 fps at 144). Ask for half a
+# frame; the frames that then come too soon are dropped above.
+patch('update interval', qr/        TimeSpan ivl = \{ av_rescale_q\(1, av_inv_q\(cctx->frame_rate\), AVRational\{1, TIMESPAN_RES\}\) \};\n/,
+      "        TimeSpan ivl = { av_rescale_q(1, av_inv_q(cctx->frame_rate), AVRational{1, TIMESPAN_RES}) / 2 };\n");
 
 patch('activate retry', qr/        int ret = process_frame_if_exists\(outlink\);\n        if \(ret != AVERROR\(EAGAIN\)\)\n            return ret;\n/,
       "        int ret = process_frame_if_exists(outlink);\n        if (ret == 1)\n            continue;\n        if (ret != AVERROR(EAGAIN))\n            return ret;\n");
