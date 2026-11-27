@@ -101,8 +101,8 @@ struct Inner {
     /// Recording just the game's window failed on this PC (or for this game):
     /// record its screen instead until the game closes.
     window_failed: bool,
-    /// Was set for full-screen games recorded from the screen; no longer
-    /// set: Game window mode uses window capture for every game.
+    /// A game window found filling its whole screen: recorded from the
+    /// screen instead (see `fills_screen`), until the game closes.
     screen_for: Option<u64>,
     /// Screen capture stopped getting this game window's pictures: window
     /// capture from then on, until the game closes.
@@ -164,6 +164,19 @@ fn captured_size_from_log(log: &str) -> Option<(u32, u32)> {
 
 /// Whether a window's size changed for real: more than 8 pixels either way.
 /// Unknown sizes (a minimised window) never count.
+/// Whether a game's window covers its whole screen at the screen's usual
+/// widescreen shape (1920x1080 on a 1920x1080 screen; a line or two short
+/// counts). Such a game is recorded from the screen: window capture handed
+/// VALORANT's frames over in bursts at ~70 fps once its picture went a line
+/// short after alt-tabbing, while screen capture stays a steady 144. Not a
+/// stretched resolution (1568x1080, narrower than 16:10) or a smaller picture
+/// inside the window: window capture records those exactly as drawn.
+fn fills_screen(window: Option<(u32, u32)>, screen: Option<(u32, u32)>, content: Option<(u32, u32)>) -> bool {
+    let (Some((w, h)), Some((sw, sh))) = (window, screen) else { return false };
+    let near = |(a, b): (u32, u32), (c, d): (u32, u32)| a.abs_diff(c) <= 2 && b.abs_diff(d) <= 2;
+    sh > 0 && near((w, h), (sw, sh)) && content.is_none_or(|c| near(c, (w, h))) && u64::from(sw) * 10 >= u64::from(sh) * 16
+}
+
 fn size_changed(before: Option<(u32, u32)>, now: Option<(u32, u32)>) -> bool {
     match (before, now) {
         (Some((w1, h1)), Some((w2, h2))) => w1.abs_diff(w2) > 8 || h1.abs_diff(h2) > 8,
@@ -401,6 +414,13 @@ impl Recorder {
                 inner.screen_for = None;
             }
         }
+        if let Some(g) = game.as_ref().filter(|g| g.hwnd != 0 && inner.screen_for != Some(g.hwnd) && inner.no_screen_for != Some(g.hwnd)) {
+            let content = inner.content_size.filter(|(h, _)| *h == g.hwnd).map(|(_, s)| s);
+            if inner.settings.capture == crate::settings::Capture::Window && fills_screen(g.window_size, g.screen_size, content) {
+                crate::trail("recording: the game fills its screen; recording the screen (steadier than window capture), only while the game is in front");
+                inner.screen_for = Some(g.hwnd);
+            }
+        }
         let window = game
             .as_ref()
             .map(|g| g.hwnd)
@@ -500,6 +520,8 @@ impl Recorder {
             // Screen capture in Game window mode (a full-screen game, or window
             // capture failed on this PC): only while the game is in front.
             let only_window = Some(g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed));
+            // Whole screen: the screen the game is on, found by FFmpeg from its window.
+            let monitor_window = Some(g.hwnd).filter(|h| *h != 0 && window.is_none() && only_window.is_none());
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
@@ -518,7 +540,7 @@ impl Recorder {
                     String::new()
                 }
             ));
-            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g, only_window) {
+            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g, only_window, monitor_window) {
                 Ok(running) => {
                     crate::trail("recording: started");
                     inner.status.state = RecState::Recording;
@@ -573,6 +595,7 @@ impl Recorder {
         key: String,
         game: &Game,
         only_window: Option<u64>,
+        monitor_window: Option<u64>,
     ) -> Result<Running, String> {
         let segment_dir = self.work_dir.join("buffer");
         let _ = fs::remove_dir_all(&segment_dir);
@@ -591,6 +614,7 @@ impl Recorder {
             window: (game.hwnd != 0).then_some(game.hwnd),
             source_size: if game.hwnd != 0 { game.window_size } else { game.screen_size },
             only_window,
+            monitor_window,
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)
@@ -798,6 +822,18 @@ mod tests {
     }
 
     #[test]
+    fn full_screen_games_are_recorded_from_the_screen() {
+        let fhd = Some((1920, 1080));
+        assert!(fills_screen(fhd, fhd, None));
+        assert!(fills_screen(Some((1920, 1079)), fhd, Some((1920, 1079))), "a line short");
+        assert!(fills_screen(Some((2560, 1440)), Some((2560, 1440)), None));
+        assert!(!fills_screen(Some((1568, 1080)), Some((1568, 1080)), None), "true stretch");
+        assert!(!fills_screen(fhd, fhd, Some((1568, 1080))), "smaller picture inside the window");
+        assert!(!fills_screen(Some((1280, 720)), fhd, None), "windowed");
+        assert!(!fills_screen(None, fhd, None), "size unknown");
+    }
+
+    #[test]
     fn tabbed_out_times_are_logged_as_spans() {
         let mut log = CoveredLog::default();
         log.note(false, 1_000);
@@ -882,7 +918,7 @@ mod tests {
         *rec.ffmpeg.lock().unwrap() = Some((ff.clone(), VideoEncoder::Cpu));
         let key = recording_key(&settings);
         let running = rec
-            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default(), None)
+            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default(), None, None)
             .expect("start recording");
         rec.lock().running = Some(running);
 

@@ -12,7 +12,9 @@
 # if new. With only_hwnd that is never taken: the last game picture repeats,
 # and after 3 s with the game in front and no new picture a warning says so,
 # so CrossPOV can switch to window capture.
-# The screen recorded is the one the game is on, found from its window.
+# The screen recorded is the one the game is on, found from its window
+# (only_hwnd, or monitor_hwnd for the whole screen without the game-only part):
+# a number worked out by another program pointed at the wrong monitor.
 # Usage: perl ddagrab-game-only.pl libavfilter/vsrc_ddagrab.c
 use strict;
 use warnings;
@@ -29,12 +31,14 @@ sub patch {
 }
 
 patch('context field', qr/    int        dup_frames;\n\} DdagrabContext;\n/,
-      "    int        dup_frames;\n    int64_t    only_hwnd;\n} DdagrabContext;\n");
+      "    int        dup_frames;\n    int64_t    only_hwnd;\n    int64_t    monitor_hwnd;\n} DdagrabContext;\n");
 
 patch('option', qr/(                                                   OFFSET\(dup_frames\), AV_OPT_TYPE_BOOL,       \{ \.i64 = 1    \},       0,       1, FLAGS \},\n)/,
       "                                                   OFFSET(dup_frames), AV_OPT_TYPE_BOOL,       { .i64 = 1    },       0,       1, FLAGS },\n"
     . "    { \"only_hwnd\",  \"take new pictures only while this window is in front\",\n"
-    . "                                                   OFFSET(only_hwnd),  AV_OPT_TYPE_INT64,      { .i64 = 0    },       0, INT64_MAX, FLAGS },\n");
+    . "                                                   OFFSET(only_hwnd),  AV_OPT_TYPE_INT64,      { .i64 = 0    },       0, INT64_MAX, FLAGS },\n"
+    . "    { \"monitor_hwnd\", \"record the screen this window is on\",\n"
+    . "                                                   OFFSET(monitor_hwnd), AV_OPT_TYPE_INT64,    { .i64 = 0    },       0, INT64_MAX, FLAGS },\n");
 
 patch('game frame time', qr/    int64_t first_pts;\n/, "    int64_t first_pts;\n    int64_t last_game_frame;\n    int64_t stall_warned;\n    int64_t cover_warned;\n");
 
@@ -157,8 +161,8 @@ my $pick = <<'C';
     // Recording a game: capture the screen the game is on (by its monitor,
     // not a number another program worked out; a minimised game counts as
     // where it goes back to).
-    if (dda->only_hwnd) {
-        HWND game = (HWND)(intptr_t)dda->only_hwnd;
+    if (dda->only_hwnd || dda->monitor_hwnd) {
+        HWND game = (HWND)(intptr_t)(dda->only_hwnd ? dda->only_hwnd : dda->monitor_hwnd);
         HMONITOR mon;
         WINDOWPLACEMENT place = { sizeof(place) };
         if (IsIconic(game) && GetWindowPlacement(game, &place))
