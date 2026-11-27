@@ -240,14 +240,28 @@ impl Session {
         lines.into_iter().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect()
     }
 
+    /// One obs-websocket request. "Not ready" (207: OBS still loading, its
+    /// websocket comes up first) is retried for up to 20 s.
     fn request(&mut self, kind: &str, data: Value) -> Result<Value, String> {
+        let until = Instant::now() + Duration::from_secs(20);
+        loop {
+            match self.request_once(kind, data.clone()) {
+                Err((207, _)) if Instant::now() < until => std::thread::sleep(Duration::from_millis(500)),
+                Err((_, e)) => return Err(e),
+                Ok(v) => return Ok(v),
+            }
+        }
+    }
+
+    /// Err((status code, message)); code 0 when there's no answer at all.
+    fn request_once(&mut self, kind: &str, data: Value) -> Result<Value, (u64, String)> {
         let id = self.next_id.to_string();
         self.next_id += 1;
         let msg = json!({ "op": 6, "d": { "requestType": kind, "requestId": id, "requestData": data } });
-        self.ws.send(&msg.to_string()).map_err(|e| format!("OBS: {kind}: {e}"))?;
+        self.ws.send(&msg.to_string()).map_err(|e| (0, format!("OBS: {kind}: {e}")))?;
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            let Some(text) = self.ws.recv(Duration::from_millis(500)).map_err(|e| format!("OBS: {kind}: {e}"))? else { continue };
+            let Some(text) = self.ws.recv(Duration::from_millis(500)).map_err(|e| (0, format!("OBS: {kind}: {e}")))? else { continue };
             let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
             match v["op"].as_u64() {
                 Some(5) => self.events.push(v["d"].clone()),
@@ -256,12 +270,12 @@ impl Session {
                     if status["result"].as_bool() == Some(true) {
                         return Ok(v["d"]["responseData"].clone());
                     }
-                    return Err(format!("OBS: {kind}: {} {}", status["code"], status["comment"].as_str().unwrap_or("")));
+                    return Err((status["code"].as_u64().unwrap_or(0), format!("OBS: {kind}: {} {}", status["code"], status["comment"].as_str().unwrap_or(""))));
                 }
                 _ => {}
             }
         }
-        Err(format!("OBS: {kind}: no answer"))
+        Err((0, format!("OBS: {kind}: no answer")))
     }
 }
 

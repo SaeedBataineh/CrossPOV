@@ -112,8 +112,8 @@ struct Inner {
     /// A full-screen game recorded by OBS's Game Capture (see obs.rs), and
     /// the recording key it was set up for.
     obs: Option<(String, Arc<Mutex<crate::obs::Session>>)>,
-    /// OBS couldn't record on this PC (or this game): FFmpeg until the game closes.
-    obs_failed: bool,
+    /// When OBS last couldn't record: FFmpeg meanwhile, OBS tried again a minute later.
+    obs_failed: Option<Instant>,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
 }
@@ -304,7 +304,7 @@ impl Recorder {
                 no_screen_for: None,
                 waiting_for_window: false,
                 obs: None,
-                obs_failed: false,
+                obs_failed: None,
                 halted: false,
             })),
             work_dir,
@@ -466,7 +466,7 @@ impl Recorder {
         let window = game
             .as_ref()
             .map(|g| g.hwnd)
-            .filter(|&h| h != 0 && !inner.window_failed && inner.screen_for != Some(h) && inner.settings.capture == crate::settings::Capture::Window);
+            .filter(|&h| h != 0 && !inner.window_failed && inner.settings.capture == crate::settings::Capture::Window);
         let key = format!(
             "{}|{}|{}|{}",
             recording_key(&inner.settings),
@@ -475,7 +475,7 @@ impl Recorder {
             // Not the window's size: it wobbles (VALORANT reports 1080, then
             // 1079), and a restart empties the replay buffer. Window capture
             // resizes every frame to the size it started with anyway.
-            match (window, game.as_ref().map(|g| g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed))) {
+            match (window, game.as_ref().map(|g| g.hwnd).filter(|h| *h != 0 && game_only && inner.window_failed)) {
                 (Some(h), _) => format!("w{h}"),
                 (None, Some(h)) => format!("s{h}"),
                 _ => "0".into(),
@@ -488,7 +488,7 @@ impl Recorder {
         // APIs can see what's behind such a game instead). See obs.rs.
         let use_obs = want
             && game_only
-            && !inner.obs_failed
+            && inner.obs_failed.is_none_or(|t| t.elapsed() > Duration::from_secs(60))
             && crate::tools::obs_dir().is_some()
             && game.as_ref().is_some_and(|g| g.hwnd != 0 && inner.screen_for == Some(g.hwnd));
         // OBS's canvas is the game's size: a new size (switching to a stretched
@@ -497,8 +497,8 @@ impl Recorder {
         if let Some((running_key, session)) = inner.obs.clone() {
             let alive = session.lock().unwrap_or_else(|e| e.into_inner()).alive();
             if !alive {
-                crate::trail("recording: OBS stopped; recording with FFmpeg until the game closes");
-                inner.obs_failed = true;
+                crate::trail("recording: OBS stopped; recording with FFmpeg, OBS again in a minute");
+                inner.obs_failed = Some(Instant::now());
             }
             if !alive || !use_obs || running_key != obs_key {
                 if alive && use_obs {
@@ -507,7 +507,7 @@ impl Recorder {
                 inner.obs = None;
             }
         }
-        if use_obs && !inner.obs_failed {
+        if use_obs {
             inner.running = None; // never both
             if inner.obs.is_none() {
                 let g = game.clone().unwrap_or_default();
@@ -560,8 +560,8 @@ impl Recorder {
                         inner.status.message = None;
                     }
                     Err(e) => {
-                        crate::trail(&format!("recording: OBS couldn't record ({e}); recording with FFmpeg"));
-                        inner.obs_failed = true;
+                        crate::trail(&format!("recording: OBS couldn't record ({e}); recording with FFmpeg, OBS again in a minute"));
+                        inner.obs_failed = Some(Instant::now());
                     }
                 }
                 let status = inner.status.clone();
@@ -653,13 +653,17 @@ impl Recorder {
             let mut g = game.clone().unwrap_or_default();
             // Screen capture in Game window mode (a full-screen game, or window
             // capture failed on this PC): only while the game is in front.
-            let only_window = Some(g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed));
+            // Window capture failed on this PC: screen capture, only while the game is what's seen.
+            let only_window = Some(g.hwnd).filter(|h| *h != 0 && game_only && inner.window_failed);
             // Whole screen: the screen the game is on, found by FFmpeg from its window.
             let monitor_window = Some(g.hwnd).filter(|h| *h != 0 && window.is_none() && only_window.is_none());
             // A full-screen game: Windows Graphics Capture of its monitor (sees
             // the game even when Windows shows it past the desktop, which window
             // capture and Desktop Duplication missed), only while it's the game.
-            let wgc_monitor = Some(g.hmonitor).filter(|m| *m != 0 && only_window.is_some() && inner.screen_for == Some(g.hwnd));
+            // Not used: OBS records full-screen games, and its fallback is window
+            // capture, which can never show another window (monitor capture let
+            // a full-screen Discord on top through).
+            let wgc_monitor = Some(g.hmonitor).filter(|_| false);
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
@@ -707,7 +711,7 @@ impl Recorder {
         }
         if !want {
             inner.window_failed = false;
-            inner.obs_failed = false;
+            inner.obs_failed = None;
             inner.obs = None;
             inner.content_size = None;
             inner.screen_for = None;
