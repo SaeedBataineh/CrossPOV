@@ -397,10 +397,11 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h)).filter(|_| !window);
     let on_gpu = plan.source == VideoSource::Desktop;
     let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
+    // Window capture: no `fps` filter. Its frames arrive unevenly, and fitting
+    // them onto a steady grid shows some twice and skips others (looks like a
+    // low frame rate). Each frame keeps the time it was captured instead
+    // (variable frame rate, below).
     let mut vf: Vec<String> = Vec::new();
-    if on_gpu && plan.window.is_some() {
-        vf.push(format!("fps={fps}"));
-    }
     if gpu_path {
         if let Some(h) = height {
             vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
@@ -491,7 +492,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     a.push(format!("{}k", kbps * 3 / 2));
     push(&mut a, &["-bufsize"]);
     a.push(format!("{}k", kbps * 2));
-    push(&mut a, &["-g", &gop, "-keyint_min", &gop]);
+    if on_gpu && plan.window.is_some() {
+        // Frames as captured, at their own times; a keyframe every segment by
+        // time (frame counts vary), so the buffer can still be cut anywhere.
+        let every = format!("expr:gte(t,n_forced*{SEGMENT_SECONDS})");
+        push(&mut a, &["-fps_mode", "passthrough", "-force_key_frames", &every, "-g", &gop]);
+    } else {
+        push(&mut a, &["-g", &gop, "-keyint_min", &gop]);
+    }
     if !audio_labels.is_empty() {
         push(&mut a, &["-c:a", "aac", "-b:a", "160k", "-ar"]);
         a.push(AUDIO_RATE.to_string());
@@ -501,7 +509,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     // `segment_count` finished segments, oldest first.
     let n = plan.segment_count.to_string();
     let seg = SEGMENT_SECONDS.to_string();
-    push(&mut a, &["-f", "segment", "-segment_time", &seg, "-segment_wrap", &n, "-segment_list_size", &n]);
+    // A keyframe landing a hair before a cut point (uneven frame times) still
+    // starts the next segment, instead of doubling this one.
+    push(&mut a, &["-f", "segment", "-segment_time", &seg, "-segment_time_delta", "0.05", "-segment_wrap", &n, "-segment_list_size", &n]);
     push(&mut a, &["-segment_list_type", "flat", "-segment_format", "mpegts", "-reset_timestamps", "0", "-segment_list"]);
     a.push(plan.list_file().to_string_lossy().into_owned());
     a.push(plan.segment_dir.join("seg%03d.ts").to_string_lossy().into_owned());
@@ -707,7 +717,8 @@ mod tests {
         let p = RecordPlan { window: Some(132_456), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let a = joined(&Settings::default(), &p);
         assert!(a.contains("gfxcapture=hwnd=132456:max_framerate=60:capture_cursor=0"), "{a}");
-        assert!(a.contains("[0:v]fps=60"), "steady frame rate: {a}");
+        assert!(!a.contains("fps=60,") && !a.contains("[0:v]fps"), "frames keep their own times: {a}");
+        assert!(a.contains("-fps_mode passthrough -force_key_frames expr:gte(t,n_forced*2)"), "{a}");
         assert!(!a.contains("ddagrab"));
         let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(screen.contains("ddagrab") && !screen.contains("fps=60"), "{screen}");
