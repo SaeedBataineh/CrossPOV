@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, CaretLeft, CaretRight, FolderOpen, PencilSimple, Trash } from "@phosphor-icons/react";
 import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
-import { Avatar, cardMeta, cardTitle } from "../components/ui";
-import { clipVideoSrc, copyForDiscord, deleteClip, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
+import { Avatar, cardMeta, cardTitle, clipPicture, renameClip } from "../components/ui";
+import { clipVideoSrc, copyForDiscord, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
 import { result, resultColor } from "../lib/matchInfo";
 import { findPairs, fightMarks, matchOf, pairsWith, vodLink } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
-import { formatSize } from "../lib/useRecorder";
+import { deleteWithUndo } from "../lib/deleteClips";
+import { useTitles } from "../lib/titles";
+import { formatSize, type ShowToast } from "../lib/useRecorder";
 
 type View = "mine" | "theirs" | "both";
 
@@ -115,6 +118,7 @@ export default function Viewer({
   onDeleted,
   onChanged,
   notify,
+  show,
 }: {
   clip: ClipInfo;
   clips: ClipInfo[];
@@ -127,7 +131,9 @@ export default function Viewer({
   /** A new clip was saved (a cut): refresh the list. */
   onChanged: () => void;
   notify: (text: string, tone: "good" | "bad" | "info") => void;
+  show: ShowToast;
 }) {
+  useTitles(); // re-render when the clip is renamed
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
   const pair = pairsWith(clip, pairs)[0];
   const mine = clip.kind === "mine" ? clip : pair?.mine;
@@ -155,23 +161,30 @@ export default function Viewer({
   const vod = theirs ? vodLink(theirs) : null;
   const more = match ? clips.filter((c) => c.path !== mine?.path && c.path !== theirs?.path && matchOf(c, matches)?.id === match.id) : [];
 
+  // Previous / next clip, in the order of your clip list (newest first).
+  const at = clips.findIndex((c) => c.path === clip.path);
+  const prev = at > 0 ? clips[at - 1] : undefined;
+  const next = at >= 0 && at < clips.length - 1 ? clips[at + 1] : undefined;
+
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.target instanceof HTMLInputElement || document.querySelector(".dialog")) return;
       // The player handles Escape first while cutting (it ends cutting).
-      if (e.key === "Escape" && !e.defaultPrevented && !(e.target instanceof HTMLInputElement)) onBack();
+      if (e.key === "Escape") onBack();
+      else if (e.key === "[" && prev) onOpen(prev);
+      else if (e.key === "]" && next) onOpen(next);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [onBack]);
+  }, [onBack, onOpen, prev, next]);
 
   const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
+  /** Gone at once with Undo in the toast; the viewer moves on to the next clip, or back to the list. */
   async function remove() {
-    if (!window.confirm(`Delete "${cardTitle(clip)}"? This can't be undone.`)) return;
-    try {
-      await deleteClip(clip.path);
-      onDeleted();
-    } catch (err) {
-      notify(`Couldn't delete: ${String(err)}`, "bad");
+    const after = next ?? prev;
+    if (await deleteWithUndo([clip], `"${cardTitle(clip)}"`, show, onChanged)) {
+      if (after) onOpen(after);
+      else onDeleted();
     }
   }
 
@@ -216,11 +229,20 @@ export default function Viewer({
     <section className="viewer" aria-label={cardTitle(clip)}>
       <header className="viewer-head">
         <button type="button" className="back" onClick={onBack}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          <CaretLeft size={16} aria-hidden />
           {match ? <>{match.map} {r && <b style={{ color: resultColor(r.letter) }}>{r.score}</b>}</> : "Back"}
         </button>
         <span className="sep" aria-hidden="true">/</span>
-        <h1 className="ellipsis">{clip.round != null ? `R${clip.round} · ` : ""}{cardTitle(clip)}</h1>
+        <h1 className="ellipsis" title="Double-click to rename" onDoubleClick={() => void renameClip(clip)}>{clip.round != null && clip.kind === "theirs" ? `R${clip.round} · ` : ""}{cardTitle(clip)}</h1>
+        <span className="spacer" />
+        <span className="viewer-acts">
+          <button type="button" className="icon-act" onClick={() => void renameClip(clip)} title="Rename" aria-label="Rename this clip"><PencilSimple size={17} aria-hidden /></button>
+          {isDesktop && <button type="button" className="icon-act" onClick={run(() => revealClip(clip.path))} title="Show in folder" aria-label="Show in folder"><FolderOpen size={17} aria-hidden /></button>}
+          <button type="button" className="icon-act danger" onClick={() => void remove()} title="Delete" aria-label="Delete this clip"><Trash size={17} aria-hidden /></button>
+          <span className="acts-sep" aria-hidden="true" />
+          <button type="button" className="icon-act" disabled={!prev} onClick={() => prev && onOpen(prev)} title="Previous clip ( [ )" aria-label="Previous clip"><CaretLeft size={17} weight="bold" aria-hidden /></button>
+          <button type="button" className="icon-act" disabled={!next} onClick={() => next && onOpen(next)} title="Next clip ( ] )" aria-label="Next clip"><CaretRight size={17} weight="bold" aria-hidden /></button>
+        </span>
       </header>
 
       <div className="viewer-body">
@@ -275,7 +297,7 @@ export default function Viewer({
                   {trim && (
                     <div className="cut-panel" role="group" aria-label="Cut">
                       <div className="cut-range">
-                        <b>Keep {fine(trim.start)} → {fine(trim.end)}</b>
+                        <b className="row" style={{ gap: 6 }}>Keep {fine(trim.start)} <ArrowRight size={14} weight="bold" aria-label="to" /> {fine(trim.end)}</b>
                         <span className="muted">{(trim.end - trim.start).toFixed(1)} s · drag the white handles, or press I / O at the play position</span>
                       </div>
                       <div className="row-wrap" style={{ gap: 8 }}>
@@ -300,7 +322,7 @@ export default function Viewer({
             <div className="side-box">
               <p className="eyebrow">The other side</p>
               <div className="row" style={{ gap: 12 }}>
-                <Avatar name={theirs.streamer ?? "?"} avatar={st?.channel.avatar} size={40} />
+                <Avatar name={theirs.streamer ?? "?"} avatar={st?.channel.avatar} agent={streamerPlayer?.agent} size={40} />
                 <span className="stack" style={{ gap: 2, minWidth: 0 }}>
                   <b className="ellipsis">{theirs.streamer ?? "Streamer"}</b>
                   <span className="muted small">
@@ -318,7 +340,7 @@ export default function Viewer({
               <p className="eyebrow">More from this match</p>
               {more.slice(0, 6).map((c) => (
                 <button key={c.path} type="button" className="mini-clip" onClick={() => onOpen(c)}>
-                  <span className={c.kind === "theirs" ? "mini-thumb theirs" : "mini-thumb"} aria-hidden="true" />
+                  <span className={c.kind === "theirs" ? "mini-thumb theirs" : "mini-thumb"} aria-hidden="true">{clipPicture(c) && <img src={clipPicture(c)!} alt="" loading="lazy" decoding="async" />}</span>
                   <span className="stack" style={{ gap: 1, minWidth: 0 }}>
                     <b className="ellipsis">{c.round != null ? `R${c.round} · ` : ""}{cardTitle(c)}</b>
                     <span className="muted small ellipsis">{c.kind === "theirs" ? c.streamer : cardMeta(c)}</span>
@@ -334,13 +356,7 @@ export default function Viewer({
               {busy ?? "Copy for Discord"}
             </button>
           )}
-          <div className="row" style={{ gap: 8 }}>
-            {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => revealClip(clip.path))}>Show in folder</button>}
-            {isDesktop && <button type="button" className="btn quiet grow" onClick={run(() => openClip((shownClip ?? clip).path))}>Open in player</button>}
-            <button type="button" className="btn quiet danger" onClick={() => void remove()} aria-label="Delete this clip" title="Delete this clip">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
-            </button>
-          </div>
+          {isDesktop && <button type="button" className="btn quiet full" onClick={run(() => openClip((shownClip ?? clip).path))}>Open in your video player</button>}
         </aside>
       </div>
     </section>

@@ -1,11 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
-import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
-import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "../components/Select";
+import { BrandLogo, brandFor } from "../components/Brand";
+import { SegmentedControl, type TabIcon } from "../components/SegmentedControl";
+import { TwitchTabIcon } from "../components/Icons";
+import { cardTitle, GalleryCard } from "../components/ui";
+import { isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { deleteWithUndo } from "../lib/deleteClips";
+import { useTitles } from "../lib/titles";
 import { findPairs } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
+import { useFavourites } from "../lib/favourites";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
+import { SquaresFour, Star, Trash, User, X } from "@phosphor-icons/react";
 
-type Tab = "all" | "theirs" | "mine";
+/** A game's logo, when we know it. */
+const brandLogo = (name: string) => {
+  const b = brandFor(name);
+  return b ? <BrandLogo icon={b} size={14} /> : undefined;
+};
+
+type Tab = "all" | "theirs" | "mine" | "fav";
 type Sort = "newest" | "longest" | "largest";
 const PAGE = 24;
 
@@ -32,19 +46,31 @@ export default function Clips({
   query: string;
   onOpen: (c: ClipInfo) => void;
 }) {
-  const { clips, refreshClips, notify } = recorder;
+  const { clips, refreshClips, notify, show } = recorder;
+  const titles = useTitles();
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("newest");
   const [game, setGame] = useState("all");
   const games = useMemo(() => [...new Set(clips.map(gameOf))].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b))), [clips]);
   const [limit, setLimit] = useState(PAGE);
+  const favs = useFavourites();
+  /** Clips ticked for a bulk action. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const togglePick = (path: string) =>
+    setPicked((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
   const theirs = clips.filter((c) => c.kind === "theirs").length;
-  const tabs: { value: Tab; label: string; n: number }[] = [
-    { value: "all", label: "All", n: clips.length },
-    { value: "theirs", label: "Streamer clips", n: theirs },
-    { value: "mine", label: "My clips", n: clips.length - theirs },
+  const tabs: { value: Tab; label: string; n: number; Icon: TabIcon }[] = [
+    { value: "all", label: "All", n: clips.length, Icon: SquaresFour },
+    { value: "theirs", label: "Streamer clips", n: theirs, Icon: TwitchTabIcon },
+    { value: "mine", label: "My clips", n: clips.length - theirs, Icon: User },
+    { value: "fav", label: "Favourites", n: clips.filter((c) => favs.has(c.path)).length, Icon: Star },
   ];
 
   const shown = useMemo(() => {
@@ -52,59 +78,59 @@ export default function Clips({
     return clips
       .filter(
         (c) =>
-          (tab === "all" || c.kind === tab) &&
+          (tab === "all" || (tab === "fav" ? favs.has(c.path) : c.kind === tab)) &&
           (game === "all" || gameOf(c) === game) &&
           (!q || [cardTitle(c), c.name, c.streamer, c.map, c.moment, c.game].filter(Boolean).join(" ").toLowerCase().includes(q)),
       )
       .sort(SORTS[sort]);
-  }, [clips, tab, query, sort, game]);
+  }, [clips, tab, query, sort, game, favs, titles]);
   useEffect(() => setLimit(PAGE), [tab, query, sort, game]);
+
+  // More clips load by themselves as the end of the grid scrolls into view.
+  const end = useRef<HTMLDivElement>(null);
+  const more = shown.length > limit;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || !more) return;
+    const io = new IntersectionObserver((e) => e[0]?.isIntersecting && setLimit((l) => l + PAGE), { rootMargin: "600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [more, limit]);
 
   const totalBytes = clips.reduce((n, c) => n + c.sizeBytes, 0);
   const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
 
-  async function remove(c: ClipInfo) {
-    if (!window.confirm(`Delete "${clipTitle(c)}"? This can't be undone.`)) return;
-    try {
-      await deleteClip(c.path);
-    } catch (err) {
-      notify(`Couldn't delete: ${String(err)}`, "bad");
-    }
-    refreshClips();
+  /** Gone at once, with Undo in the toast; then to the Recycle Bin. */
+  const remove = (c: ClipInfo) => void deleteWithUndo([c], `"${cardTitle(c)}"`, show, refreshClips);
+
+  async function removePicked() {
+    const list = clips.filter((c) => picked.has(c.path));
+    if (!list.length) return;
+    await deleteWithUndo(list, `"${cardTitle(list[0])}"`, show, refreshClips);
+    setPicked(new Set());
   }
 
   return (
     <section className="page wide" aria-label="Clips">
       <div className="tabs-row">
-        <div className="tabs" role="tablist" aria-label="Show">
-          {tabs.map((t) => (
-            <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}>
-              {t.label} <span className="count">{t.n}</span>
-            </button>
-          ))}
-        </div>
-        <span className="row" style={{ gap: 8, marginBottom: 8 }}>
+        <SegmentedControl label="Show" value={tab} segments={tabs.map((t) => ({ id: t.value, label: t.label, n: t.n, Icon: t.Icon }))} onChange={setTab} />
+        <span className="row" style={{ gap: 8 }}>
         {games.length > 1 && (
-          <label className="field">
-            <span className="sr-only">Game</span>
-            <select value={game} onChange={(e) => setGame(e.target.value)}>
-              <option value="all">All games</option>
-              {games.map((g) => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
-          </label>
+          <Select label="Game" value={game} onChange={setGame} options={[{ value: "all", label: "All games" }, ...games.map((g) => ({ value: g, label: g, icon: brandLogo(g) }))]} />
         )}
-        <label className="field" style={{ marginBottom: 0 }}>
-          <span className="sr-only">Sort</span>
-          <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-            <option value="newest">Newest</option>
-            <option value="longest">Longest</option>
-            <option value="largest">Largest</option>
-          </select>
-        </label>
+        <Select<Sort> label="Sort" value={sort} onChange={setSort} options={[{ value: "newest", label: "Newest" }, { value: "longest", label: "Longest" }, { value: "largest", label: "Largest" }]} />
         </span>
       </div>
+
+      {picked.size > 0 && (
+        <div className="bulk-bar" role="region" aria-label="Selected clips">
+          <b>{picked.size} selected</b>
+          <button type="button" className="linkish" onClick={() => setPicked(new Set(shown.map((c) => c.path)))}>Select all {shown.length}</button>
+          <span className="spacer" />
+          <button type="button" className="btn danger sm-btn" onClick={() => void removePicked()}><Trash size={15} weight="bold" aria-hidden />Delete</button>
+          <button type="button" className="btn sm-btn" onClick={() => setPicked(new Set())}><X size={14} weight="bold" aria-hidden />Clear</button>
+        </div>
+      )}
 
       {shown.length ? (
         <div className="gallery">
@@ -117,16 +143,21 @@ export default function Clips({
                 other={p ? (c.kind === "mine" ? p.theirs : p.mine) : undefined}
                 onPlay={() => onOpen(c)}
                 onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
-                onDelete={() => void remove(c)}
+                onDelete={() => remove(c)}
+                selected={picked.has(c.path)}
+                onSelect={() => togglePick(c.path)}
+                notify={notify}
               />
             );
           })}
         </div>
       ) : (
         <div className="empty-state">
-          <b>{clips.length ? "No clips match" : tab === "theirs" ? "No streamer clips yet" : "No clips yet"}</b>
+          <b>{tab === "fav" && clips.length ? "No favourites yet" : clips.length ? "No clips match" : tab === "theirs" ? "No streamer clips yet" : "No clips yet"}</b>
           <span>
-            {clips.length
+            {tab === "fav" && clips.length
+              ? "Hover a clip and click its star to keep it here."
+              : clips.length
               ? "Try another search or tab."
               : tab === "theirs"
                 ? "They appear here after you play against someone who was streaming."
@@ -135,9 +166,7 @@ export default function Clips({
         </div>
       )}
 
-      {shown.length > limit && (
-        <button type="button" className="btn quiet center" onClick={() => setLimit(limit + PAGE)}>Show more</button>
-      )}
+      {more && <div ref={end} className="load-more" aria-hidden="true" />}
 
       {clips.length > 0 && (
         <footer className="page-foot">

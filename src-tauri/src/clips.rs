@@ -177,6 +177,99 @@ pub fn delete(root: &Path, clip: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Ending a clip's files get while they wait for Undo. `list` skips them
+/// (it's not a video extension).
+const HELD: &str = "crosspov-deleted";
+
+fn held(p: &Path) -> PathBuf {
+    let mut s = p.as_os_str().to_owned();
+    s.push(".");
+    s.push(HELD);
+    PathBuf::from(s)
+}
+
+/// Deleting from the app: hides the clip (and its thumbnail and details) so
+/// Undo can bring it back. `recycle` finishes the job.
+pub fn hide(root: &Path, clip: &Path) -> Result<(), String> {
+    fs::rename(clip, held(clip)).map_err(|e| e.to_string())?;
+    for side in [thumb_path(root, clip), meta_path(root, clip)] {
+        let _ = fs::rename(&side, held(&side));
+    }
+    Ok(())
+}
+
+/// Undo: puts a hidden clip back.
+pub fn unhide(root: &Path, clip: &Path) -> Result<(), String> {
+    fs::rename(held(clip), clip).map_err(|_| "That clip can't be brought back any more.".to_string())?;
+    for side in [thumb_path(root, clip), meta_path(root, clip)] {
+        let _ = fs::rename(held(&side), &side);
+    }
+    Ok(())
+}
+
+/// A hidden clip, checked like `validate`. Returns the clip's own (visible) path.
+pub fn validate_hidden(root: &Path, path: &str) -> Result<PathBuf, String> {
+    let canon = held(Path::new(path)).canonicalize().map_err(|_| "That clip can't be brought back any more.".to_string())?;
+    let root = root.canonicalize().map_err(|_| "Clip folder not found".to_string())?;
+    let parent_ok = [MY_CLIPS, STREAMER_CLIPS].iter().any(|d| canon.parent() == Some(root.join(d).as_path()));
+    let clip = canon.with_extension("");
+    if parent_ok && is_video(&clip) {
+        Ok(clip)
+    } else {
+        Err("Not a CrossPOV clip".into())
+    }
+}
+
+/// After Undo has run out: the video goes to the Windows Recycle Bin (under its
+/// own name, so restoring it from there works); thumbnail and details are removed.
+pub fn recycle(root: &Path, clip: &Path) -> Result<(), String> {
+    let video = held(clip);
+    if video.exists() {
+        fs::rename(&video, clip).map_err(|e| e.to_string())?;
+    }
+    if clip.exists() {
+        send_to_recycle_bin(clip)?;
+    }
+    for side in [thumb_path(root, clip), meta_path(root, clip)] {
+        let _ = fs::remove_file(held(&side));
+        let _ = fs::remove_file(&side);
+    }
+    Ok(())
+}
+
+/// Clips deleted just before the app closed (Undo never ran out): recycle them now.
+pub fn recycle_leftovers(root: &Path) {
+    for dir in [MY_CLIPS, STREAMER_CLIPS] {
+        let Ok(entries) = fs::read_dir(root.join(dir)) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some(HELD) {
+                let _ = recycle(root, &path.with_extension(""));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
+    use crate::ffmpeg::NoWindow;
+    // The path goes in through the environment, so no quoting can break the command.
+    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; \
+                  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:CROSSPOV_RECYCLE, 'OnlyErrorDialogs', 'SendToRecycleBin')";
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("CROSSPOV_RECYCLE", path)
+        .no_window()
+        .status()
+        .map_err(|e| format!("Couldn't move the clip to the Recycle Bin: {e}"))?;
+    if status.success() && !path.exists() { Ok(()) } else { Err("Couldn't move the clip to the Recycle Bin.".into()) }
+}
+
+#[cfg(not(windows))]
+fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
+    fs::remove_file(path).map_err(|e| e.to_string())
+}
+
 /// Deletes the oldest clips until the folder is under `limit_gb` (0 = no limit).
 /// Returns how many were deleted.
 pub fn prune(root: &Path, limit_gb: u32) -> usize {
@@ -223,6 +316,25 @@ mod tests {
         assert_eq!((&all[0].path, all[0].size_bytes, all[0].round), (&one.path, one.size_bytes, one.round));
         assert_eq!(one.streamer.as_deref(), Some("St"));
         assert!(info(&root, &root.join(STREAMER_CLIPS).join("notes.txt"), ClipKind::Theirs).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn hidden_clips_leave_the_list_and_come_back() {
+        let root = temp_root("hide");
+        let clip = root.join(MY_CLIPS).join("c.mp4");
+        fs::write(&clip, b"x").unwrap();
+        write_meta(&root, &clip, &ClipMeta { round: Some(5), ..Default::default() });
+        let path = list(&root)[0].path.clone();
+
+        hide(&root, &validate(&root, &path).unwrap()).unwrap();
+        assert!(list(&root).is_empty());
+        assert!(validate(&root, &path).is_err());
+
+        unhide(&root, &validate_hidden(&root, &path).unwrap()).unwrap();
+        let back = list(&root);
+        assert_eq!((back.len(), back[0].round), (1, Some(5)));
+        assert!(validate_hidden(&root, &path).is_err());
         let _ = fs::remove_dir_all(root);
     }
 

@@ -168,9 +168,20 @@ export async function listClips(): Promise<ClipInfo[]> {
   return isDesktop ? tauriInvoke<ClipInfo[]>("list_clips") : (await demo()).demoClips();
 }
 
+/** Hides the clip right away; `restoreClip` undoes it, `recycleClip` sends it to the Recycle Bin. */
 export async function deleteClip(path: string): Promise<void> {
   if (!isDesktop) throw NEEDS_APP("Deleting clips");
   await tauriInvoke<void>("delete_clip", { path });
+}
+
+/** Undo a delete (only until `recycleClip` runs). */
+export async function restoreClip(path: string): Promise<void> {
+  await tauriInvoke<void>("restore_clip", { path });
+}
+
+/** Moves a deleted clip to the Windows Recycle Bin. */
+export async function recycleClip(path: string): Promise<void> {
+  await tauriInvoke<void>("recycle_clip", { path });
 }
 
 /** A URL the app's own player can play, or null when the clip must open outside (MKV, website demo). */

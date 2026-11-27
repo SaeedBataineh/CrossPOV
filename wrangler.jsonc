@@ -26,5 +26,8 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   // Never delete variables set in the Cloudflare dashboard on deploy.
-  "keep_vars": true
+  "keep_vars": true,
+  // Pull-request branches deploy with `npx wrangler preview`, which needs this
+  // block (it can stay empty: everything above applies to previews too).
+  "previews": {}
 }
