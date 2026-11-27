@@ -36,8 +36,14 @@ pub struct Tool {
 }
 
 impl Tool {
+    /// "ffmpeg" of "ffmpeg.exe", "obs-slim" of "obs-slim.zip".
     fn stem(&self) -> &'static str {
-        self.name.trim_end_matches(".exe")
+        self.name.rsplit_once('.').map_or(self.name, |(stem, _)| stem)
+    }
+
+    /// ".exe", ".zip".
+    fn ext(&self) -> &'static str {
+        self.name.rfind('.').map_or("", |i| &self.name[i..])
     }
 
     fn short(&self) -> &'static str {
@@ -46,7 +52,7 @@ impl Tool {
 
     /// Release asset name, e.g. "ffmpeg-0123456789abcdef.exe".
     pub fn asset(&self) -> String {
-        format!("{}-{}.exe", self.stem(), self.short())
+        format!("{}-{}{}", self.stem(), self.short(), self.ext())
     }
 
     fn path(&self, root: &Path) -> PathBuf {
@@ -61,6 +67,14 @@ const TOOLS: &[Tool] = &[
 ];
 #[cfg(not(feature = "single-exe"))]
 const TOOLS: &[Tool] = &[];
+
+/// The slim OBS Studio that records games (scripts/make-slim-obs.py): a zip,
+/// unpacked next to itself once checked. Downloaded on its own, after the
+/// tools above, so recording never waits for it.
+#[cfg(feature = "single-exe")]
+const OBS: Option<Tool> = Some(Tool { name: "obs-slim.zip", sha256: env!("CROSSPOV_OBS_SHA256") });
+#[cfg(not(feature = "single-exe"))]
+const OBS: Option<Tool> = None;
 
 /// True in the single-exe build (the tools are downloaded, and the exe updates itself).
 pub const EMBEDDED: bool = cfg!(feature = "single-exe");
@@ -80,6 +94,59 @@ fn root() -> Option<&'static Path> {
 pub fn get(name: &str) -> Option<PathBuf> {
     let root = root()?;
     TOOLS.iter().find(|t| t.name == name).map(|t| t.path(root)).filter(|p| p.is_file())
+}
+
+/// The slim OBS's folder (holding bin\64bit\obs64.exe), once downloaded,
+/// checked and unpacked. None until then, and always without the feature.
+pub fn obs_dir() -> Option<PathBuf> {
+    let (tool, root) = (OBS?, root()?);
+    let dir = obs_unpacked(&tool, root);
+    (dir.join(UNPACKED).is_file() && dir.join("bin").join("64bit").join("obs64.exe").is_file()).then_some(dir)
+}
+
+/// Marks a complete unpack (an interrupted one is unpacked again).
+const UNPACKED: &str = "crosspov-unpacked";
+
+fn obs_unpacked(tool: &Tool, root: &Path) -> PathBuf {
+    tool.path(root).with_file_name("obs")
+}
+
+/// Gets the slim OBS ready: downloads and checks it if needed (from
+/// crosspov.com, else GitHub), then unpacks it. Ok(true) if it's ready.
+pub fn prepare_obs() -> Result<bool, String> {
+    let (Some(tool), Some(root)) = (OBS, root()) else { return Ok(false) };
+    if obs_dir().is_some() {
+        return Ok(true);
+    }
+    let agent = agent();
+    let list = [tool];
+    if !missing_in(&list, Some(root)).is_empty() {
+        download_in(&list, root, MIRROR_URL, &agent, &mut |_, _| {}).or_else(|e| {
+            eprintln!("OBS from crosspov.com failed ({e}), trying GitHub");
+            download_in(&list, root, BASE_URL, &agent, &mut |_, _| {})
+        })?;
+    }
+    unpack(&tool.path(root), &obs_unpacked(&tool, root))?;
+    Ok(obs_dir().is_some())
+}
+
+/// Unpacks `zip` into `dir` with Windows' own tar (Windows 10 1803 and later).
+fn unpack(zip: &Path, dir: &Path) -> Result<(), String> {
+    use crate::ffmpeg::NoWindow;
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
+    let out = std::process::Command::new("tar")
+        .arg("-xf")
+        .arg(zip)
+        .arg("-C")
+        .arg(dir)
+        .no_window()
+        .output()
+        .map_err(|e| format!("Couldn't unpack OBS: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("Couldn't unpack OBS: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    fs::write(dir.join(UNPACKED), b"").map_err(|e| e.to_string())
 }
 
 /// Folders the tools run from (so an update can stop them first).
@@ -344,5 +411,8 @@ mod tests {
         let t = Tool { name: "yt-dlp.exe", sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" };
         assert_eq!(t.asset(), "yt-dlp-abcdef0123456789.exe");
         assert_eq!(t.path(Path::new("R")), Path::new("R").join("yt-dlp").join("abcdef0123456789").join("yt-dlp.exe"));
+        let obs = Tool { name: "obs-slim.zip", ..t };
+        assert_eq!(obs.asset(), "obs-slim-abcdef0123456789.zip");
+        assert_eq!(obs.path(Path::new("R")), Path::new("R").join("obs-slim").join("abcdef0123456789").join("obs-slim.zip"));
     }
 }

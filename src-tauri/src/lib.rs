@@ -66,6 +66,25 @@ pub(crate) const MINIMIZED_ARG: &str = "--minimized";
 /// First run of the single exe (or new tool versions): download FFmpeg and
 /// yt-dlp, showing progress where the recorder status goes, then start
 /// recording. Without internet it keeps trying every minute.
+/// Gets the slim OBS (scripts/make-slim-obs.py) ready in the background,
+/// trying again every 10 minutes until it is. Nothing waits for it.
+fn prepare_obs_in_background() {
+    if !tools::EMBEDDED {
+        return;
+    }
+    let _ = std::thread::Builder::new().name("obs-download".into()).spawn(|| loop {
+        match tools::prepare_obs() {
+            Ok(true) => {
+                trail("obs: ready");
+                return;
+            }
+            Ok(false) => return,
+            Err(e) => trail(&format!("obs: {e}; trying again in 10 minutes")),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(600));
+    });
+}
+
 fn get_tools_then_record(recorder: &Recorder) {
     loop {
         recorder.show_tools_status("Downloading recording tools (one time only)…".into(), false);
@@ -79,7 +98,10 @@ fn get_tools_then_record(recorder: &Recorder) {
             }
         });
         match result {
-            Ok(()) => return recorder.spawn(),
+            Ok(()) => {
+                prepare_obs_in_background();
+                return recorder.spawn();
+            }
             Err(err) => {
                 recorder.show_tools_status(format!("{err} CrossPOV can't record until it has them; it tries again every minute."), true);
                 std::thread::sleep(std::time::Duration::from_secs(60));
@@ -372,6 +394,9 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     }
     let missing: Vec<&str> = tools::missing().iter().map(|t| t.name).collect();
     let _ = writeln!(out, "tools: {}", if missing.is_empty() { "ok".to_string() } else { format!("missing {}", missing.join(", ")) });
+    if tools::EMBEDDED {
+        let _ = writeln!(out, "obs: {}", if tools::obs_dir().is_some() { "ready" } else { "not downloaded yet" });
+    }
     let _ = writeln!(out, "ffmpeg: {}", ffmpeg::locate().map(|p| p.display().to_string()).unwrap_or_else(|| "not found".into()));
     let _ = writeln!(out, "\n[Matches]\nRiot ID: {} ({})", if s.riot_id.is_empty() { "not set" } else { &s.riot_id }, s.region);
     let _ = writeln!(out, "last check: {}", m.last_check_ms.map(|t| format!("{} s ago", (now_ms_lib().saturating_sub(t)) / 1000)).unwrap_or_else(|| "never".into()));
@@ -1014,6 +1039,7 @@ pub fn run() {
             streamer_worker.spawn();
             apply_hotkey(&handle, &hotkey);
             if tools::missing().is_empty() {
+                prepare_obs_in_background();
                 recorder.spawn();
             } else {
                 let recorder = recorder.clone();

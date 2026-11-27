@@ -6,10 +6,11 @@ fn main() {
     for (var, file) in [
         ("CROSSPOV_FFMPEG_SHA256", "binaries/ffmpeg-x86_64-pc-windows-msvc.exe"),
         ("CROSSPOV_YTDLP_SHA256", "binaries/yt-dlp-x86_64-pc-windows-msvc.exe"),
+        ("CROSSPOV_OBS_SHA256", "binaries/obs-slim.zip"),
     ] {
         println!("cargo:rerun-if-changed={file}");
         let hash = if std::env::var_os("CARGO_FEATURE_SINGLE_EXE").is_some() {
-            let bytes = std::fs::read(file).unwrap_or_else(|e| panic!("single-exe build needs {file} ({e}); run scripts/get-ffmpeg.ps1 and scripts/get-ytdlp.ps1"));
+            let bytes = std::fs::read(file).unwrap_or_else(|e| panic!("single-exe build needs {file} ({e}); run scripts/get-ffmpeg.ps1, scripts/get-ytdlp.ps1 and scripts/make-slim-obs.py"));
             Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect()
         } else {
             String::new()

@@ -148,6 +148,39 @@ jobs:
         shell: pwsh
         run: ./scripts/get-ytdlp.ps1
 
+      # The slim OBS Studio the app records games with (downloaded on first run,
+      # like FFmpeg). Cached by its script, so the same zip (and fingerprint)
+      # is reused and users only download it again when it really changes.
+      - id: obs-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries/obs-slim.zip
+          key: obs-slim-${{ hashFiles('scripts/make-slim-obs.py') }}
+      - name: Make the slim OBS
+        if: steps.obs-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT" -Directory | Sort-Object FullName | Select-Object -Last 1
+          "Visual C++ runtime from $($crt.FullName)"
+          python scripts/make-slim-obs.py src-tauri/binaries/obs-slim.zip $crt.FullName
+          if ($LASTEXITCODE) { throw "making the slim OBS failed" }
+
+      # Does the slim OBS start with the parts left out? This machine has no
+      # graphics card, so OBS may not get far: logged, not required (yet).
+      - name: Try the slim OBS
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:RUNNER_TEMP "obs-try"
+          tar -xf src-tauri/binaries/obs-slim.zip -C (New-Item -ItemType Directory -Force $d)
+          "slim OBS: {0:N1} MB unpacked" -f ((Get-ChildItem $d -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+          $p = Start-Process "$d\bin\64bit\obs64.exe" -ArgumentList "--portable","--minimize-to-tray","--disable-updater","--disable-shutdown-check","--multi" -WorkingDirectory "$d\bin\64bit" -PassThru
+          Start-Sleep 25
+          "still running after 25 s: $(-not $p.HasExited)"
+          Get-ChildItem "$d\config\obs-studio\logs" -ErrorAction SilentlyContinue | Select-Object -Last 1 | ForEach-Object { Get-Content $_.FullName -Tail 60 }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+
       - name: Run Rust tests
         shell: pwsh
         run: |
@@ -220,9 +253,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force tools-out | Out-Null
-          foreach ($t in @(@("ffmpeg", "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"), @("yt-dlp", "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"))) {
+          foreach ($t in @(@("ffmpeg", "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"), @("yt-dlp", "src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe"), @("obs-slim", "src-tauri/binaries/obs-slim.zip"))) {
             $h = (Get-FileHash $t[1] -Algorithm SHA256).Hash.ToLower()
-            Copy-Item $t[1] "tools-out/$($t[0])-$($h.Substring(0, 16)).exe"
+            Copy-Item $t[1] "tools-out/$($t[0])-$($h.Substring(0, 16))$([IO.Path]::GetExtension($t[1]))"
           }
           Get-ChildItem tools-out | Format-Table Name, Length
 
@@ -233,8 +266,8 @@ jobs:
         with:
           tag_name: tools
           target_commitish: ${{ github.sha }}
-          name: CrossPOV tools (FFmpeg and yt-dlp)
-          body: FFmpeg and yt-dlp, downloaded by CrossPOV on first run. Each file is named after the start of its SHA-256; the app checks the whole fingerprint before using it.
+          name: CrossPOV tools (FFmpeg, yt-dlp and OBS Studio)
+          body: FFmpeg, yt-dlp and a slim, unmodified OBS Studio (GPL-2.0-or-later; source at https://github.com/obsproject/obs-studio), downloaded by CrossPOV on first run. Each file is named after the start of its SHA-256; the app checks the whole fingerprint before using it.
           files: tools-out/*
           make_latest: false
 

@@ -418,7 +418,8 @@ const RELEASE_FILES = "https://github.com/SaeedBataineh/CrossPOV/releases/";
 /** A release's files: https://github.com/.../releases/download/<tag>/<name>. */
 const RELEASE_DOWNLOAD = `${RELEASE_FILES}download/`;
 /** Files crosspov.com hands out by path: a version's files, or the tools. Neither ever changes once published. */
-const FILE_PATH = /^\/files\/(v\d+\.\d+\.\d+|tools)\/([\w.-]+\.exe)$/;
+// Release files: .exe, and .zip among the tools (the slim OBS).
+const FILE_PATH = /^\/files\/(v\d+\.\d+\.\d+|tools)\/([\w.-]+\.(?:exe|zip))$/;
 const FILE_TTL = 365 * 24 * 3600;
 const UPDATE_TTL = 120;
 
@@ -433,7 +434,7 @@ export async function downloadRedirect(pathname: string, env: Env, ctx?: Executi
   const path = pathname.replace(/\/+$/, "");
   if (path === "/update/latest.json") return updateFeed(env, ctx);
   const f = FILE_PATH.exec(path);
-  if (f) return serveFile(`${RELEASE_DOWNLOAD}${f[1]}/${f[2]}`, f[2], ctx, range);
+  if (f && (f[1] === "tools" || !f[2].endsWith(".zip"))) return serveFile(`${RELEASE_DOWNLOAD}${f[1]}/${f[2]}`, f[2], ctx, range);
   if (path === "/download") {
     // The newest version's own file never changes, so Cloudflare can keep it.
     const latest = await latestRelease(env, ctx);
@@ -501,7 +502,7 @@ export function rewriteFeed(feed: unknown): unknown {
  * "latest" links change with each release and are never kept.
  */
 async function serveFile(url: string, filename: string, ctx?: ExecutionContext, range?: string | null): Promise<Response> {
-  if (!url.startsWith(RELEASE_FILES) || !/^[\w.-]+\.exe$/.test(filename)) return unavailable();
+  if (!url.startsWith(RELEASE_FILES) || !/^[\w.-]+\.(?:exe|zip)$/.test(filename)) return unavailable();
   const fixed = url.startsWith(RELEASE_DOWNLOAD);
   const cache = fixed && typeof caches !== "undefined" ? caches.default : undefined;
   const key = `https://cache.crosspov.internal/files/${url.slice(RELEASE_DOWNLOAD.length)}`;
@@ -523,7 +524,7 @@ async function serveFile(url: string, filename: string, ctx?: ExecutionContext, 
       }
     }
     const headers = new Headers({
-      "content-type": "application/vnd.microsoft.portable-executable",
+      "content-type": filename.endsWith(".zip") ? "application/zip" : "application/vnd.microsoft.portable-executable",
       "content-disposition": `attachment; filename="${filename}"`,
       "cache-control": fixed ? "public, max-age=86400" : "public, max-age=300",
       "x-content-type-options": "nosniff",

@@ -462,7 +462,10 @@ test("release files and the update feed are served from crosspov.com", async () 
     assert.equal(tool.status, 200);
     assert.equal(await tool.text(), "MZ tool");
     assert.equal(asked.at(-1), `${gh}tools/ffmpeg-0123456789abcdef.exe`);
-    for (const bad of ["/files/tools/../x.exe", "/files/latest/CrossPOV.exe", "/files/v1.2.3/notes.txt", "/files/main/x.exe"]) {
+    const obs = (await downloadRedirect("/files/tools/obs-slim-0123456789abcdef.zip", {}))!;
+    assert.equal(obs.status, 200, "the slim OBS, among the tools");
+    assert.equal(obs.headers.get("content-type"), "application/zip");
+    for (const bad of ["/files/tools/../x.exe", "/files/latest/CrossPOV.exe", "/files/v1.2.3/notes.txt", "/files/main/x.exe", "/files/v1.2.3/x.zip"]) {
       assert.equal(await downloadRedirect(bad, {}), null, bad);
     }
     const res = (await downloadRedirect("/update/latest.json", {}))!;
