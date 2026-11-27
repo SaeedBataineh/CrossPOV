@@ -130,6 +130,10 @@ pub struct Game {
     /// Which screen it's on, as the screen-capture counts them (0 = main).
     #[serde(skip)]
     pub output_idx: u32,
+    /// That screen's Windows handle (HMONITOR), for monitor capture: names
+    /// the screen itself, not a number another program might count otherwise.
+    #[serde(skip)]
+    pub hmonitor: u64,
     /// That screen's height in pixels, if known.
     #[serde(skip)]
     pub screen_height: Option<u32>,
@@ -195,6 +199,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
         let screen = match same {
             Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some(Spot {
                 output_idx: g.output_idx,
+                hmonitor: g.hmonitor,
                 screen_height: g.screen_height,
                 screen_size: g.screen_size,
                 hwnd: g.hwnd,
@@ -205,6 +210,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
                 *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
                 let previous = same.filter(|g| g.hwnd != 0).map(|g| Spot {
                     output_idx: g.output_idx,
+                    hmonitor: g.hmonitor,
                     screen_height: g.screen_height,
                     screen_size: g.screen_size,
                     hwnd: g.hwnd,
@@ -231,6 +237,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
             name,
             found,
             output_idx: spot.output_idx,
+            hmonitor: spot.hmonitor,
             screen_height: spot.screen_height,
             hwnd: spot.hwnd,
             window_size: spot.window_size,
@@ -261,6 +268,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
             exe,
             found: Found::Fullscreen,
             output_idx: front.spot.output_idx,
+            hmonitor: front.spot.hmonitor,
             screen_height: front.spot.screen_height,
             hwnd: front.spot.hwnd,
             window_size: front.spot.window_size,
@@ -303,6 +311,7 @@ pub fn last_seen() -> Option<Game> {
 #[cfg_attr(not(windows), allow(dead_code))]
 struct Spot {
     output_idx: u32,
+    hmonitor: u64,
     screen_height: Option<u32>,
     screen_size: Option<(u32, u32)>,
     hwnd: u64,
@@ -382,7 +391,7 @@ mod window {
         let mut client = RECT::default();
         // SAFETY: plain query on a window Windows handed us; `client` is a valid local.
         let window_size = unsafe { GetClientRect(hwnd, &mut client) }.ok().and_then(|_| size(client));
-        Spot { output_idx: output_index(monitor), screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size, refresh_hz: refresh_of(monitor) }
+        Spot { output_idx: output_index(monitor), hmonitor: monitor.0 as usize as u64, screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size, refresh_hz: refresh_of(monitor) }
     }
 
     /// A screen's refresh rate, in Hz.

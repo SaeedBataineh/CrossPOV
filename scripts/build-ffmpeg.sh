@@ -72,6 +72,10 @@ grep -q 'wgctx->pool_size = frame_size;' libavfilter/vsrc_gfxcapture_winrt.cpp |
 # frame while the game sends none (alt-tabbed). See the patch for why.
 perl "$HERE/ffmpeg-patches/gfxcapture-keep-going.pl" libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q 'repeat_last_frame(outlink)' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't keep window capture on real time" >&2; exit 1; }
+# Monitor capture of a full-screen game, using pictures only while the game
+# is what's seen (only_hwnd). See the patch.
+perl "$HERE/ffmpeg-patches/gfxcapture-game-only.pl" libavfilter
+grep -q 'game_visible(cctx)' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't make monitor capture game-only" >&2; exit 1; }
 # Screen capture of a full-screen game records only the game: new pictures
 # only while its window is in front (only_hwnd), the last one repeated while
 # you're tabbed out. See the patch.

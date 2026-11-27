@@ -344,6 +344,10 @@ pub struct RecordPlan {
     /// Whole-screen capture: the game's window, to record the screen it's on
     /// (found by FFmpeg from the window, not a number worked out here).
     pub monitor_window: Option<u64>,
+    /// Windows Graphics Capture of a whole monitor (its HMONITOR): a
+    /// full-screen game, recorded as seen on its screen (with `only_window`:
+    /// only while the game is what's seen).
+    pub wgc_monitor: Option<u64>,
 }
 
 impl RecordPlan {
@@ -375,7 +379,13 @@ pub fn segment_count(buffer_seconds: u32) -> u32 {
 }
 
 fn on_gpu_window(plan: &RecordPlan) -> bool {
-    plan.source == VideoSource::Desktop && plan.window.is_some()
+    plan.source == VideoSource::Desktop && uses_wgc(plan)
+}
+
+/// Recorded with Windows Graphics Capture (a window, or a whole monitor):
+/// frames come at their own times, handled like window capture's.
+fn uses_wgc(plan: &RecordPlan) -> bool {
+    plan.window.is_some() || plan.wgc_monitor.is_some()
 }
 
 /// `setpts` that puts each frame in the next free slot of a 1/fps grid (see
@@ -435,6 +445,18 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                     }
                     a.push(src);
                 }
+                // A full-screen game: its whole monitor, as seen, by the
+                // monitor's own handle; new pictures only while it's the game.
+                None if plan.wgc_monitor.is_some() => {
+                    let mut src = format!("gfxcapture=hmonitor={}:max_framerate={fps}:capture_cursor=0:capture_border=0", plan.wgc_monitor.unwrap_or(0));
+                    if let Some(hwnd) = plan.only_window {
+                        src.push_str(&format!(":only_hwnd={hwnd}"));
+                    }
+                    if let Some((w, h)) = plan.source_size {
+                        src.push_str(&format!(":width={}:height={}:resize_mode=crop", (w + 1) & !1, (h + 1) & !1));
+                    }
+                    a.push(src);
+                }
                 None => {
                     let mut src = format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx);
                     if let Some(hwnd) = plan.only_window {
@@ -478,7 +500,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     // than its own time: the second of a pair moves into the gap after it, no
     // frame is dropped or repeated, and timing can't drift from the sound.
     let mut vf: Vec<String> = Vec::new();
-    if on_gpu && plan.window.is_some() {
+    if on_gpu && uses_wgc(plan) {
         vf.push(even_slots_filter(s.fps));
     }
     if gpu_path {
@@ -552,7 +574,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
             // Window capture's frames come at uneven times; B-frames then made
             // duplicate timestamps ("Non-monotonic DTS"). None there.
-            if !plan.compat && plan.window.is_none() {
+            if !plan.compat && !uses_wgc(plan) {
                 push(&mut a, &["-bf", "3"]);
             }
         }
@@ -577,7 +599,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     a.push(format!("{}k", kbps * 3 / 2));
     push(&mut a, &["-bufsize"]);
     a.push(format!("{}k", kbps * 2));
-    if on_gpu && plan.window.is_some() {
+    if on_gpu && uses_wgc(plan) {
         // Frames as captured, at their own times; a keyframe every segment by
         // time (frame counts vary), so the buffer can still be cut anywhere.
         let every = format!("expr:gte(t,n_forced*{SEGMENT_SECONDS})");
@@ -713,7 +735,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None, source_size: None, only_window: None, monitor_window: None }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None, source_size: None, only_window: None, monitor_window: None, wgc_monitor: None }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -730,6 +752,9 @@ mod tests {
         assert!(!args.contains("only_hwnd"), "whole screen: everything on it");
         let game_only = joined(&Settings::default(), &RecordPlan { only_window: Some(4242), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
         assert!(game_only.contains("draw_mouse=0:only_hwnd=4242"), "full-screen game: only while it's in front: {game_only}");
+        let full = joined(&Settings::default(), &RecordPlan { wgc_monitor: Some(65537), only_window: Some(4242), source_size: Some((1920, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
+        assert!(full.contains("gfxcapture=hmonitor=65537:max_framerate=60:capture_cursor=0:capture_border=0:only_hwnd=4242:width=1920:height=1080"), "full-screen game: its monitor, game only: {full}");
+        assert!(full.contains("-fps_mode passthrough") && !full.contains("-bf 3") && !full.contains("ddagrab"), "{full}");
         let follow = joined(&Settings::default(), &RecordPlan { monitor_window: Some(77), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
         assert!(follow.contains("draw_mouse=0:monitor_hwnd=77") && !follow.contains("only_hwnd"), "whole screen: the game's screen: {follow}");
         assert!(!args.contains("hwdownload"), "{args}");

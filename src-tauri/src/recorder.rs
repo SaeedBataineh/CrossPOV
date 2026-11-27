@@ -522,6 +522,10 @@ impl Recorder {
             let only_window = Some(g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed));
             // Whole screen: the screen the game is on, found by FFmpeg from its window.
             let monitor_window = Some(g.hwnd).filter(|h| *h != 0 && window.is_none() && only_window.is_none());
+            // A full-screen game: Windows Graphics Capture of its monitor (sees
+            // the game even when Windows shows it past the desktop, which window
+            // capture and Desktop Duplication missed), only while it's the game.
+            let wgc_monitor = Some(g.hmonitor).filter(|m| *m != 0 && only_window.is_some() && inner.screen_for == Some(g.hwnd));
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
@@ -540,7 +544,7 @@ impl Recorder {
                     String::new()
                 }
             ));
-            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g, only_window, monitor_window) {
+            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g, only_window, monitor_window, wgc_monitor) {
                 Ok(running) => {
                     crate::trail("recording: started");
                     inner.status.state = RecState::Recording;
@@ -596,6 +600,7 @@ impl Recorder {
         game: &Game,
         only_window: Option<u64>,
         monitor_window: Option<u64>,
+        wgc_monitor: Option<u64>,
     ) -> Result<Running, String> {
         let segment_dir = self.work_dir.join("buffer");
         let _ = fs::remove_dir_all(&segment_dir);
@@ -615,6 +620,7 @@ impl Recorder {
             source_size: if game.hwnd != 0 { game.window_size } else { game.screen_size },
             only_window,
             monitor_window,
+            wgc_monitor,
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)
@@ -918,7 +924,7 @@ mod tests {
         *rec.ffmpeg.lock().unwrap() = Some((ff.clone(), VideoEncoder::Cpu));
         let key = recording_key(&settings);
         let running = rec
-            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default(), None, None)
+            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default(), None, None, None)
             .expect("start recording");
         rec.lock().running = Some(running);
 
