@@ -639,7 +639,8 @@ mod tests {
     }
 
     /// Blacks out part of a real clip with real FFmpeg, and checks the
-    /// picture there is black while the rest isn't. Skipped without FFmpeg.
+    /// picture there is black while the rest isn't. Uses only what the small
+    /// FFmpeg has (testsrc2, the CPU encoder, image2). Skipped without FFmpeg.
     #[test]
     fn blacks_out_the_tabbed_out_part_of_a_clip() {
         let Some(ff) = ffmpeg::locate() else {
@@ -651,27 +652,29 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let (src, out) = (dir.join("in.mp4"), dir.join("out.mp4"));
         let made = Command::new(&ff)
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-f", "lavfi", "-i", "sine=frequency=440"])
-            .args(["-t", "4", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30"])
+            .args(["-t", "4", "-vf", "format=nv12", "-c:v", VideoEncoder::Cpu.codec(), "-b:v", "1M"])
             .arg(&src)
-            .status()
+            .output()
             .unwrap();
-        assert!(made.success());
-        run_ffmpeg(&ff, &ffmpeg::blackout_args(&src, &out, &[(1.0, 2.0)], VideoEncoder::Cpu, false, 2_000)).expect("blackout");
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        run_ffmpeg(&ff, &ffmpeg::blackout_args(&src, &out, &[(1.0, 2.0)], VideoEncoder::Cpu, false, 1_000)).expect("blackout");
         // Average brightness of one frame, as an 8x8 grey picture.
         let brightness = |at: &str| -> f64 {
+            let raw = dir.join(format!("frame-{at}.gray"));
             let o = Command::new(&ff)
-                .args(["-hide_banner", "-loglevel", "error", "-ss", at, "-i"])
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-ss", at, "-i"])
                 .arg(&out)
-                .args(["-frames:v", "1", "-vf", "scale=8:8,format=gray", "-f", "rawvideo", "-"])
+                .args(["-frames:v", "1", "-vf", "scale=8:8,format=gray", "-c:v", "rawvideo", "-f", "image2", "-update", "1"])
+                .arg(&raw)
                 .output()
                 .unwrap();
-            o.stdout.iter().map(|&b| f64::from(b)).sum::<f64>() / o.stdout.len().max(1) as f64
+            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+            let px = fs::read(&raw).unwrap();
+            px.iter().map(|&b| f64::from(b)).sum::<f64>() / px.len().max(1) as f64
         };
         assert!(brightness("1.5") < 20.0, "tabbed-out part is black");
         assert!(brightness("3.0") > 40.0, "the rest is the game");
-        let probe = Command::new(&ff).args(["-hide_banner", "-i"]).arg(&out).output().unwrap();
-        assert!(String::from_utf8_lossy(&probe.stderr).contains("Audio"), "sound kept");
         let _ = fs::remove_dir_all(&dir);
     }
 

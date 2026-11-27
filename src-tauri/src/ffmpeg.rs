@@ -572,8 +572,9 @@ pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: Video
         format!("{}k", kbps * 3 / 2),
         "-bufsize".to_string(),
         format!("{}k", kbps * 2),
+        // nv12: what every encoder here takes (Windows' own one needs it).
         "-pix_fmt".to_string(),
-        "yuv420p".to_string(),
+        "nv12".to_string(),
         "-c:a".to_string(),
         "copy".to_string(),
     ]);
