@@ -123,6 +123,7 @@ impl Session {
         };
         let mut s = Session { child, ws, next_id: 1, events: Vec::new(), config, setup };
         s.configure()?;
+        hide_tray_icon(s.child.id());
         Ok(s)
     }
 
@@ -219,9 +220,14 @@ impl Session {
         ))
     }
 
-    /// Whether OBS is still running.
+    /// Whether OBS is still running. Also keeps its tray icon away (Qt adds
+    /// it back when Explorer restarts).
     pub fn alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        let alive = matches!(self.child.try_wait(), Ok(None));
+        if alive {
+            hide_tray_icon(self.child.id());
+        }
+        alive
     }
 
     /// The last lines of OBS's own log about capture, encoding or errors.
@@ -495,6 +501,37 @@ fn parse_frame(buf: &[u8]) -> Option<(bool, u8, Vec<u8>, usize)> {
     }
     Some((fin, opcode, payload, end))
 }
+
+/// Removes OBS's tray icon. OBS starts hidden in the tray (no window ever
+/// shows); its icon is the only thing left, and players shouldn't see OBS.
+/// Qt's tray icon belongs to a message-only window of class
+/// "QTrayIconMessageWindowClass" with icon id 0.
+#[cfg(windows)]
+fn hide_tray_icon(pid: u32) {
+    use windows::core::w;
+    use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_DELETE, NOTIFYICONDATAW};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowThreadProcessId, HWND_MESSAGE};
+    // SAFETY: window lookups and a tray-icon removal with a properly sized struct.
+    unsafe {
+        for parent in [Some(HWND_MESSAGE), None] {
+            let mut after = None;
+            while let Ok(hwnd) = FindWindowExW(parent, after, w!("QTrayIconMessageWindowClass"), None) {
+                after = Some(hwnd);
+                let mut owner = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut owner));
+                if owner == pid {
+                    for id in 0..4 {
+                        let data = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: id, ..Default::default() };
+                        let _ = Shell_NotifyIconW(NIM_DELETE, &data);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_tray_icon(_pid: u32) {}
 
 /// A window's title and class (Game Capture matches the window by them, and the .exe).
 #[cfg(windows)]
