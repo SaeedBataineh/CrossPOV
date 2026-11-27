@@ -491,13 +491,19 @@ impl Recorder {
             && !inner.obs_failed
             && crate::tools::obs_dir().is_some()
             && game.as_ref().is_some_and(|g| g.hwnd != 0 && inner.screen_for == Some(g.hwnd));
-        if let Some((obs_key, session)) = inner.obs.clone() {
+        // OBS's canvas is the game's size: a new size (switching to a stretched
+        // resolution mid-game) restarts it, or the picture sits off-centre.
+        let obs_key = format!("{key}|{:?}", game.as_ref().and_then(|g| g.screen_size.or(g.window_size)));
+        if let Some((running_key, session)) = inner.obs.clone() {
             let alive = session.lock().unwrap_or_else(|e| e.into_inner()).alive();
             if !alive {
                 crate::trail("recording: OBS stopped; recording with FFmpeg until the game closes");
                 inner.obs_failed = true;
             }
-            if !alive || !use_obs || obs_key != key {
+            if !alive || !use_obs || running_key != obs_key {
+                if alive && use_obs {
+                    crate::trail("recording: the game's size changed, starting OBS afresh at the new size");
+                }
                 inner.obs = None;
             }
         }
@@ -548,7 +554,7 @@ impl Recorder {
                 match started {
                     Ok(session) => {
                         crate::trail("recording: started (OBS)");
-                        inner.obs = Some((key, Arc::new(Mutex::new(session))));
+                        inner.obs = Some((obs_key, Arc::new(Mutex::new(session))));
                         inner.status.state = RecState::Recording;
                         inner.status.encoder = Some(format!("OBS Game Capture ({})", encoder.label()));
                         inner.status.message = None;
