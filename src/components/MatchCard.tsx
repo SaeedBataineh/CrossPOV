@@ -275,7 +275,7 @@ export function MatchCard({
           className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96] hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           {open ? "Hide" : "Details"}
-          <CaretDown size={14} weight="bold" aria-hidden className={`transition-transform duration-200 ease-out ${open ? "rotate-180" : ""}`} />
+          <CaretDown size={14} weight="bold" aria-hidden className={`transition-transform duration-200 ease-out motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
         </button>
       </div>
 
