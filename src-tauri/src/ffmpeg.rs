@@ -214,7 +214,7 @@ pub fn bitrate_kbps(s: &Settings) -> u32 {
 /// a 16:9 monitor) is narrower than 16:9. Like Medal, such a picture keeps its
 /// own shape and is enlarged to the 16:9 width of its height level: the
 /// chosen resolution is an upper limit, never above the game's own height.
-/// 1568x1080 becomes 1920x1322 at 1080p or 1440p (Medal: 1920x1324), never
+/// 1568x1080 becomes 1920x1324 at 1080p or 1440p, exactly as Medal, never
 /// enlarged to 2560 wide. Native records it at its own size. None: record as
 /// is (16:9 or wider, Native, or size unknown).
 pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32, u32)> {
@@ -227,7 +227,8 @@ pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32,
     let h = [720, 1080, 1440, 2160].into_iter().find(|&s| h < s && (s - h) * 100 <= s).unwrap_or(h);
     let th = target_height(r)?.min(h);
     let out_w = ((u64::from(th) * 16 / 9) as u32 + 1) & !1;
-    let out_h = (u64::from(out_w) * u64::from(h) / u64::from(w)) as u32 & !1;
+    // Height rounded up to a multiple of 4, as Medal does (1322.4 -> 1324).
+    let out_h = (u64::from(out_w) * u64::from(h)).div_ceil(u64::from(w) * 4) as u32 * 4;
     Some((out_w, out_h))
 }
 
@@ -745,11 +746,11 @@ mod tests {
     fn stretched_resolutions_are_recorded_stretched() {
         // "True stretch": 1568x1080 shown across a 16:9 monitor.
         // Like Medal: own shape, the chosen resolution's full width.
-        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1080), Some((1920, 1322)));
-        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1440), Some((1920, 1322)), "1440p is a limit, like Medal");
-        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P720), Some((1280, 880)));
-        assert_eq!(stretched_size(Some((1568, 1079)), Resolution::P1440), Some((1920, 1322)), "a line short: same as 1080");
-        assert_eq!(stretched_size(Some((1280, 960)), Resolution::P1080), Some((1706, 1278)));
+        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1080), Some((1920, 1324)));
+        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1440), Some((1920, 1324)), "1440p is a limit, like Medal");
+        assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P720), Some((1280, 884)));
+        assert_eq!(stretched_size(Some((1568, 1079)), Resolution::P1440), Some((1920, 1324)), "a line short: same as 1080");
+        assert_eq!(stretched_size(Some((1280, 960)), Resolution::P1080), Some((1706, 1280)));
         assert_eq!(stretched_size(Some((1280, 960)), Resolution::Native), None, "its own size");
         // 16:9, 16:10 and ultrawide stay as they are.
         assert_eq!(stretched_size(Some((2560, 1440)), Resolution::P1440), None);
@@ -761,7 +762,7 @@ mod tests {
         let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
         let a = joined(&s, &p);
-        assert!(a.contains(":width=1920:height=1322:resize_mode=scale:scale_mode=bicubic"), "{a}");
+        assert!(a.contains(":width=1920:height=1324:resize_mode=scale:scale_mode=bicubic"), "{a}");
         assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
         // A big window shrunk to the chosen height the same way.
         assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
