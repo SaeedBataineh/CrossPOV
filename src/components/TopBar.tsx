@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { MagnifyingGlass, Record, X } from "@phosphor-icons/react";
 import { isDesktop, saveClipNow, type RecorderStatus } from "../lib/backend";
 import type { Settings } from "../lib/settings";
+import { confirmDialog } from "./Dialog";
 import { Select } from "./Select";
 
 /** A keyboard key, Medal-style: a flat key box. */
@@ -114,7 +115,7 @@ export function TopBar({
 
       <span role="status" title={status?.message ?? (game?.exe || undefined)} className={`flex min-w-0 items-center gap-2 text-[11.5px] font-bold tracking-[0.06em] whitespace-nowrap uppercase ${tone}`}>
         <span className="relative grid size-2 shrink-0 place-items-center" aria-hidden>
-          {isDesktop && !bad && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-50" />}
+          {recording && <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-50 motion-reduce:animate-none" />}
           {recording ? <Record size={10} weight="fill" className="relative" /> : <span className="relative size-2 rounded-full bg-current" />}
         </span>
         <span className="truncate">{line}</span>
@@ -133,7 +134,7 @@ export function TopBar({
           type="button"
           title={`CrossPOV is recording ${game.exe} because it's fullscreen. Stop recording it?`}
           onClick={() => {
-            if (window.confirm(`Stop recording ${game.name}? It won't be recorded again. You can undo this in Settings › Games.`)) onIgnore(game.exe);
+            void confirmDialog({ title: `Stop recording ${game.name}?`, body: "It won't be recorded again. You can undo this in Settings › Games.", confirm: "Stop recording" }).then((ok) => ok && onIgnore(game.exe));
           }}
           className="h-8 shrink-0 rounded-lg border border-[#2b2b2f] bg-[#1c1c1f] px-3 text-[12.5px] font-semibold text-[#d9d9de] transition-colors hover:bg-[#26262a] active:scale-[0.97]"
         >

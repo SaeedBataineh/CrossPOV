@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Broadcast, GameController, Keyboard, SpeakerHigh, UserCircle, VideoCamera, type Icon } from "@phosphor-icons/react";
+import { Broadcast, CheckCircle, GameController, Keyboard, SpeakerHigh, UserCircle, VideoCamera, type Icon } from "@phosphor-icons/react";
+import { confirmDialog } from "../components/Dialog";
 import { Keycap } from "../components/TopBar";
 import { Select } from "../components/Select";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle } from "../components/ui";
@@ -63,12 +64,11 @@ const SECTIONS: { id: Section; label: string; Icon: Icon; about: string }[] = [
   { id: "account", label: "Account", Icon: UserCircle, about: "Your Riot ID, where clips are kept, and how the app starts." },
 ];
 
-/** Medal-style category header: a big icon, the title and one line on what's inside. */
+/** Category header: the title and one line on what's inside. Type does the work, no icon tile. */
 function CategoryHead({ section, right }: { section: Section; right?: ReactNode }) {
   const s = SECTIONS.find((x) => x.id === section)!;
   return (
     <header className="settings-head">
-      <span className="settings-icon" aria-hidden="true"><s.Icon size={26} weight="duotone" /></span>
       <span className="settings-title">
         <h2>{s.label}</h2>
         <p>{s.about}</p>
@@ -123,7 +123,7 @@ function BitratePicker({ value, auto, onChange }: { value: number; auto: number;
           aria-label="Custom bitrate in Mbps"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
+          onBlur={() => void commit()}
           onKeyDown={(e) => e.key === "Enter" && commit()}
         />
       )}
@@ -177,10 +177,13 @@ function RiotIdField({ value, onCommit }: { value: string; onCommit: (id: string
   useEffect(() => setText(value), [value]);
   const ok = text.trim() === "" || validRiotId(text);
 
-  function commit() {
+  async function commit() {
     const id = text.trim();
     if (same(id, value) || !ok) return;
-    if (value.trim() && !window.confirm(`Switch to ${id || "no account"}? Your match history for ${value.trim()} will be cleared. Your clips stay.`)) {
+    if (
+      value.trim() &&
+      !(await confirmDialog({ title: `Switch to ${id || "no account"}?`, body: `Your match history for ${value.trim()} will be cleared. Your clips stay.`, confirm: "Switch account", danger: true }))
+    ) {
       setText(value);
       return;
     }
@@ -194,7 +197,7 @@ function RiotIdField({ value, onCommit }: { value: string; onCommit: (id: string
       placeholder="Name#TAG"
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
+      onBlur={() => void commit()}
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
         if (e.key === "Escape") setText(value);
@@ -260,7 +263,7 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
                     for (const k of Object.keys(v) as (keyof typeof v)[]) set(k, v[k] as never);
                   }}
                 >
-                  <b>{p.label}</b>
+                  <b>{p.label}{on && <CheckCircle size={16} weight="fill" aria-hidden className="preset-check" />}</b>
                   <span>{p.about}</span>
                 </button>
               );
@@ -371,7 +374,7 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           className="linkish muted small"
           style={{ alignSelf: "flex-start" }}
           onClick={() => {
-            if (window.confirm("Reset all settings to their defaults? Your Riot ID, region and clips stay.")) void d.reset();
+            void confirmDialog({ title: "Reset all settings?", body: "Everything goes back to its default. Your Riot ID, region and clips stay.", confirm: "Reset settings", danger: true }).then((yes) => yes && void d.reset());
           }}
         >
           Reset all settings to defaults

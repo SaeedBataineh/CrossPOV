@@ -1,4 +1,4 @@
-import { Microphone, SpeakerHigh } from "@phosphor-icons/react";
+import { Microphone, SpeakerHigh, X } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Select } from "../components/Select";
 import { AppIcon, Panel, Row, SaveState, Seg, Toggle, Volume } from "../components/ui";
@@ -112,7 +112,7 @@ export default function Audio({ settings, onSaved }: { settings: Settings; onSav
                 volume={app.volume}
                 onVolume={(v) => setApp(i, { volume: v })}
                 track="T1"
-                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}>✕</button>}
+                extra={<button type="button" className="b sm icon" style={{ width: 24 }} aria-label={`Remove ${appName(app.exe)}`} onClick={() => set("apps", draft.apps.filter((_, j) => j !== i))}><X size={13} weight="bold" aria-hidden /></button>}
               />
             ))}
           <Channel

@@ -1,5 +1,9 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { Icon } from "@phosphor-icons/react";
+import type { ComponentType } from "react";
+import type { IconWeight } from "@phosphor-icons/react";
+
+/** A Phosphor icon, or a brand logo that takes the same props. */
+export type TabIcon = ComponentType<{ size?: number; weight?: IconWeight; className?: string; "aria-hidden"?: boolean }>;
 
 export interface Segment<T extends string> {
   id: T;
@@ -7,7 +11,7 @@ export interface Segment<T extends string> {
   /** A small count after the label; hidden when undefined (0 still shows). */
   n?: number;
   /** An icon before the label (filled when the tab is chosen). */
-  Icon?: Icon;
+  Icon?: TabIcon;
 }
 
 /**

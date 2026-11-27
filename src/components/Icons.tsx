@@ -1,9 +1,18 @@
 // Brand marks. UI glyphs come from @phosphor-icons/react directly.
-import { TwitchLogo } from "@phosphor-icons/react";
+import { siTwitch } from "simple-icons";
 type P = { size?: number };
 
-/** Twitch glyph (Phosphor). */
-export const TwitchIcon = ({ size = 14, color = "currentColor" }: P & { color?: string }) => <TwitchLogo size={size} color={color} weight="fill" aria-hidden="true" />;
+/** Twitch's real logo (Simple Icons), in Twitch purple unless told otherwise. */
+export const TwitchIcon = ({ size = 14, color = `#${siTwitch.hex}`, className }: P & { color?: string; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={color} className={className} aria-hidden="true">
+    <path d={siTwitch.path} />
+  </svg>
+);
+
+/** The same logo as a tab icon: takes the tab's colour like the other tab icons. */
+export const TwitchTabIcon = ({ size, className }: { size?: number | string; weight?: unknown; className?: string }) => (
+  <TwitchIcon size={typeof size === "number" ? size : 16} color="currentColor" className={className} />
+);
 
 /**
  * CrossPOV mark: a play button inside a ring of three arcs, coloured for

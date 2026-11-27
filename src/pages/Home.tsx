@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Select } from "../components/Select";
-import { ArrowsClockwise, FilmStrip, GearSix, Play, Sword, TwitchLogo } from "@phosphor-icons/react";
+import { ArrowsClockwise, GearSix, Play, Sword, User } from "@phosphor-icons/react";
+import { TwitchTabIcon } from "../components/Icons";
 import { MatchCard, type Show } from "../components/MatchCard";
 import { SegmentedControl, type Segment } from "../components/SegmentedControl";
 import type { Page } from "../components/Sidebar";
@@ -213,8 +214,8 @@ export default function Home({
 
   const tabs: Segment<Show>[] = [
     { id: "all", label: "All matches", Icon: Sword },
-    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length, Icon: TwitchLogo },
-    { id: "mine", label: "My clips only", Icon: FilmStrip },
+    { id: "streamers", label: "With streamers", n: matches.filter(withStreamers).length, Icon: TwitchTabIcon },
+    { id: "mine", label: "My clips only", Icon: User },
   ];
 
   return (
@@ -261,7 +262,7 @@ export default function Home({
         />
       )}
       {all.length ? (
-        <div key={show} className="stagger flex flex-col gap-3">
+        <div className="stagger flex flex-col gap-3">
           {all.map((m) =>
             m.id === looked?.match.id ? (
               <MatchCard key={m.id} match={m} riotId={looked.riotId} clips={[]} web={looked.web} onOpen={onOpen} />
@@ -289,9 +290,6 @@ export default function Home({
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.08] bg-zinc-900/40 px-6 py-16 text-center">
-          <span className="mb-2 grid size-12 place-items-center rounded-2xl bg-gradient-to-b from-white/[0.10] to-white/[0.03] text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] ring-1 ring-white/[0.06]">
-            <Sword size={22} weight="bold" aria-hidden />
-          </span>
           <b className="text-[17px] font-semibold tracking-[-0.02em] text-white">{matches.length ? "Nothing matches" : "No matches yet"}</b>
           <span className="max-w-sm text-[13.5px] text-zinc-400">
             {matches.length
@@ -316,16 +314,13 @@ export default function Home({
 
 // ---------- Summary strip ----------
 
-/** One tile: icon, a big number, and what it means. */
-function Tile({ icon, label, value, sub }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode }) {
+/** One figure: what it counts, the number, and the detail under it. */
+function Tile({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/80 p-4 shadow-[0_12px_32px_-22px_rgba(0,0,0,0.8)]">
-      <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
-        <span className="grid size-6 place-items-center rounded-lg bg-[#3b9eff]/[0.12] text-[#6ab7ff]">{icon}</span>
-        {label}
-      </div>
-      <div className="mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.03em] text-white tabular-nums">{value}</div>
-      {sub && <div className="mt-2 text-[12px] text-zinc-500 tabular-nums">{sub}</div>}
+    <div className="min-w-0 px-5 py-4">
+      <div className="text-[11.5px] font-semibold tracking-[0.08em] text-zinc-500 uppercase">{label}</div>
+      <div className="mt-2 text-[34px] leading-none font-semibold tracking-[-0.04em] text-white tabular-nums">{value}</div>
+      {sub && <div className="mt-2 truncate text-[12.5px] text-zinc-400 tabular-nums">{sub}</div>}
     </div>
   );
 }
@@ -337,15 +332,13 @@ function Summary({ matches, clips, streamers }: { matches: MatchSummary[]; clips
   const met = new Set(Object.values(streamers).flatMap((s) => s.players.map((p) => p.channel.login))).size;
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 divide-x divide-white/[0.06] rounded-2xl border border-white/[0.06] bg-zinc-900/60">
       <Tile
-        icon={<FilmStrip size={13} weight="bold" aria-hidden />}
         label="Saved clips"
         value={clips.length}
         sub={`${clips.length - theirs} yours · ${theirs} from streamers`}
       />
       <Tile
-        icon={<Sword size={13} weight="bold" aria-hidden />}
         label="Streamer matches"
         value={withStreamers}
         sub={`${met} ${met === 1 ? "streamer" : "streamers"} met`}

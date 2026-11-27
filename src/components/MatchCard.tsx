@@ -90,7 +90,7 @@ function StreamerBadge({ live, checking, checked }: { live: Live[]; checking: bo
             </span>
           ))}
         </span>
-        <TwitchIcon size={12} color="#a78bfa" />
+        <TwitchIcon size={12} />
         <span className="truncate">{text}</span>
       </span>
     );
@@ -217,7 +217,7 @@ export function MatchCard({
     if (paired.has(c.path)) continue;
     saved++;
     const into = Math.max(0, Math.round((c.createdMs - (c.durationSec ?? 0) * 1000 - Date.parse(match.startedAt)) / 1000));
-    tiles.push(<GalleryCard key={c.path} clip={c} title="Your clip" meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} notify={notify} onPlay={() => onOpen(c)} />);
+    tiles.push(<GalleryCard key={c.path} clip={c} title={cardTitle(c)} meta={`Saved with your hotkey · ${Math.floor(into / 60)}:${String(into % 60).padStart(2, "0")} into the match`} notify={notify} onPlay={() => onOpen(c)} />);
   }
 
   const minutes = match.lengthMs ? Math.round(match.lengthMs / 60000) : 0;

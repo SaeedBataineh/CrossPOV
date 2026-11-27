@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ArrowUpRight } from "@phosphor-icons/react";
 import type { Page } from "../components/Sidebar";
 import { Avatar, Notice } from "../components/ui";
 import { findMe, isDesktop, linkedChannels, removeLinkedChannel, type ClipInfo, type LinkedChannel } from "../lib/backend";
@@ -27,10 +28,10 @@ function LinkedChannels({ notify }: { notify: (text: string, tone: "good" | "bad
       <h2 className="section-title">Channels you linked <span>kept on this PC only</span></h2>
       <div className="list boxed">
         {links.map((l) => (
-          <div key={l.puuid} className="list-row">
+          <div key={l.puuid} className="list-row link-row" title={`Open ${l.login} on Twitch`}>
             <Avatar agent={l.label.split(" · ").pop()} size={36} />
             <span className="grow stack" style={{ gap: 2 }}>
-              <a href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.login}</b></a>
+              <a className="stretch" href={`https://www.twitch.tv/${l.login}`} target="_blank" rel="noreferrer"><b>{l.login}</b><ArrowUpRight size={13} weight="bold" className="out" aria-hidden /></a>
               <span className="muted small">{l.label}{l.seen ? ` · found again ${l.seen}×` : ""}</span>
             </span>
             <button type="button" className="btn quiet" onClick={() => void remove(l)}>Forget</button>
@@ -93,11 +94,12 @@ export default function Streamers({
             const pct = p.status === "working" && !p.checking && !mate ? progress(p) : null;
             const clip = firstClip(matchId, [p.channel.login, p.channel.displayName]);
             return (
-              <div key={`${matchId}-${p.puuid}`} className="table-row" role="row">
+              // The whole row opens their channel (the name's link stretches over it); Watch sits on top.
+              <div key={`${matchId}-${p.puuid}`} className="table-row link-row" role="row" title={`Open ${p.channel.displayName} on Twitch`}>
                 <span role="cell" className="row" style={{ gap: 12, minWidth: 0 }}>
                   <Avatar name={p.channel.displayName} avatar={p.channel.avatar} agent={who?.agent} size={36} />
                   <span className="stack" style={{ gap: 2, minWidth: 0 }}>
-                    <a href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b></a>
+                    <a className="stretch" href={`https://www.twitch.tv/${p.channel.login}`} target="_blank" rel="noreferrer"><b className="ellipsis">{p.channel.displayName}</b><ArrowUpRight size={13} weight="bold" className="out" aria-hidden /></a>
                     <span className="muted small ellipsis">{["Twitch", mate ? "Teammate" : me && who ? "Enemy" : null, who?.agent].filter(Boolean).join(" · ")}</span>
                   </span>
                 </span>

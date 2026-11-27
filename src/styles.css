@@ -824,7 +824,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .preset b { font-size: 14px; font-weight: 700; }
 .preset span { font-size: 12px; line-height: 1.35; color: var(--muted); }
 .preset[aria-checked="true"] { border-color: var(--accent); background: rgba(59, 158, 255, 0.08); box-shadow: 0 0 0 1px var(--accent); }
-.preset[aria-checked="true"] b::after { content: "✓"; margin-left: 8px; color: var(--accent-hi); }
+.preset b { display: inline-flex; align-items: center; gap: 6px; }
+.preset-check { flex: none; color: var(--accent-hi); }
 .custom-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 14px; padding: 14px 18px 4px; animation: rise-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .custom-grid label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .custom-grid label > span:first-child { font-size: 12.5px; font-weight: 600; color: var(--muted); }
@@ -939,4 +940,121 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .expand.open .vs-win.on, .expand.open .vs-row { animation: fade-in 160ms ease-out both; animation-delay: 0ms; }
   .gstar.on svg, .gsel[aria-checked="true"] svg, .gbtn.discord.done svg { animation: none; }
   .gcard:hover .gthumb img { transform: none; }
+}
+
+/* ---------- Skills pass: less motion where it repeats, cheaper where it runs ----------
+   One entrance per container: a match card already rises with the list, so
+   its clip tiles don't stagger again inside it. */
+.stagger .gallery > * { animation: none; }
+/* The switch knob slides on transform (compositor) instead of `left` (layout). */
+.tg::after { left: 3px; transition: transform 160ms var(--ease-out), background-color 160ms ease-out; }
+.tg[aria-checked="true"]::after { left: 3px; transform: translateX(18px); }
+/* Website demo on phones: no grey tap flash, no double-tap zoom delay. */
+button, a, [role="tab"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.pc-track { touch-action: none; }
+/* Worst-case text: long error paths wrap inside a toast. */
+.toast { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .tg::after { transition: background-color 160ms ease-out; } }
+
+/* ---------- Page arrival: a fluid slide, not a fade ----------
+   Opening a page from the sidebar glides the content up into place. The
+   opacity settles in the first half so it reads as movement, not a fade.
+   Deliberately also plays with Windows' "Animation effects" off: it's one
+   short, gentle movement per page, not constant motion. */
+@keyframes page-slide {
+  0% { opacity: 0; transform: translateY(18px); }
+  45% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+.page-enter { animation: page-slide 420ms var(--ease-out) both; }
+.settings-body { animation: page-slide 360ms var(--ease-out) both; }
+/* The list under it follows a beat behind, each item a little later. */
+.stagger > *, .gallery > * { animation: page-slide 480ms var(--ease-out) both; }
+.stagger .gallery > * { animation: none; }
+/* The real Discord mark in Discord's own blurple; it brightens on hover. */
+.gbtn.discord svg { opacity: 0.85; transition: opacity 0.15s ease-out; }
+.gbtn.discord:hover svg { opacity: 1; }
+
+/* ---------- No icon tiles ----------
+   Icons sitting in tinted rounded squares read as template filler. Headings
+   lead with type; brand and app logos stand on their own. */
+.settings-icon { display: none; }
+.settings-head { align-items: flex-end; gap: 16px; padding: 2px 0 18px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.settings-title h2 { font-size: 26px; font-weight: 650; letter-spacing: -0.035em; line-height: 1.1; }
+.settings-title p { margin-top: 6px; font-size: 14px; color: var(--muted); max-width: 52ch; }
+/* App and source icons: the logo itself, no box behind it. */
+.src-ic { width: 28px; height: 28px; border: 0; border-radius: 0; background: none; color: var(--muted); }
+.src-ic.app-ic { padding: 0; border-radius: 6px; }
+/* Mixer: the slider fills its column instead of pushing "100%" into the next one. */
+.mixer-row .volume { min-width: 0; }
+.mixer-row .volume input { width: auto; flex: 1; min-width: 0; }
+
+/* ================= QoL pass ================= */
+
+/* Toasts with buttons (Undo, Open, Copy for Discord). */
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 14px; }
+.toast-text { min-width: 0; }
+.toast-actions { display: flex; gap: 4px; margin-right: -6px; flex: none; }
+.toast-btn { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.08); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; transition: background-color 0.15s ease-out, transform 0.12s ease-out; }
+.toast-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.toast-btn:active { transform: scale(0.96); }
+.toast-btn:first-child { color: var(--accent-hi); }
+
+/* Confirm and rename dialogs, in the app's own look. */
+.dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(5, 5, 7, 0.6); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); animation: fade-in 160ms ease-out both; }
+.dialog { width: min(420px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 22px 22px 18px; border: 1px solid var(--line-2); border-radius: 14px; background: #161618; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.9); animation: dialog-in 200ms var(--ease-out) both; }
+.dialog h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.02em; color: #fff; }
+.dialog p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.dialog-input { height: 38px; margin-top: 4px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 14px; outline: none; }
+.dialog-input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-bg); }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.btn.danger-fill { border-color: transparent; background: #e5484d; color: #fff; font-weight: 600; }
+.btn.danger-fill:hover:not(:disabled) { background: #f05a5f; border-color: transparent; }
+@keyframes dialog-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+/* Right-click menu. */
+.ctx-menu { position: fixed; z-index: 70; min-width: 210px; padding: 5px; border: 1px solid var(--line-2); border-radius: 11px; background: #18181b; box-shadow: 0 18px 44px -12px rgba(0, 0, 0, 0.85); animation: ctx-in 120ms var(--ease-out) both; transform-origin: top left; }
+.ctx-menu button { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font-size: 13.5px; text-align: left; outline: none; }
+.ctx-menu button:hover, .ctx-menu button:focus-visible { background: rgba(255, 255, 255, 0.07); color: #fff; }
+.ctx-menu button.danger { color: var(--rec-text); }
+.ctx-menu button.danger:hover, .ctx-menu button.danger:focus-visible { background: rgba(255, 69, 58, 0.12); }
+.ctx-menu button.sep { margin-top: 5px; position: relative; }
+.ctx-menu button.sep::before { content: ""; position: absolute; left: 6px; right: 6px; top: -3px; height: 1px; background: var(--line-2); }
+.ctx-ic { display: grid; place-items: center; width: 16px; color: var(--muted); }
+.ctx-menu button:hover .ctx-ic { color: inherit; }
+@keyframes ctx-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+/* Hover preview on clip cards. */
+.gthumb .gpreview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; animation: fade-in 180ms ease-out both; }
+.gtitle { cursor: default; }
+
+/* Clips load as you scroll: an invisible marker near the end of the grid. */
+.load-more { height: 1px; }
+
+/* Viewer header: rename, folder, delete, then previous / next. */
+.viewer-acts { display: flex; align-items: center; gap: 2px; flex: none; }
+.icon-act { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); transition: background-color 0.15s ease-out, color 0.15s ease-out, transform 0.12s ease-out; }
+.icon-act:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: #fff; }
+.icon-act.danger:hover:not(:disabled) { color: var(--rec-text); background: rgba(255, 69, 58, 0.1); }
+.icon-act:active:not(:disabled) { transform: scale(0.92); }
+.icon-act:disabled { opacity: 0.3; }
+.acts-sep { width: 1px; height: 18px; margin: 0 6px; background: var(--line-2); }
+.viewer-head h1 { cursor: default; }
+.mini-thumb { position: relative; overflow: hidden; }
+.mini-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* Avatar without a picture: initials, not a logo in a box. */
+.avatar.sq.initials { background: #232326; color: var(--text-2); font-weight: 650; letter-spacing: 0.02em; }
+
+/* Rows that open a channel: the name's link covers the row; buttons stay on top. */
+.link-row { position: relative; cursor: pointer; transition: background-color 0.15s ease-out; }
+.link-row:hover { background: rgba(255, 255, 255, 0.03); }
+.link-row a.stretch { display: inline-flex; align-items: center; gap: 4px; color: var(--text); text-decoration: none; min-width: 0; }
+.link-row a.stretch::after { content: ""; position: absolute; inset: 0; }
+.link-row a.stretch .out { color: var(--dim); opacity: 0; transition: opacity 0.15s ease-out; flex: none; }
+.link-row:hover a.stretch .out { opacity: 1; }
+.link-row button { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog, .ctx-menu { animation: fade-in 140ms ease-out both; }
 }

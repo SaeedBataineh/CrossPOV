@@ -5,6 +5,8 @@ import "./app.css";
 import { Sidebar, type Page } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Notice, ToastView } from "./components/ui";
+import { ContextMenuHost } from "./components/ContextMenu";
+import { DialogHost } from "./components/Dialog";
 import { UpdateGate, useUpdateStatus } from "./components/UpdateGate";
 import { isDesktop, loadSettings, saveSettings, type ClipInfo } from "./lib/backend";
 import { same } from "./lib/riotId";
@@ -45,7 +47,8 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const recorder = useRecorder();
+  // "Open" on a Clip saved toast opens it in the viewer.
+  const recorder = useRecorder(setViewing);
   const matchesState = useMatches();
   const update = useUpdateStatus();
   /** While updating, the app behind the update screen can't be clicked or tabbed into. */
@@ -144,6 +147,7 @@ export default function App() {
                 }}
                 onChanged={recorder.refreshClips}
                 notify={recorder.notify}
+                show={recorder.show}
               />
             ) : (
               <>
@@ -157,7 +161,9 @@ export default function App() {
           </Suspense>
         </main>
       </div>
-      <ToastView toast={recorder.toast} />
+      <ToastView toast={recorder.toast} onAct={recorder.act} onHold={recorder.setHeld} />
+      <ContextMenuHost />
+      <DialogHost />
     </div>
     <UpdateGate status={update} />
     </>

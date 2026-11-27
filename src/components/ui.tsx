@@ -1,13 +1,17 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { appIcon, copyForDiscord, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
-import { Check, Clock, DiscordLogo, FolderOpen, GameController, Info, Play, Star, Trash, Warning, WarningCircle } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { appIcon, clipVideoSrc, copyForDiscord, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { Check, Clock, FolderOpen, GameController, Info, PencilSimple, Play, Star, Trash, Warning, WarningCircle } from "@phosphor-icons/react";
+import { openContextMenu, type MenuItem } from "./ContextMenu";
+import { promptDialog } from "./Dialog";
+import { customTitle, setTitle, useTitles } from "../lib/titles";
 import { toggleFavourite, useFavourites } from "../lib/favourites";
 import { BrandLogo, brandFor } from "./Brand";
+import { siDiscord } from "simple-icons";
 import { TwitchIcon } from "./Icons";
 import { Select } from "./Select";
 import { AgentIcon, hasAgentArt, mapArt } from "./ValorantArt";
 import type { Draft } from "../lib/useDraft";
-import { formatDuration, formatSize, timeAgo, type Toast } from "../lib/useRecorder";
+import { formatDuration, formatSize, timeAgo, type Toast, type ToastAction } from "../lib/useRecorder";
 
 /** A titled box. `color` is the small square before the title. */
 export function Panel({
@@ -129,10 +133,21 @@ export function Volume({ label, value, onChange, disabled }: { label: string; va
   );
 }
 
-export function ToastView({ toast }: { toast: Toast | null }) {
+export function ToastView({ toast, onAct, onHold }: { toast: Toast | null; onAct?: (t: Toast, a: ToastAction) => void; onHold?: (held: boolean) => void }) {
   return (
     <div className="toast-region" role="status" aria-live="polite">
-      {toast && <div key={toast.id} className={`toast ${toast.tone}`}>{toast.text}</div>}
+      {toast && (
+        <div key={toast.id} className={`toast ${toast.tone}`} onPointerEnter={() => onHold?.(true)} onPointerLeave={() => onHold?.(false)}>
+          <span className="toast-text">{toast.text}</span>
+          {toast.actions?.length ? (
+            <span className="toast-actions">
+              {toast.actions.map((a) => (
+                <button key={a.label} type="button" className="toast-btn" onClick={() => { onHold?.(false); onAct?.(toast, a); }}>{a.label}</button>
+              ))}
+            </span>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -201,11 +216,31 @@ export function ClipCard({ clip, selected, onSelect, onOpen }: { clip: ClipInfo;
 
 // ---------- Gallery ----------
 
-/** Big, plain title for a clip card: what happened, not the file name. */
+/** "21:14" today, otherwise "Mon 21:14" (this week) or "24 Nov 21:14". */
+function clockLabel(ms: number): string {
+  const d = new Date(ms);
+  const time = d.toTimeString().slice(0, 5);
+  const days = (Date.now() - ms) / 86_400_000;
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return `${d.toLocaleDateString(undefined, days < 6 ? { weekday: "short" } : { day: "numeric", month: "short" })} ${time}`;
+}
+
+/**
+ * Big, plain title for a clip card: the name you gave it, else what happened
+ * (streamer clips) or where and when (your clips: "Ascent · 21:14").
+ */
 export function cardTitle(c: ClipInfo): string {
-  if (!isTheirs(c)) return "Your clip";
+  const own = customTitle(c.path);
+  if (own) return own;
+  if (!isTheirs(c)) return `${c.map ?? c.game ?? "Clip"} · ${clockLabel(c.createdMs)}`;
   const m = c.moment ?? "Streamer clip";
   return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+/** Asks for a new name for a clip; an empty name goes back to the automatic one. */
+export async function renameClip(c: ClipInfo) {
+  const name = await promptDialog({ title: "Rename clip", body: "Only the name in CrossPOV changes; the file keeps its name.", confirm: "Rename", value: cardTitle(c) });
+  if (name !== null) setTitle(c.path, name);
 }
 
 /** "Ascent · R14 · 35 min ago", or "Apex Legends · 35 min ago" for other games. */
@@ -214,6 +249,10 @@ export function cardMeta(c: ClipInfo): string {
 }
 
 /** A clip's picture: its own thumbnail, else its map's art. */
+export function clipPicture(c: ClipInfo): string | null {
+  return picture(c);
+}
+
 function picture(c: ClipInfo): string | null {
   return thumbSrc(c.thumb) ?? mapArt(c.map);
 }
@@ -257,6 +296,7 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
 }) {
   const favs = useFavourites();
   const fav = favs.has(clip.path);
+  const titles = useTitles();
   /** Copy for Discord: working, then a check for a moment once it's on the clipboard. */
   const [copy, setCopy] = useState<"idle" | "busy" | "done">("idle");
   async function copyIt() {
@@ -267,13 +307,48 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
     if (ok) setTimeout(() => setCopy("idle"), 1600);
   }
   const src = picture(clip);
-  const t = title ?? cardTitle(clip);
+  const t = titles[clip.path] ?? title ?? cardTitle(clip);
   const mine = isTheirs(clip) ? other : clip;
   const theirs = isTheirs(clip) ? clip : other;
   const both = Boolean(mine && theirs);
+
+  // Hover preview: after a short rest on the picture, the clip plays silently.
+  const [preview, setPreview] = useState<string | null>(null);
+  const wait = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const startPreview = () => {
+    if (!isDesktop) return;
+    clearTimeout(wait.current);
+    wait.current = setTimeout(() => {
+      clipVideoSrc(clip.path).then((s) => s && setPreview(s), () => {});
+    }, 450);
+  };
+  const stopPreview = () => {
+    clearTimeout(wait.current);
+    setPreview(null);
+  };
+  useEffect(() => () => clearTimeout(wait.current), []);
+
+  const menu = (x: number, y: number) => {
+    const items: MenuItem[] = [
+      { label: "Open", icon: <Play size={15} weight="fill" />, run: onPlay },
+      ...(onReveal ? [{ label: "Show in folder", icon: <FolderOpen size={15} />, run: onReveal }] : []),
+      ...(notify && isDesktop ? [{ label: "Copy for Discord", icon: <BrandLogo icon={siDiscord} size={15} />, run: () => void copyIt() }] : []),
+      { label: fav ? "Remove from favourites" : "Add to favourites", icon: <Star size={15} weight={fav ? "fill" : "regular"} />, run: () => toggleFavourite(clip.path), separator: true },
+      { label: "Rename", icon: <PencilSimple size={15} />, run: () => void renameClip(clip) },
+      ...(onDelete ? [{ label: "Delete", icon: <Trash size={15} />, run: onDelete, danger: true, separator: true }] : []),
+    ];
+    openContextMenu(x, y, items);
+  };
+
   return (
-    <div className={selected ? "gcard selected" : "gcard"}>
-      <div className="gpic">
+    <div
+      className={selected ? "gcard selected" : "gcard"}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        menu(e.clientX, e.clientY);
+      }}
+    >
+      <div className="gpic" onPointerEnter={startPreview} onPointerLeave={stopPreview}>
         <button type="button" className={both ? "gthumb split" : isTheirs(clip) ? "gthumb theirs" : "gthumb"} onClick={onPlay} aria-label={`Open ${t}`}>
           {both ? (
             <>
@@ -285,9 +360,10 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
           ) : (
             <Play size={26} weight="fill" color="rgba(255,255,255,0.55)" aria-hidden />
           )}
-          <span className="hover-play" aria-hidden="true"><Play size={20} weight="fill" /></span>
+          {preview && <video className="gpreview" src={preview} muted autoPlay loop playsInline aria-hidden="true" onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.duration > 8) v.currentTime = v.duration * 0.3; }} />}
+          {!preview && <span className="hover-play" aria-hidden="true"><Play size={20} weight="fill" /></span>}
           {mine && <span className="tag you">YOU</span>}
-          {theirs && <span className={both ? "tag them split" : "tag them"}><TwitchIcon size={11} color="#a970ff" />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
+          {theirs && <span className={both ? "tag them split" : "tag them"}><TwitchIcon size={11} />{both ? "THEM" : theirs.streamer ?? "THEM"}</span>}
           {clip.durationSec != null && <span className="len">{formatDuration(clip.durationSec)}</span>}
         </button>
         {onSelect && (
@@ -301,13 +377,13 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
       </div>
       <div className="gbody">
         <span className="gtext">
-          <b className="gtitle">{t}</b>
+          <b className="gtitle" title={t} onDoubleClick={() => void renameClip(clip)}>{t}</b>
           <span className="gmeta"><Clock size={13} aria-hidden />{meta ?? cardMeta(clip)}</span>
         </span>
         <span className="gbtns">
           {notify && (
             <button type="button" className={`gbtn discord ${copy}`} title="Copy for Discord" aria-label={`Copy ${t} for Discord`} aria-busy={copy === "busy"} onClick={() => void copyIt()}>
-              {copy === "done" ? <Check size={16} weight="bold" aria-hidden /> : <DiscordLogo size={16} weight="fill" aria-hidden />}
+              {copy === "done" ? <Check size={16} weight="bold" aria-hidden /> : <BrandLogo icon={siDiscord} size={17} />}
             </button>
           )}
           {onReveal && <button type="button" className="gbtn" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
@@ -349,9 +425,9 @@ export function SaveState({ d }: { d: Draft }) {
 
 /**
  * A streamer's picture: their Twitch picture (loaded through crosspov.com, so
- * your PC never contacts Twitch), else the agent they played, else the Twitch logo.
+ * your PC never contacts Twitch), else the agent they played, else their initials.
  */
-export function Avatar({ avatar, agent, size = 36 }: { name?: string; avatar?: string | null; agent?: string | null; size?: number }) {
+export function Avatar({ name, avatar, agent, size = 36 }: { name?: string; avatar?: string | null; agent?: string | null; size?: number }) {
   const [failed, setFailed] = useState(false);
   const style = { width: size, height: size };
   if (!avatar || failed) {
@@ -363,8 +439,8 @@ export function Avatar({ avatar, agent, size = 36 }: { name?: string; avatar?: s
       );
     }
     return (
-      <span className="avatar sq" style={style} aria-hidden="true">
-        <TwitchIcon size={Math.round(size * 0.45)} color="#a970ff" />
+      <span className="avatar sq initials" style={{ ...style, fontSize: Math.round(size * 0.38) }} aria-hidden="true">
+        {(name ?? "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "?"}
       </span>
     );
   }

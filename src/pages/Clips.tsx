@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Select } from "../components/Select";
 import { BrandLogo, brandFor } from "../components/Brand";
-import { SegmentedControl } from "../components/SegmentedControl";
-import { cardTitle, clipTitle, GalleryCard } from "../components/ui";
-import { deleteClip, isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { SegmentedControl, type TabIcon } from "../components/SegmentedControl";
+import { TwitchTabIcon } from "../components/Icons";
+import { cardTitle, GalleryCard } from "../components/ui";
+import { isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { deleteWithUndo } from "../lib/deleteClips";
+import { useTitles } from "../lib/titles";
 import { findPairs } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
 import { useFavourites } from "../lib/favourites";
 import { formatSize, type useRecorder } from "../lib/useRecorder";
-import { SquaresFour, Star, Trash, TwitchLogo, User, X, type Icon } from "@phosphor-icons/react";
+import { SquaresFour, Star, Trash, User, X } from "@phosphor-icons/react";
 
 /** A game's logo, when we know it. */
 const brandLogo = (name: string) => {
@@ -43,7 +46,8 @@ export default function Clips({
   query: string;
   onOpen: (c: ClipInfo) => void;
 }) {
-  const { clips, refreshClips, notify } = recorder;
+  const { clips, refreshClips, notify, show } = recorder;
+  const titles = useTitles();
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("newest");
   const [game, setGame] = useState("all");
@@ -62,9 +66,9 @@ export default function Clips({
   const pairs = useMemo(() => findPairs(clips, matches), [clips, matches]);
 
   const theirs = clips.filter((c) => c.kind === "theirs").length;
-  const tabs: { value: Tab; label: string; n: number; Icon: Icon }[] = [
+  const tabs: { value: Tab; label: string; n: number; Icon: TabIcon }[] = [
     { value: "all", label: "All", n: clips.length, Icon: SquaresFour },
-    { value: "theirs", label: "Streamer clips", n: theirs, Icon: TwitchLogo },
+    { value: "theirs", label: "Streamer clips", n: theirs, Icon: TwitchTabIcon },
     { value: "mine", label: "My clips", n: clips.length - theirs, Icon: User },
     { value: "fav", label: "Favourites", n: clips.filter((c) => favs.has(c.path)).length, Icon: Star },
   ];
@@ -79,36 +83,31 @@ export default function Clips({
           (!q || [cardTitle(c), c.name, c.streamer, c.map, c.moment, c.game].filter(Boolean).join(" ").toLowerCase().includes(q)),
       )
       .sort(SORTS[sort]);
-  }, [clips, tab, query, sort, game, favs]);
+  }, [clips, tab, query, sort, game, favs, titles]);
   useEffect(() => setLimit(PAGE), [tab, query, sort, game]);
+
+  // More clips load by themselves as the end of the grid scrolls into view.
+  const end = useRef<HTMLDivElement>(null);
+  const more = shown.length > limit;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || !more) return;
+    const io = new IntersectionObserver((e) => e[0]?.isIntersecting && setLimit((l) => l + PAGE), { rootMargin: "600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [more, limit]);
 
   const totalBytes = clips.reduce((n, c) => n + c.sizeBytes, 0);
   const run = (f: () => Promise<void>) => () => void f().catch((err) => notify(String(err), "bad"));
 
-  async function remove(c: ClipInfo) {
-    if (!window.confirm(`Delete "${clipTitle(c)}"? This can't be undone.`)) return;
-    try {
-      await deleteClip(c.path);
-    } catch (err) {
-      notify(`Couldn't delete: ${String(err)}`, "bad");
-    }
-    refreshClips();
-  }
+  /** Gone at once, with Undo in the toast; then to the Recycle Bin. */
+  const remove = (c: ClipInfo) => void deleteWithUndo([c], `"${cardTitle(c)}"`, show, refreshClips);
 
   async function removePicked() {
     const list = clips.filter((c) => picked.has(c.path));
-    if (!list.length || !window.confirm(`Delete ${list.length} clip${list.length === 1 ? "" : "s"}? This can't be undone.`)) return;
-    let failed = 0;
-    for (const c of list) {
-      try {
-        await deleteClip(c.path);
-      } catch {
-        failed++;
-      }
-    }
-    if (failed) notify(`Couldn't delete ${failed} of ${list.length} clips.`, "bad");
+    if (!list.length) return;
+    await deleteWithUndo(list, `"${cardTitle(list[0])}"`, show, refreshClips);
     setPicked(new Set());
-    refreshClips();
   }
 
   return (
@@ -134,7 +133,7 @@ export default function Clips({
       )}
 
       {shown.length ? (
-        <div className="gallery" key={tab}>
+        <div className="gallery">
           {shown.slice(0, limit).map((c) => {
             const p = pairs.find((x) => x.mine.path === c.path || x.theirs.path === c.path);
             return (
@@ -144,7 +143,7 @@ export default function Clips({
                 other={p ? (c.kind === "mine" ? p.theirs : p.mine) : undefined}
                 onPlay={() => onOpen(c)}
                 onReveal={isDesktop ? run(() => revealClip(c.path)) : undefined}
-                onDelete={() => void remove(c)}
+                onDelete={() => remove(c)}
                 selected={picked.has(c.path)}
                 onSelect={() => togglePick(c.path)}
                 notify={notify}
@@ -167,9 +166,7 @@ export default function Clips({
         </div>
       )}
 
-      {shown.length > limit && (
-        <button type="button" className="btn quiet center" onClick={() => setLimit(limit + PAGE)}>Show more</button>
-      )}
+      {more && <div ref={end} className="load-more" aria-hidden="true" />}
 
       {clips.length > 0 && (
         <footer className="page-foot">
