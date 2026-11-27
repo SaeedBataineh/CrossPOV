@@ -551,11 +551,12 @@ pub fn blackout_ranges(spans: &[(u64, u64)], clip_start: u64, clip_end: u64, pad
 
 /// Re-encodes a joined clip with `ranges` (seconds) blacked out, on the same
 /// graphics card and format it was recorded with. Sound is copied as is.
-pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: VideoEncoder, hevc: bool, kbps: u32) -> Vec<String> {
+/// `gpu_decode`: decode on the graphics card when it can ("auto" quietly
+/// uses the CPU when it can't).
+pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: VideoEncoder, hevc: bool, kbps: u32, gpu_decode: bool) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y"].iter().map(|s| s.to_string()).collect();
-    if cfg!(windows) {
-        // Decode on the graphics card (falls back to the CPU by itself).
-        a.extend(["-hwaccel", "d3d11va"].iter().map(|s| s.to_string()));
+    if gpu_decode {
+        a.extend(["-hwaccel", "auto"].iter().map(|s| s.to_string()));
     }
     a.extend(["-i".to_string(), input.to_string_lossy().into_owned()]);
     let when = ranges.iter().map(|(s, e)| format!("between(t,{s:.3},{e:.3})")).collect::<Vec<_>>().join("+");
@@ -757,7 +758,7 @@ mod tests {
         let spans = [(110_000, 115_000), (114_000, 118_000), (50_000, 90_000), (158_000, 170_000)];
         assert_eq!(blackout_ranges(&spans, start, end, 250), vec![(9.75, 18.25), (57.75, 60.0)]);
         assert!(blackout_ranges(&[(10_000, 20_000)], start, end, 250).is_empty(), "before the clip");
-        let a = blackout_args(&PathBuf::from("in.mp4"), &PathBuf::from("out.mp4"), &[(9.75, 18.25)], VideoEncoder::Nvenc, true, 50_000).join(" ");
+        let a = blackout_args(&PathBuf::from("in.mp4"), &PathBuf::from("out.mp4"), &[(9.75, 18.25)], VideoEncoder::Nvenc, true, 50_000, true).join(" ");
         assert!(a.contains("drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(t,9.750,18.250)'"), "{a}");
         assert!(a.contains("-c:v hevc_nvenc") && a.contains("-c:a copy") && a.contains("-tag:v hvc1"), "{a}");
     }

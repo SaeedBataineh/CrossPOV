@@ -578,8 +578,12 @@ impl Recorder {
             let encoder = self.ffmpeg_tools().map_or(VideoEncoder::Cpu, |(_, e)| e);
             let secs: f64 = hide.iter().map(|(a, b)| b - a).sum();
             crate::trail(&format!("clip: hiding {secs:.1} s where you'd tabbed out"));
-            let args = ffmpeg::blackout_args(&joined, &out, &hide, encoder, plan.hevc, ffmpeg::bitrate_kbps(&settings));
-            if let Err(e) = run_ffmpeg(&ffmpeg_path, &args) {
+            let kbps = ffmpeg::bitrate_kbps(&settings);
+            // Decoding on the graphics card first; if anything about that
+            // fails, all on the CPU (slower, works everywhere).
+            let done = run_ffmpeg(&ffmpeg_path, &ffmpeg::blackout_args(&joined, &out, &hide, encoder, plan.hevc, kbps, true))
+                .or_else(|_| run_ffmpeg(&ffmpeg_path, &ffmpeg::blackout_args(&joined, &out, &hide, encoder, plan.hevc, kbps, false)));
+            if let Err(e) = done {
                 // Keep the clip rather than lose it.
                 crate::trail(&format!("clip: couldn't hide the tabbed-out parts ({e}); saved as recorded"));
                 let _ = fs::remove_file(&out);
@@ -658,7 +662,9 @@ mod tests {
             .output()
             .unwrap();
         assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
-        run_ffmpeg(&ff, &ffmpeg::blackout_args(&src, &out, &[(1.0, 2.0)], VideoEncoder::Cpu, false, 1_000)).expect("blackout");
+        // As the app does it: graphics-card decoding when available (this
+        // machine may have none: it must still work).
+        run_ffmpeg(&ff, &ffmpeg::blackout_args(&src, &out, &[(1.0, 2.0)], VideoEncoder::Cpu, false, 1_000, true)).expect("blackout");
         // Average brightness of one frame, as an 8x8 grey picture.
         let brightness = |at: &str| -> f64 {
             let raw = dir.join(format!("frame-{at}.gray"));
