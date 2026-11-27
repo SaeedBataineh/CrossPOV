@@ -36,7 +36,7 @@ pub fn icon_png(exe: &str, path: Option<PathBuf>) -> Option<Vec<u8>> {
     let named_exe = |p: &PathBuf| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(exe));
     let path = match path.filter(named_exe) {
         Some(p) => p,
-        None => running_path(exe)?,
+        None => running_path(exe).or_else(|| installed_path(exe))?,
     };
     let png = extract(&path)?;
     if let Some(cache) = cache {
@@ -74,6 +74,32 @@ fn running_path(exe: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Where an installed (not running) game is, for games whose launcher says
+/// where it put them. VALORANT: Riot's product settings name its folder.
+fn installed_path(exe: &str) -> Option<PathBuf> {
+    if !exe.eq_ignore_ascii_case("VALORANT-Win64-Shipping.exe") && !exe.eq_ignore_ascii_case("VALORANT.exe") {
+        return None;
+    }
+    let data = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    let settings = data.join("Riot Games").join("Metadata").join("valorant.live").join("valorant.live.product_settings.yaml");
+    let folder = std::fs::read_to_string(settings)
+        .ok()
+        .and_then(|text| riot_install_folder(&text))
+        .unwrap_or_else(|| PathBuf::from(r"C:\Riot Games\VALORANT\live"));
+    [folder.join("ShooterGame").join("Binaries").join("Win64").join("VALORANT-Win64-Shipping.exe"), folder.join("VALORANT.exe")]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// `product_install_full_path: "C:/Riot Games/VALORANT/live"` from Riot's settings.
+fn riot_install_folder(yaml: &str) -> Option<PathBuf> {
+    yaml.lines()
+        .find_map(|l| l.trim().strip_prefix("product_install_full_path:"))
+        .map(|v| v.trim().trim_matches('"').trim_matches('\''))
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Keeps a game's icon as soon as it's seen running, so Settings can show
@@ -188,6 +214,13 @@ mod tests {
         assert!(!valid_exe("..\\..\\x.exe"));
         assert!(!valid_exe("C:/Windows/notepad.exe"));
         assert!(!valid_exe("notes.txt"));
+    }
+
+    #[test]
+    fn reads_where_riot_installed_valorant() {
+        let yaml = "product_install_full_path: \"D:/Games/Riot Games/VALORANT/live\"\nproduct_install_root: \"D:/Games/Riot Games\"\n";
+        assert_eq!(riot_install_folder(yaml), Some(PathBuf::from("D:/Games/Riot Games/VALORANT/live")));
+        assert_eq!(riot_install_folder("other: 1"), None);
     }
 
     #[test]

@@ -117,7 +117,7 @@ export function AppIcon({ exe, name }: { exe: string; name: string; color?: stri
       live = false;
     };
   }, [exe]);
-  // A picture that won't load falls back to the letter, never a broken image.
+  // A picture that won't load falls back to the brand logo or controller icon, never a broken image.
   if (src) return <img className="src-ic app-ic" src={src} alt="" onError={() => setSrc(null)} />;
   const brand = brandFor(exe) ?? brandFor(name);
   return <span className="src-ic" aria-hidden="true">{brand ? <BrandLogo icon={brand} size={18} /> : <GameController size={18} weight="duotone" />}</span>;
