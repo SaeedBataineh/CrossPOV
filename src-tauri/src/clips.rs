@@ -250,19 +250,46 @@ pub fn recycle_leftovers(root: &Path) {
     }
 }
 
+/// `\\?\C:\x` (what `canonicalize` gives on Windows) as `C:\x`, and
+/// `\\?\UNC\server\share` as `\\server\share`: many Windows functions, the
+/// Recycle Bin's among them, don't accept the `\\?\` form.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn plain_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// Moves a file to the Recycle Bin with Windows' own file operation (no
+/// PowerShell, which can be blocked, slow or restricted).
 #[cfg(windows)]
 fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
-    use crate::ffmpeg::NoWindow;
-    // The path goes in through the environment, so no quoting can break the command.
-    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; \
-                  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:CROSSPOV_RECYCLE, 'OnlyErrorDialogs', 'SendToRecycleBin')";
-    let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .env("CROSSPOV_RECYCLE", path)
-        .no_window()
-        .status()
-        .map_err(|e| format!("Couldn't move the clip to the Recycle Bin: {e}"))?;
-    if status.success() && !path.exists() { Ok(()) } else { Err("Couldn't move the clip to the Recycle Bin.".into()) }
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
+    let plain = plain_path(path);
+    // A list of names, each ending in a 0, the whole list ending in another 0.
+    let from: Vec<u16> = plain.as_os_str().encode_wide().chain([0, 0]).collect();
+    let mut op = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO.0 | FOF_NOCONFIRMATION.0 | FOF_NOERRORUI.0 | FOF_SILENT.0) as u16,
+        ..Default::default()
+    };
+    // SAFETY: `op` and the name list it points to live through the call.
+    let code = unsafe { SHFileOperationW(&mut op) };
+    if code == 0 && !op.fAnyOperationsAborted.as_bool() && !path.exists() {
+        Ok(())
+    } else {
+        let why = format!("Windows said {code:#x}{}", if path.exists() { ", and the file is still there (is it open in another program?)" } else { "" });
+        crate::trail(&format!("recycle bin: couldn't move {} ({why})", plain.display()));
+        Err(format!("Couldn't move the clip to the Recycle Bin ({why})."))
+    }
 }
 
 #[cfg(not(windows))]
@@ -301,6 +328,13 @@ mod tests {
         fs::create_dir_all(dir.join(MY_CLIPS)).unwrap();
         fs::create_dir_all(dir.join(STREAMER_CLIPS)).unwrap();
         dir
+    }
+
+    #[test]
+    fn recycle_bin_gets_plain_paths() {
+        assert_eq!(plain_path(Path::new(r"\\?\C:\Videos\Clip.mp4")), PathBuf::from(r"C:\Videos\Clip.mp4"));
+        assert_eq!(plain_path(Path::new(r"\\?\UNC\nas\clips\a.mp4")), PathBuf::from(r"\\nas\clips\a.mp4"));
+        assert_eq!(plain_path(Path::new("/home/a.mp4")), PathBuf::from("/home/a.mp4"));
     }
 
     #[test]
