@@ -45,8 +45,6 @@ export interface Settings {
   codec: "h264" | "h265";
   /** The game's whole screen (smooth), or just its window. */
   captureMode: "window" | "screen";
-  /** Stretched resolutions: the game's own pixels, or enlarged and shown 16:9. */
-  stretched: "keep" | "stretch";
   // Which games to record
   /** Any app running fullscreen counts as a game. */
   recordFullscreen: boolean;
@@ -102,7 +100,6 @@ export const DEFAULT_SETTINGS: Settings = {
   format: "mp4",
   codec: "h264",
   captureMode: "screen",
-  stretched: "keep",
   recordFullscreen: true,
   customGames: [],
   ignoredGames: [],

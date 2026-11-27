@@ -30,7 +30,7 @@ concurrency:
 jobs:
   ffmpeg:
     # A small FFmpeg with only what CrossPOV uses (~7 MB instead of ~130 MB).
-    # Cached: it only rebuilds when scripts/build-ffmpeg.sh or its patches change.
+    # Cached: it only rebuilds when scripts/build-ffmpeg.sh changes.
     runs-on: ubuntu-latest
     # Debian testing for MinGW 14: Ubuntu's MinGW 11 is too old for Windows'
     # window capture (gfxcapture), which records just the game's window.
@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-out/ffmpeg.exe
-          key: ffmpeg-mingw14-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/ffmpeg-patches/**') }}
+          key: ffmpeg-mingw14-${{ hashFiles('scripts/build-ffmpeg.sh') }}
       - name: Build FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -128,7 +128,7 @@ jobs:
           Copy-Item ffmpeg-small/ffmpeg.exe src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
           $ff = "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
           "FFmpeg size: {0:N1} MB" -f ((Get-Item $ff).Length / 1MB)
-          $need = @{ "-filters" = "ddagrab","gfxcapture","fps","drawbox","setsar","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
+          $need = @{ "-filters" = "fps","setsar","scale"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
           foreach ($k in $need.Keys) {
             $list = & $ff -hide_banner $k 2>&1 | Out-String
             foreach ($n in $need[$k]) { if ($list -notmatch "\b$n\b") { throw "FFmpeg is missing $n ($k)" } }

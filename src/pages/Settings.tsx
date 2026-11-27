@@ -285,21 +285,11 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
             label="Capture"
             help={
               draft.captureMode === "window"
-                ? "Game window: other windows never show up, but Windows hands over game frames unevenly, so clips can look choppy"
-                : "Whole screen: smooth, every frame your monitor shows"
+                ? "Game window: only the game, other windows never show up"
+                : "Whole screen: everything on the game's monitor"
             }
           >
             <Seg label="Capture" value={draft.captureMode} onChange={(v) => set("captureMode", v)} options={[{ value: "screen", label: "Whole screen" }, { value: "window", label: "Game window" }]} />
-          </Row>
-          <Row
-            label="Stretched resolutions"
-            help={
-              draft.stretched === "keep"
-                ? "Keep the game's pixels: recorded exactly as drawn (e.g. 1568×1080), the sharpest"
-                : "Stretch like in-game: enlarged and shown at 16:9, as on your monitor"
-            }
-          >
-            <Seg label="Stretched resolutions" value={draft.stretched} onChange={(v) => set("stretched", v)} options={[{ value: "keep", label: "Keep pixels" }, { value: "stretch", label: "Stretch" }]} />
           </Row>
           <Row
             label="Video format"

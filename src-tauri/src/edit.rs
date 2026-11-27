@@ -7,7 +7,8 @@ use std::path::Path;
 use crate::ffmpeg::VideoEncoder;
 
 /// Discord's upload limit without Nitro is 10 MB; aim a little under it.
-pub const DISCORD_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
+#[cfg(test)]
+const DISCORD_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
 const DISCORD_TARGET_BYTES: f64 = 9.3 * 1024.0 * 1024.0;
 const DISCORD_AUDIO_KBPS: u32 = 96;
 
