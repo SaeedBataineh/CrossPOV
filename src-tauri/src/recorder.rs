@@ -595,27 +595,57 @@ impl Recorder {
             n += 1;
         }
 
-        // Parts where you'd tabbed out (whole-screen recording only). The last
-        // segment's file time is when the clip ends.
+        // The last segment's file time is when the clip ends.
         let clip_end = take
             .last()
             .and_then(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map_or_else(now_ms, |d| d.as_millis() as u64);
-        let clip_start = clip_end.saturating_sub(u64::from(take.len() as u32 * SEGMENT_SECONDS) * 1000);
-        let hide = if plan.window.is_none() {
+        // Parts where you'd tabbed out (whole-screen recording only), for the
+        // clip made of `used`.
+        let hide_for = |used: &[PathBuf]| -> Vec<(f64, f64)> {
+            if plan.window.is_some() {
+                return Vec::new();
+            }
+            let clip_start = clip_end.saturating_sub(u64::from(used.len() as u32 * SEGMENT_SECONDS) * 1000);
             let spans = self.covered.lock().unwrap_or_else(|e| e.into_inner()).spans(now_ms());
             ffmpeg::blackout_ranges(&spans, clip_start, clip_end, 300)
-        } else {
-            Vec::new()
         };
 
+        // Join the segments. FFmpeg takes the sound's format from the first
+        // one; right after recording (re)started, that one can have no sound
+        // yet ("sample rate not set"). Then leave out the first one or two;
+        // as a last resort, save the picture without sound rather than nothing.
         let list = plan.segment_dir.join(format!("concat-{}.txt", now_ms()));
-        fs::write(&list, take.iter().map(|p| concat_list_line(p)).collect::<String>()).map_err(|e| e.to_string())?;
-        let joined = if hide.is_empty() { out.clone() } else { plan.segment_dir.join(format!("joined-{}.{ext}", now_ms())) };
-        let result = run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &joined, settings.format, plan.hevc));
+        let mut joined_ok: Option<(&[PathBuf], Vec<(f64, f64)>, PathBuf)> = None;
+        let mut last_err = String::new();
+        for skip in 0..=2usize.min(take.len().saturating_sub(1)) {
+            let used = &take[skip..];
+            let hide = hide_for(used);
+            let joined = if hide.is_empty() { out.clone() } else { plan.segment_dir.join(format!("joined-{}.{ext}", now_ms())) };
+            fs::write(&list, used.iter().map(|p| concat_list_line(p)).collect::<String>()).map_err(|e| e.to_string())?;
+            match run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &joined, settings.format, plan.hevc, true)) {
+                Ok(()) => {
+                    if skip > 0 {
+                        crate::trail(&format!("clip: left out the first {skip} segment(s), which had no sound yet"));
+                    }
+                    joined_ok = Some((used, hide, joined));
+                    break;
+                }
+                Err(e) => last_err = e,
+            }
+        }
+        if joined_ok.is_none() {
+            let hide = hide_for(take);
+            let joined = if hide.is_empty() { out.clone() } else { plan.segment_dir.join(format!("joined-{}.{ext}", now_ms())) };
+            fs::write(&list, take.iter().map(|p| concat_list_line(p)).collect::<String>()).map_err(|e| e.to_string())?;
+            run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &joined, settings.format, plan.hevc, false))
+                .map_err(|e| format!("Could not save clip: {last_err} | without sound: {e}"))?;
+            crate::trail(&format!("clip: saved without sound ({last_err})"));
+            joined_ok = Some((take, hide, joined));
+        }
         let _ = fs::remove_file(&list);
-        result.map_err(|e| format!("Could not save clip: {e}"))?;
+        let (take, hide, joined) = joined_ok.expect("joined above");
         if !hide.is_empty() {
             let encoder = self.ffmpeg_tools().map_or(VideoEncoder::Cpu, |(_, e)| e);
             let secs: f64 = hide.iter().map(|(a, b)| b - a).sum();

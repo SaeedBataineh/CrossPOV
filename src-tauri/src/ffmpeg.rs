@@ -564,13 +564,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
 }
 
 /// Arguments that join buffer segments into one clip without re-encoding.
-pub fn concat_args(concat_list: &Path, out: &Path, format: Container, hevc: bool) -> Vec<String> {
+/// `with_sound`: false keeps only the picture (when the sound can't be joined).
+pub fn concat_args(concat_list: &Path, out: &Path, format: Container, hevc: bool, with_sound: bool) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i"]
         .iter()
         .map(|s| s.to_string())
         .collect();
     a.push(concat_list.to_string_lossy().into_owned());
-    a.extend(["-map", "0", "-c", "copy"].iter().map(|s| s.to_string()));
+    a.extend(["-map", if with_sound { "0" } else { "0:v" }, "-c", "copy"].iter().map(|s| s.to_string()));
     if hevc && format == Container::Mp4 {
         // The tag browsers (and CrossPOV's player) expect for H.265 in MP4.
         a.extend(["-tag:v", "hvc1"].iter().map(|s| s.to_string()));
@@ -752,9 +753,9 @@ mod tests {
         assert!(amd.contains("-c:v hevc_amf") && amd.contains("-quality quality"), "{amd}");
 
         let list = PathBuf::from("l.txt");
-        let mp4 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, true).join(" ");
+        let mp4 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, true, true).join(" ");
         assert!(mp4.contains("-tag:v hvc1"), "{mp4}");
-        let h264 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, false).join(" ");
+        let h264 = concat_args(&list, &PathBuf::from("c.mp4"), Container::Mp4, false, true).join(" ");
         assert!(!h264.contains("hvc1"));
     }
 
