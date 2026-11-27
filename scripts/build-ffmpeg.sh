@@ -72,6 +72,11 @@ grep -q 'wgctx->pool_size = frame_size;' libavfilter/vsrc_gfxcapture_winrt.cpp |
 # frame while the game sends none (alt-tabbed). See the patch for why.
 perl "$HERE/ffmpeg-patches/gfxcapture-keep-going.pl" libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q 'repeat_last_frame(outlink)' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't keep window capture on real time" >&2; exit 1; }
+# Screen capture of a full-screen game records only the game: new pictures
+# only while its window is in front (only_hwnd), the last one repeated while
+# you're tabbed out. See the patch.
+perl "$HERE/ffmpeg-patches/ddagrab-game-only.pl" libavfilter/vsrc_ddagrab.c
+grep -q 'only_hwnd' libavfilter/vsrc_ddagrab.c || { echo "couldn't make screen capture game-only" >&2; exit 1; }
 # Window capture enlarges with a cubic B-spline (its "bilinear" and "bicubic"
 # both use it), which smooths as it enlarges: stretched clips looked blurry.
 # Swap in Catmull-Rom, the sharp bicubic (9 bilinear samples; MIT, after

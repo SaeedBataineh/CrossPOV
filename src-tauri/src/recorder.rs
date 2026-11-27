@@ -389,7 +389,7 @@ impl Recorder {
         if let Some(g) = game.as_ref().filter(|g| g.hwnd != 0 && inner.screen_for != Some(g.hwnd)) {
             let content = inner.content_size.filter(|(h, _)| *h == g.hwnd).map(|(_, s)| s);
             if inner.settings.capture == crate::settings::Capture::Window && fills_screen(g.window_size, g.screen_size, content) {
-                crate::trail("recording: the game fills its screen; recording the screen (steadier than window capture), with tabbed-out parts hidden");
+                crate::trail("recording: the game fills its screen; recording the screen (steadier than window capture), only while the game is in front");
                 inner.screen_for = Some(g.hwnd);
             }
         }
@@ -405,7 +405,11 @@ impl Recorder {
             // Not the window's size: it wobbles (VALORANT reports 1080, then
             // 1079), and a restart empties the replay buffer. Window capture
             // resizes every frame to the size it started with anyway.
-            window.unwrap_or(0)
+            match (window, game.as_ref().map(|g| g.hwnd).filter(|h| inner.screen_for == Some(*h))) {
+                (Some(h), _) => format!("w{h}"),
+                (None, Some(h)) => format!("s{h}"),
+                _ => "0".into(),
+            }
         );
         inner.status.game = game.clone();
 
@@ -485,6 +489,7 @@ impl Recorder {
                 settings.codec,
             ));
             let mut g = game.clone().unwrap_or_default();
+            let only_window = Some(g.hwnd).filter(|h| *h != 0 && inner.screen_for == Some(*h));
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
@@ -503,7 +508,7 @@ impl Recorder {
                     String::new()
                 }
             ));
-            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g) {
+            match self.start(ffmpeg_path, &settings, encoder, compat, source, key, &g, only_window) {
                 Ok(running) => {
                     crate::trail("recording: started");
                     inner.status.state = RecState::Recording;
@@ -546,6 +551,7 @@ impl Recorder {
         (self.listener)(&status);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn start(
         &self,
         ffmpeg_path: &Path,
@@ -555,6 +561,7 @@ impl Recorder {
         source: VideoSource,
         key: String,
         game: &Game,
+        only_window: Option<u64>,
     ) -> Result<Running, String> {
         let segment_dir = self.work_dir.join("buffer");
         let _ = fs::remove_dir_all(&segment_dir);
@@ -572,6 +579,7 @@ impl Recorder {
             hevc: settings.codec == crate::settings::Codec::H265,
             window: (game.hwnd != 0).then_some(game.hwnd),
             source_size: if game.hwnd != 0 { game.window_size } else { game.screen_size },
+            only_window,
         };
         let log = File::create(self.work_dir.join("ffmpeg.log")).map_err(|e| e.to_string())?;
         let mut child = Command::new(ffmpeg_path)
@@ -669,7 +677,8 @@ impl Recorder {
         // Parts where you'd tabbed out (whole-screen recording only), for the
         // clip made of `used`.
         let hide_for = |used: &[PathBuf]| -> Vec<(f64, f64)> {
-            if plan.window.is_some() {
+            // Only the game was recorded: nothing to hide.
+            if plan.window.is_some() || plan.only_window.is_some() {
                 return Vec::new();
             }
             let clip_start = clip_end.saturating_sub(u64::from(used.len() as u32 * SEGMENT_SECONDS) * 1000);
@@ -872,7 +881,7 @@ mod tests {
         *rec.ffmpeg.lock().unwrap() = Some((ff.clone(), VideoEncoder::Cpu));
         let key = recording_key(&settings);
         let running = rec
-            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default())
+            .start(&ff, &settings, VideoEncoder::Cpu, false, VideoSource::TestPattern, key, &Game::default(), None)
             .expect("start recording");
         rec.lock().running = Some(running);
 

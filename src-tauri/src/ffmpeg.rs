@@ -338,6 +338,9 @@ pub struct RecordPlan {
     /// Size of the picture being captured (the game window, or the screen as
     /// Windows runs it), if known.
     pub source_size: Option<(u32, u32)>,
+    /// Screen capture of a full-screen game: the game's window (HWND). New
+    /// pictures only while it's in front; the last one is kept meanwhile.
+    pub only_window: Option<u64>,
 }
 
 impl RecordPlan {
@@ -429,7 +432,13 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                     }
                     a.push(src);
                 }
-                None => a.push(format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx)),
+                None => {
+                    let mut src = format!("ddagrab=output_idx={}:framerate={fps}:draw_mouse=0", plan.output_idx);
+                    if let Some(hwnd) = plan.only_window {
+                        src.push_str(&format!(":only_hwnd={hwnd}"));
+                    }
+                    a.push(src);
+                }
             }
         }
         VideoSource::TestPattern => {
@@ -699,7 +708,7 @@ mod tests {
     use super::*;
 
     fn plan(source: VideoSource, encoder: VideoEncoder, audio: bool) -> RecordPlan {
-        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None, source_size: None }
+        RecordPlan { source, encoder, audio, compat: false, segment_dir: PathBuf::from("/tmp/buf"), segment_count: 34, screen_height: None, output_idx: 0, hevc: false, window: None, source_size: None, only_window: None }
     }
 
     fn joined(s: &Settings, p: &RecordPlan) -> String {
@@ -713,6 +722,9 @@ mod tests {
         assert!(args.contains("ddagrab=output_idx=0:framerate=60"));
         let second = joined(&Settings::default(), &RecordPlan { output_idx: 1, ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
         assert!(second.contains("ddagrab=output_idx=1:"), "records the screen the game is on");
+        assert!(!args.contains("only_hwnd"), "whole screen: everything on it");
+        let game_only = joined(&Settings::default(), &RecordPlan { only_window: Some(4242), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) });
+        assert!(game_only.contains("draw_mouse=0:only_hwnd=4242"), "full-screen game: only while it's in front: {game_only}");
         assert!(!args.contains("hwdownload"), "{args}");
         assert!(args.contains("-map 0:v"));
         assert!(args.contains("-c:v h264_nvenc"));
