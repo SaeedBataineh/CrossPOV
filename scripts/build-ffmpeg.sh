@@ -21,6 +21,7 @@
 # Intel GPUs encode through Media Foundation (h264_mf), so there is no QSV.
 set -euo pipefail
 
+HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$(realpath -m "${1:?output path}")
 WORK=$(realpath -m "${2:-$(mktemp -d)}")
 FFMPEG_TAG=n8.1.3
@@ -49,6 +50,15 @@ cd ffmpeg
 # bunched up (Windows composes them unevenly), the rest are dropped. Keep 4.
 sed -i 's/^#define CAPTURE_POOL_SIZE 2$/#define CAPTURE_POOL_SIZE 4/' libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q '^#define CAPTURE_POOL_SIZE 4$' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't set the window capture pool size" >&2; exit 1; }
+# Window capture enlarges with a cubic B-spline (its "bilinear" and "bicubic"
+# both use it), which smooths as it enlarges: stretched clips looked blurry.
+# Swap in Catmull-Rom, the sharp bicubic (9 bilinear samples; MIT, after
+# TheRealMJP's SampleTextureCatmullRom).
+CATMULL="$HERE/ffmpeg-patches/gfxcapture-catmull-rom.hlsl" perl -0pi -e '
+  local $/; open my $f, "<", $ENV{CATMULL} or die "patch file: $!"; my $new = <$f>;
+  s/    float4 texBicubic\(.*?(?=    float4 unpremultiply\()/$new/s or die "texBicubic not found\n";
+' libavfilter/vsrc_gfxcapture_shader.h
+grep -q 'float2 w12 = w1 + w2;' libavfilter/vsrc_gfxcapture_shader.h || { echo "couldn't switch window capture to Catmull-Rom" >&2; exit 1; }
 PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --prefix="$PREFIX" \
   --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \

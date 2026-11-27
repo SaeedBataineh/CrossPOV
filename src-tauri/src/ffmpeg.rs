@@ -371,10 +371,11 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                         // scaling by one line would soften every row.
                         let (sw, sh) = plan.source_size.unwrap_or((w, h));
                         let tiny = w.abs_diff(sw) <= 2 && h.abs_diff(sh) <= 2;
-                        // Bilinear, not window capture's "bicubic": that one is a
-                        // cubic B-spline, which smooths as it enlarges and made
-                        // stretched clips visibly blurry.
-                        let mode = if tiny { "crop" } else { "scale:scale_mode=bilinear" };
+                        // Window capture's scaling, which our FFmpeg build swaps
+                        // from a blurry cubic B-spline to Catmull-Rom (sharp
+                        // bicubic; scripts/ffmpeg-patches). Its "bilinear" runs
+                        // the same code, so the name hardly matters.
+                        let mode = if tiny { "crop" } else { "scale:scale_mode=bicubic" };
                         src.push_str(&format!(":width={w}:height={h}:resize_mode={mode}"));
                     }
                     a.push(src);
@@ -760,7 +761,7 @@ mod tests {
         let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
         let a = joined(&s, &p);
-        assert!(a.contains(":width=1920:height=1322:resize_mode=scale:scale_mode=bilinear"), "not the B-spline: {a}");
+        assert!(a.contains(":width=1920:height=1322:resize_mode=scale:scale_mode=bicubic"), "{a}");
         assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
         // A big window shrunk to the chosen height the same way.
         assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
