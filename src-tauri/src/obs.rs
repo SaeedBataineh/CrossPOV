@@ -1,14 +1,16 @@
-//! Recording a full-screen game with OBS Studio (the slim, unmodified copy
-//! tools.rs downloads). OBS's Game Capture takes the game's frames from the
-//! game itself (its own signed hook, which Vanguard allows), so it records
-//! games that Windows shows straight on the screen, where Windows' capture
-//! APIs see what's behind the game instead.
+//! All recording goes through OBS Studio (the slim, unmodified copy tools.rs
+//! downloads). OBS's Game Capture takes a game's frames from the game itself
+//! (its own signed hook, which Vanguard allows), so it records games that
+//! Windows shows straight on the screen, where Windows' capture APIs saw
+//! what's behind the game instead. Whole-screen mode uses OBS's Display
+//! Capture.
 //!
-//! OBS runs hidden, in portable mode (its settings in its own folder, apart
-//! from any OBS the user has), tied to CrossPOV (closes with it). CrossPOV
-//! sets it up and drives it through obs-websocket on 127.0.0.1 with a random
-//! password: Game Capture of the game's .exe, its sound, the mic, and a
-//! replay buffer; F9 saves the replay.
+//! OBS starts hidden as soon as CrossPOV does and stays running (ready in an
+//! instant when a game starts), in portable mode (its settings in its own
+//! folder, apart from any OBS the user has), tied to CrossPOV (closes with
+//! it), with no window and no tray icon. CrossPOV drives it through
+//! obs-websocket on 127.0.0.1 with a random password: what to capture, the
+//! sound, and a replay buffer; F9 saves the replay.
 
 use std::{
     fs,
@@ -24,50 +26,72 @@ use sha2::{Digest, Sha256};
 
 use crate::ffmpeg::VideoEncoder;
 
-/// What to record, from CrossPOV's settings and the detected game.
+/// Settings OBS starts with (its profile). A change restarts OBS.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Setup {
-    /// The game's .exe, window title and class (Game Capture finds the window by them).
-    pub exe: String,
-    pub title: String,
-    pub class: String,
-    /// The game's picture size (OBS's canvas) and the recorded size.
-    pub size: (u32, u32),
-    pub out_size: (u32, u32),
-    pub fps: u32,
+pub struct Profile {
     pub encoder: VideoEncoder,
     pub hevc: bool,
     pub kbps: u32,
     pub buffer_seconds: u32,
     /// "mp4" or "mkv".
     pub format: &'static str,
-    /// The game's sound (volume 0..1), the mic (volume 0..1), noise
-    /// suppression, and whether the mic gets its own track.
-    pub game_audio: Option<f32>,
-    pub mic: Option<f32>,
-    pub denoise_mic: bool,
+    /// The mic on its own track (track 2).
     pub separate_tracks: bool,
     /// Where OBS writes saved replays before CrossPOV moves them.
     pub replay_dir: PathBuf,
 }
 
-const GAME: &str = "CrossPOV Game";
+/// What OBS records.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    /// A game, by its .exe and window class (Game Capture).
+    Game { exe: String, class: String },
+    /// The monitor whose top-left corner is at this desktop position (Display Capture).
+    Screen { origin: (i32, i32) },
+}
+
+/// What to record right now. A change is applied to the running OBS.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Capture {
+    pub source: Source,
+    /// OBS's canvas (the picture's size) and the recorded size.
+    pub size: (u32, u32),
+    pub out_size: (u32, u32),
+    pub fps: u32,
+    /// The game's sound, or all desktop sound (volume 0..1).
+    pub game_audio: Option<f32>,
+    pub desktop_audio: bool,
+    /// Extra apps' sound: (.exe, volume 0..1).
+    pub apps: Vec<(String, f32)>,
+    /// The mic (volume 0..1) and its noise suppression.
+    pub mic: Option<f32>,
+    pub denoise_mic: bool,
+    pub separate_tracks: bool,
+}
+
+const VIDEO: &str = "CrossPOV Video";
 const GAME_AUDIO: &str = "CrossPOV Game Audio";
+const DESKTOP_AUDIO: &str = "CrossPOV Desktop Audio";
 const MIC: &str = "CrossPOV Mic";
+const APP_AUDIO: &str = "CrossPOV App";
 const PROFILE: &str = "CrossPOV";
 
-/// A running, recording OBS.
-pub struct Session {
+/// The running OBS.
+pub struct Obs {
     child: Child,
     ws: Ws,
     next_id: u64,
     /// Events that came in while waiting for a request's answer.
     events: Vec<Value>,
     config: PathBuf,
-    pub setup: Setup,
+    pub profile: Profile,
+    /// What it records now (None: idle).
+    pub capture: Option<Capture>,
+    /// Inputs CrossPOV made, to remove when the capture changes.
+    inputs: Vec<String>,
 }
 
-impl Drop for Session {
+impl Drop for Obs {
     fn drop(&mut self) {
         let _ = self.request("StopReplayBuffer", json!({}));
         let _ = self.child.kill();
@@ -75,15 +99,15 @@ impl Drop for Session {
     }
 }
 
-impl Session {
-    /// Starts OBS from `obs_dir` (holding bin\64bit\obs64.exe), sets it up for
-    /// `setup` and starts the replay buffer.
-    pub fn start(obs_dir: &Path, setup: Setup) -> Result<Session, String> {
+impl Obs {
+    /// Starts OBS from `obs_dir` (holding bin\64bit\obs64.exe), hidden and
+    /// idle, and connects to it.
+    pub fn launch(obs_dir: &Path, profile: Profile) -> Result<Obs, String> {
         let config = obs_dir.join("config").join("obs-studio");
         let port = free_port().ok_or("no free local port for OBS")?;
         let password = random_hex(16);
-        write_config(&config, &setup, port, &password).map_err(|e| format!("Couldn't write OBS's settings: {e}"))?;
-        fs::create_dir_all(&setup.replay_dir).map_err(|e| e.to_string())?;
+        write_config(&config, &profile, port, &password).map_err(|e| format!("Couldn't write OBS's settings: {e}"))?;
+        fs::create_dir_all(&profile.replay_dir).map_err(|e| e.to_string())?;
 
         let bin = obs_dir.join("bin").join("64bit");
         let mut cmd = std::process::Command::new(bin.join("obs64.exe"));
@@ -108,8 +132,9 @@ impl Session {
         let child = cmd.spawn().map_err(|e| format!("Couldn't start OBS: {e}"))?;
         crate::procs::tie_to_app(&child);
 
-        // OBS takes a few seconds to load; its websocket comes up with it.
-        let deadline = Instant::now() + Duration::from_secs(40);
+        // OBS takes a few seconds to load; its websocket comes up with it
+        // (and answers "not ready" until it has: see request).
+        let deadline = Instant::now() + Duration::from_secs(60);
         let ws = loop {
             match Ws::connect(port).and_then(|mut ws| identify(&mut ws, &password).map(|_| ws)) {
                 Ok(ws) => break ws,
@@ -121,55 +146,82 @@ impl Session {
                 Err(_) => std::thread::sleep(Duration::from_millis(500)),
             }
         };
-        let mut s = Session { child, ws, next_id: 1, events: Vec::new(), config, setup };
-        s.configure()?;
-        hide_tray_icon(s.child.id());
-        Ok(s)
+        let mut obs = Obs { child, ws, next_id: 1, events: Vec::new(), config, profile, capture: None, inputs: Vec::new() };
+        // Ready: the first request waits until OBS has finished loading.
+        obs.request("GetVersion", json!({}))?;
+        hide_tray_icon(obs.child.id());
+        Ok(obs)
     }
 
-    fn configure(&mut self) -> Result<(), String> {
-        let st = self.setup.clone();
+    /// Records `capture` from now on (`title`: the game window's title, for
+    /// finding it), or nothing (None). The replay buffer restarts.
+    pub fn apply(&mut self, capture: Option<Capture>, title: &str) -> Result<(), String> {
+        let _ = self.request("StopReplayBuffer", json!({}));
+        self.wait_replay_buffer_stopped();
+        for name in std::mem::take(&mut self.inputs) {
+            let _ = self.request("RemoveInput", json!({ "inputName": name }));
+        }
+        self.capture = None;
+        let Some(c) = capture else { return Ok(()) };
+
         self.request(
             "SetVideoSettings",
-            json!({ "baseWidth": st.size.0, "baseHeight": st.size.1, "outputWidth": st.out_size.0, "outputHeight": st.out_size.1, "fpsNumerator": st.fps, "fpsDenominator": 1 }),
+            json!({ "baseWidth": c.size.0, "baseHeight": c.size.1, "outputWidth": c.out_size.0, "outputHeight": c.out_size.1, "fpsNumerator": c.fps, "fpsDenominator": 1 }),
         )?;
         let scene = self.request("GetCurrentProgramScene", json!({}))?;
         let scene = scene.get("currentProgramSceneName").or_else(|| scene.get("sceneName")).and_then(Value::as_str).unwrap_or("Scene").to_string();
-        for name in [GAME, GAME_AUDIO, MIC] {
+        // Inputs a crashed CrossPOV left in OBS's saved scene.
+        for name in [VIDEO, GAME_AUDIO, DESKTOP_AUDIO, MIC] {
             let _ = self.request("RemoveInput", json!({ "inputName": name }));
         }
-        let window = window_spec(&st.title, &st.class, &st.exe);
-        self.request(
-            "CreateInput",
-            json!({
-                "sceneName": scene, "inputName": GAME, "inputKind": "game_capture", "sceneItemEnabled": true,
-                "inputSettings": {
+
+        match &c.source {
+            Source::Game { exe, class } => {
+                let window = window_spec(title, class, exe);
+                self.create(&scene, VIDEO, "game_capture", json!({
                     "capture_mode": "window", "window": window, "priority": 2,
                     "anti_cheat_hook": true, "capture_cursor": false, "capture_overlays": false,
                     "allow_transparency": false, "limit_framerate": false, "hook_rate": 1
+                }))?;
+            }
+            Source::Screen { origin } => {
+                // Display Capture, Windows 10 method; the monitor is picked by
+                // its position among those OBS lists ("... @ 0,0 ...").
+                self.create(&scene, VIDEO, "monitor_capture", json!({ "method": 2, "capture_cursor": false }))?;
+                let at = format!("@ {},{}", origin.0, origin.1);
+                if let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": VIDEO, "propertyName": "monitor_id" })) {
+                    let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
+                    if let Some(item) = items.iter().find(|i| i["itemName"].as_str().is_some_and(|n| n.contains(&at))) {
+                        let _ = self.request("SetInputSettings", json!({ "inputName": VIDEO, "inputSettings": { "monitor_id": item["itemValue"] } }));
+                    }
                 }
-            }),
-        )?;
-        // Tracks: 1 = everything, or the game on 1 and the mic on 2.
-        let tracks = |one: bool, two: bool| json!({ "1": one, "2": two, "3": false, "4": false, "5": false, "6": false });
-        if let Some(vol) = st.game_audio {
-            self.request(
-                "CreateInput",
-                json!({ "sceneName": scene, "inputName": GAME_AUDIO, "inputKind": "wasapi_process_output_capture", "sceneItemEnabled": true,
-                        "inputSettings": { "window": window, "priority": 2 } }),
-            )?;
-            let _ = self.request("SetInputVolume", json!({ "inputName": GAME_AUDIO, "inputVolumeMul": vol }));
-            let _ = self.request("SetInputAudioTracks", json!({ "inputName": GAME_AUDIO, "inputAudioTracks": tracks(true, false) }));
+            }
         }
-        if let Some(vol) = st.mic {
-            self.request(
-                "CreateInput",
-                json!({ "sceneName": scene, "inputName": MIC, "inputKind": "wasapi_input_capture", "sceneItemEnabled": true,
-                        "inputSettings": { "device_id": "default" } }),
-            )?;
-            let _ = self.request("SetInputVolume", json!({ "inputName": MIC, "inputVolumeMul": vol }));
-            let _ = self.request("SetInputAudioTracks", json!({ "inputName": MIC, "inputAudioTracks": tracks(!st.separate_tracks, st.separate_tracks) }));
-            if st.denoise_mic {
+
+        // Track 1: everything, or all but the mic (on track 2).
+        let tracks = |one: bool, two: bool| json!({ "1": one, "2": two, "3": false, "4": false, "5": false, "6": false });
+        let window_of = |exe: &str, class: &str, title: &str| window_spec(title, class, exe);
+        if let Some(vol) = c.game_audio {
+            if c.desktop_audio {
+                self.create(&scene, DESKTOP_AUDIO, "wasapi_output_capture", json!({ "device_id": "default" }))?;
+                self.audio(DESKTOP_AUDIO, vol, tracks(true, false));
+            } else if let Source::Game { exe, class } = &c.source {
+                self.create(&scene, GAME_AUDIO, "wasapi_process_output_capture", json!({ "window": window_of(exe, class, title), "priority": 2 }))?;
+                self.audio(GAME_AUDIO, vol, tracks(true, false));
+            }
+        }
+        if !c.desktop_audio {
+            for (i, (exe, vol)) in c.apps.iter().enumerate() {
+                let name = format!("{APP_AUDIO} {}", i + 1);
+                if self.create(&scene, &name, "wasapi_process_output_capture", json!({ "window": window_of(exe, "", ""), "priority": 2 })).is_ok() {
+                    self.audio(&name, *vol, tracks(true, false));
+                }
+            }
+        }
+        if let Some(vol) = c.mic {
+            self.create(&scene, MIC, "wasapi_input_capture", json!({ "device_id": "default" }))?;
+            self.audio(MIC, vol, tracks(!c.separate_tracks, c.separate_tracks));
+            if c.denoise_mic {
                 let _ = self.request(
                     "CreateSourceFilter",
                     json!({ "sourceName": MIC, "filterName": "Noise suppression", "filterKind": "noise_suppress_filter_v2", "filterSettings": { "method": "rnnoise" } }),
@@ -177,11 +229,39 @@ impl Session {
             }
         }
         self.request("StartReplayBuffer", json!({}))?;
+        self.capture = Some(c);
         Ok(())
+    }
+
+    fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<(), String> {
+        let _ = self.request("RemoveInput", json!({ "inputName": name }));
+        self.request("CreateInput", json!({ "sceneName": scene, "inputName": name, "inputKind": kind, "sceneItemEnabled": true, "inputSettings": settings }))?;
+        self.inputs.push(name.to_string());
+        Ok(())
+    }
+
+    fn audio(&mut self, name: &str, volume: f32, tracks: Value) {
+        let _ = self.request("SetInputVolume", json!({ "inputName": name, "inputVolumeMul": volume }));
+        let _ = self.request("SetInputAudioTracks", json!({ "inputName": name, "inputAudioTracks": tracks }));
+    }
+
+    /// Stopping the replay buffer takes a moment; video settings can only
+    /// change once it has.
+    fn wait_replay_buffer_stopped(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            match self.request("GetReplayBufferStatus", json!({})) {
+                Ok(s) if s["outputActive"].as_bool() == Some(true) => std::thread::sleep(Duration::from_millis(100)),
+                _ => return,
+            }
+        }
     }
 
     /// Saves the replay buffer; returns the saved file once OBS has written it.
     pub fn save_replay(&mut self) -> Result<PathBuf, String> {
+        if self.capture.is_none() {
+            return Err("Not recording right now. Clips are saved while a game is open.".into());
+        }
         self.events.clear();
         self.request("SaveReplayBuffer", json!({}))?;
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -235,15 +315,15 @@ impl Session {
         let dir = self.config.join("logs");
         let newest = fs::read_dir(&dir).ok().and_then(|it| it.flatten().max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok()));
         let Some(text) = newest.and_then(|e| fs::read_to_string(e.path()).ok()) else { return Vec::new() };
-        let wanted = |l: &str| ["game-capture", "game_capture", "error", "failed", "encoder", "Replay Buffer", "skipped"].iter().any(|k| l.contains(k));
+        let wanted = |l: &str| ["game-capture", "game_capture", "monitor_capture", "error", "failed", "encoder", "Replay Buffer", "skipped"].iter().any(|k| l.contains(k));
         let lines: Vec<String> = text.lines().filter(|l| wanted(l)).map(|l| l.chars().take(200).collect()).collect();
         lines.into_iter().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect()
     }
 
     /// One obs-websocket request. "Not ready" (207: OBS still loading, its
-    /// websocket comes up first) is retried for up to 20 s.
+    /// websocket comes up first) is retried for up to 30 s.
     fn request(&mut self, kind: &str, data: Value) -> Result<Value, String> {
-        let until = Instant::now() + Duration::from_secs(20);
+        let until = Instant::now() + Duration::from_secs(30);
         loop {
             match self.request_once(kind, data.clone()) {
                 Err((207, _)) if Instant::now() < until => std::thread::sleep(Duration::from_millis(500)),
@@ -298,9 +378,9 @@ fn encoder_id(enc: VideoEncoder, hevc: bool) -> &'static str {
 }
 
 /// OBS's settings before it starts: no first-run wizard, starts in the tray,
-/// our profile (video, no desktop/mic devices of its own, replay buffer, the
+/// our profile (no desktop/mic devices of its own, replay buffer, the
 /// encoder) and obs-websocket with our port and password.
-fn write_config(config: &Path, st: &Setup, port: u16, password: &str) -> io::Result<()> {
+fn write_config(config: &Path, p: &Profile, port: u16, password: &str) -> io::Result<()> {
     let app = format!(
         "[General]\r\nFirstRun=true\r\nEnableAutoUpdates=false\r\nConfirmOnExit=false\r\n\r\n[BasicWindow]\r\nSysTrayEnabled=true\r\nSysTrayWhenStarted=true\r\nSysTrayMinimizeToTray=true\r\n\r\n[Basic]\r\nProfile={PROFILE}\r\nProfileDir={PROFILE}\r\nSceneCollection={PROFILE}\r\nSceneCollectionFile={PROFILE}\r\n"
     );
@@ -310,24 +390,19 @@ fn write_config(config: &Path, st: &Setup, port: u16, password: &str) -> io::Res
 
     let profile = config.join("basic").join("profiles").join(PROFILE);
     fs::create_dir_all(&profile)?;
-    let tracks = if st.mic.is_some() && st.separate_tracks { 3 } else { 1 };
+    let tracks = if p.separate_tracks { 3 } else { 1 };
     let ini = format!(
-        "[General]\r\nName={PROFILE}\r\n\r\n[Video]\r\nBaseCX={bw}\r\nBaseCY={bh}\r\nOutputCX={ow}\r\nOutputCY={oh}\r\nFPSType=1\r\nFPSInt={fps}\r\n\r\n\
+        "[General]\r\nName={PROFILE}\r\n\r\n[Video]\r\nBaseCX=1920\r\nBaseCY=1080\r\nOutputCX=1920\r\nOutputCY=1080\r\nFPSType=1\r\nFPSInt=60\r\n\r\n\
          [Audio]\r\nSampleRate=48000\r\nChannelSetup=Stereo\r\nDesktopDevice1=disabled\r\nDesktopDevice2=disabled\r\nAuxDevice1=disabled\r\nAuxDevice2=disabled\r\nAuxDevice3=disabled\r\nAuxDevice4=disabled\r\n\r\n\
          [Output]\r\nMode=Advanced\r\n\r\n\
          [AdvOut]\r\nRecType=Standard\r\nRecFilePath={dir}\r\nRecFormat2={fmt}\r\nRecEncoder={enc}\r\nRecTracks={tracks}\r\nRecRB=true\r\nRecRBTime={secs}\r\nRecRBSize=8192\r\nRecRBPrefix=Replay\r\n",
-        bw = st.size.0,
-        bh = st.size.1,
-        ow = st.out_size.0,
-        oh = st.out_size.1,
-        fps = st.fps,
-        dir = st.replay_dir.display(),
-        fmt = st.format,
-        enc = encoder_id(st.encoder, st.hevc),
-        secs = st.buffer_seconds,
+        dir = p.replay_dir.display(),
+        fmt = p.format,
+        enc = encoder_id(p.encoder, p.hevc),
+        secs = p.buffer_seconds,
     );
     fs::write(profile.join("basic.ini"), ini)?;
-    let encoder = json!({ "rate_control": "VBR", "bitrate": st.kbps, "max_bitrate": st.kbps * 3 / 2, "keyint_sec": 2, "preset2": "p5", "tune": "hq", "multipass": "disabled", "bf": 2 });
+    let encoder = json!({ "rate_control": "VBR", "bitrate": p.kbps, "max_bitrate": p.kbps * 3 / 2, "keyint_sec": 2, "preset2": "p5", "tune": "hq", "multipass": "disabled", "bf": 2 });
     fs::write(profile.join("recordEncoder.json"), encoder.to_string())?;
 
     let ws = config.join("plugin_config").join("obs-websocket");

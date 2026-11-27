@@ -109,10 +109,10 @@ struct Inner {
     no_screen_for: Option<u64>,
     /// Logged that the game's window isn't known yet (once per wait).
     waiting_for_window: bool,
-    /// A full-screen game recorded by OBS's Game Capture (see obs.rs), and
-    /// the recording key it was set up for.
-    obs: Option<(String, Arc<Mutex<crate::obs::Session>>)>,
-    /// When OBS last couldn't record: FFmpeg meanwhile, OBS tried again a minute later.
+    /// OBS, which records everything (see obs.rs): started with CrossPOV and
+    /// kept running, pointed at the game when there is one.
+    obs: Option<Arc<Mutex<crate::obs::Obs>>>,
+    /// When OBS last failed to start or record: tried again 30 s later.
     obs_failed: Option<Instant>,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
@@ -425,9 +425,147 @@ impl Recorder {
                 always.then(Game::desktop)
             });
             let playing = game.is_some();
-            self.tick(game, &path, detected, source);
+            if source == VideoSource::Desktop {
+                self.tick_obs(game, detected);
+            } else {
+                self.tick(game, &path, detected, source); // test pattern (tests)
+            }
             thread::sleep(if playing { POLL } else { POLL_IDLE });
         }
+    }
+
+    /// One step of recording with OBS: keep OBS running (started with
+    /// CrossPOV, restarted if it stops or the encoder settings change) and
+    /// pointed at the game, or idle when there's none.
+    fn tick_obs(&self, game: Option<Game>, detected: VideoEncoder) {
+        let mut inner = self.lock();
+        let settings = inner.settings.clone();
+        let game_only = settings.capture == crate::settings::Capture::Window;
+        let no_window = game_only && game.as_ref().is_some_and(|g| g.hwnd == 0);
+        if no_window && !inner.waiting_for_window {
+            crate::trail("recording: waiting for the game's window (Game window mode never records the desktop)");
+        }
+        inner.waiting_for_window = no_window;
+        let want = game.is_some() && !inner.halted && !no_window;
+        inner.status.game = game.clone();
+        if inner.halted {
+            return;
+        }
+
+        let encoder = ffmpeg::resolve_encoder(settings.encoder, detected);
+        let profile = crate::obs::Profile {
+            encoder,
+            hevc: settings.codec == crate::settings::Codec::H265,
+            kbps: ffmpeg::bitrate_kbps(&settings),
+            buffer_seconds: settings.buffer_seconds,
+            format: container_ext(settings.format),
+            separate_tracks: settings.microphone && settings.separate_tracks,
+            replay_dir: self.work_dir.join("obs-replays"),
+        };
+        // OBS running, with these encoder settings?
+        if let Some(obs) = inner.obs.clone() {
+            let mut o = obs.lock().unwrap_or_else(|e| e.into_inner());
+            if !o.alive() {
+                crate::trail("recording: OBS stopped; starting it again");
+                drop(o);
+                inner.obs = None;
+            } else if o.profile != profile {
+                crate::trail("recording: encoder settings changed; restarting OBS");
+                drop(o);
+                inner.obs = None;
+            }
+        }
+        if inner.obs.is_none() {
+            if inner.obs_failed.is_some_and(|t| t.elapsed() < Duration::from_secs(30)) {
+                return;
+            }
+            let Some(dir) = crate::tools::obs_dir() else {
+                inner.status.state = RecState::Starting;
+                inner.status.message = Some("Getting the recorder ready (one-time download)…".into());
+                let status = inner.status.clone();
+                drop(inner);
+                (self.listener)(&status);
+                return;
+            };
+            crate::trail(&format!("recording: starting OBS ({})", encoder.label()));
+            drop(inner);
+            // OBS takes a few seconds to load: not while holding the lock.
+            let launched = crate::obs::Obs::launch(&dir, profile);
+            inner = self.lock();
+            match launched {
+                Ok(obs) => {
+                    crate::trail("recording: OBS ready");
+                    inner.obs = Some(Arc::new(Mutex::new(obs)));
+                    inner.obs_failed = None;
+                }
+                Err(e) => {
+                    crate::trail(&format!("recording: OBS couldn't start ({e}); trying again in 30 s"));
+                    inner.obs_failed = Some(Instant::now());
+                    inner.status.state = RecState::Error;
+                    inner.status.message = Some(format!("The recorder couldn't start: {e}"));
+                    let status = inner.status.clone();
+                    drop(inner);
+                    (self.listener)(&status);
+                    return;
+                }
+            }
+        }
+
+        // What it should record now.
+        let desired = game.as_ref().filter(|_| want).map(|g| {
+            let size = if game_only { g.window_size.or(g.screen_size) } else { g.screen_size }.unwrap_or((1920, 1080));
+            crate::obs::Capture {
+                source: if game_only {
+                    crate::obs::Source::Game { exe: g.exe.clone(), class: crate::obs::window_names(g.hwnd).1 }
+                } else {
+                    crate::obs::Source::Screen { origin: g.screen_origin }
+                },
+                size,
+                out_size: obs_output_size(size, settings.resolution),
+                fps: settings.fps,
+                game_audio: settings.game_audio.then(|| settings.game_volume as f32 / 100.0),
+                desktop_audio: settings.audio_mode == crate::settings::AudioMode::Desktop,
+                apps: settings.apps.iter().filter(|a| a.enabled).map(|a| (a.exe.clone(), a.volume as f32 / 100.0)).collect(),
+                mic: settings.microphone.then(|| settings.mic_volume as f32 / 100.0),
+                denoise_mic: settings.microphone && settings.mic_noise_suppression,
+                separate_tracks: settings.microphone && settings.separate_tracks,
+            }
+        });
+        let Some(obs) = inner.obs.clone() else { return };
+        let current = obs.lock().unwrap_or_else(|e| e.into_inner()).capture.clone();
+        if desired != current {
+            match &desired {
+                Some(c) => crate::trail(&format!(
+                    "recording: {} with OBS {} ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
+                    game.as_ref().map_or("", |g| g.exe.as_str()),
+                    if game_only { "Game Capture" } else { "Display Capture" },
+                    encoder.label(),
+                    c.size.0,
+                    c.size.1,
+                    c.out_size.0,
+                    c.out_size.1,
+                    c.fps,
+                    ffmpeg::bitrate_kbps(&settings) / 1000
+                )),
+                None => crate::trail("recording: stopped (game closed)"),
+            }
+            let title = game.as_ref().map(|g| crate::obs::window_names(g.hwnd).0).unwrap_or_default();
+            drop(inner);
+            let applied = obs.lock().unwrap_or_else(|e| e.into_inner()).apply(desired.clone(), &title);
+            inner = self.lock();
+            if let Err(e) = applied {
+                crate::trail(&format!("recording: OBS couldn't record ({e}); restarting it"));
+                inner.obs = None;
+                inner.obs_failed = Some(Instant::now());
+            }
+        }
+        let recording = inner.obs.is_some() && desired.is_some();
+        inner.status.state = if recording { RecState::Recording } else { RecState::Waiting };
+        inner.status.encoder = recording.then(|| format!("OBS {} ({})", if game_only { "Game Capture" } else { "Display Capture" }, encoder.label()));
+        inner.status.message = None;
+        let status = inner.status.clone();
+        drop(inner);
+        (self.listener)(&status);
     }
 
     fn tick(&self, game: Option<Game>, ffmpeg_path: &Path, detected: VideoEncoder, source: VideoSource) {
@@ -482,98 +620,6 @@ impl Recorder {
             }
         );
         inner.status.game = game.clone();
-
-        // A full-screen game in Game window mode, with OBS ready: OBS's Game
-        // Capture records it (frames from the game itself; Windows' capture
-        // APIs can see what's behind such a game instead). See obs.rs.
-        let use_obs = want
-            && game_only
-            && inner.obs_failed.is_none_or(|t| t.elapsed() > Duration::from_secs(60))
-            && crate::tools::obs_dir().is_some()
-            && game.as_ref().is_some_and(|g| g.hwnd != 0 && inner.screen_for == Some(g.hwnd));
-        // OBS's canvas is the game's size: a new size (switching to a stretched
-        // resolution mid-game) restarts it, or the picture sits off-centre.
-        let obs_key = format!("{key}|{:?}", game.as_ref().and_then(|g| g.screen_size.or(g.window_size)));
-        if let Some((running_key, session)) = inner.obs.clone() {
-            let alive = session.lock().unwrap_or_else(|e| e.into_inner()).alive();
-            if !alive {
-                crate::trail("recording: OBS stopped; recording with FFmpeg, OBS again in a minute");
-                inner.obs_failed = Some(Instant::now());
-            }
-            if !alive || !use_obs || running_key != obs_key {
-                if alive && use_obs {
-                    crate::trail("recording: the game's size changed, starting OBS afresh at the new size");
-                }
-                inner.obs = None;
-            }
-        }
-        if use_obs {
-            inner.running = None; // never both
-            if inner.obs.is_none() {
-                let g = game.clone().unwrap_or_default();
-                let settings = inner.settings.clone();
-                let encoder = ffmpeg::resolve_encoder(settings.encoder, detected);
-                let size = g.screen_size.or(g.window_size).unwrap_or((1920, 1080));
-                let (title, class) = crate::obs::window_names(g.hwnd);
-                let setup = crate::obs::Setup {
-                    exe: g.exe.clone(),
-                    title,
-                    class,
-                    size,
-                    out_size: obs_output_size(size, settings.resolution),
-                    fps: settings.fps,
-                    encoder,
-                    hevc: settings.codec == crate::settings::Codec::H265,
-                    kbps: ffmpeg::bitrate_kbps(&settings),
-                    buffer_seconds: settings.buffer_seconds,
-                    format: container_ext(settings.format),
-                    game_audio: settings.game_audio.then(|| settings.game_volume as f32 / 100.0),
-                    mic: settings.microphone.then(|| settings.mic_volume as f32 / 100.0),
-                    denoise_mic: settings.microphone && settings.mic_noise_suppression,
-                    separate_tracks: settings.separate_tracks,
-                    replay_dir: self.work_dir.join("obs-replays"),
-                };
-                crate::trail(&format!(
-                    "recording: {} with OBS Game Capture ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
-                    g.exe,
-                    encoder.label(),
-                    setup.size.0,
-                    setup.size.1,
-                    setup.out_size.0,
-                    setup.out_size.1,
-                    setup.fps,
-                    setup.kbps / 1000
-                ));
-                inner.status.state = RecState::Starting;
-                let status = inner.status.clone();
-                drop(inner);
-                (self.listener)(&status);
-                // OBS takes a few seconds to start: not while holding the lock.
-                let started = crate::tools::obs_dir().ok_or_else(|| "OBS isn't ready".to_string()).and_then(|dir| crate::obs::Session::start(&dir, setup));
-                let mut inner = self.lock();
-                match started {
-                    Ok(session) => {
-                        crate::trail("recording: started (OBS)");
-                        inner.obs = Some((obs_key, Arc::new(Mutex::new(session))));
-                        inner.status.state = RecState::Recording;
-                        inner.status.encoder = Some(format!("OBS Game Capture ({})", encoder.label()));
-                        inner.status.message = None;
-                    }
-                    Err(e) => {
-                        crate::trail(&format!("recording: OBS couldn't record ({e}); recording with FFmpeg, OBS again in a minute"));
-                        inner.obs_failed = Some(Instant::now());
-                    }
-                }
-                let status = inner.status.clone();
-                drop(inner);
-                (self.listener)(&status);
-                return;
-            }
-            let status = inner.status.clone();
-            drop(inner);
-            (self.listener)(&status);
-            return;
-        }
 
         // Stop if the game closed or recording settings changed, or the game's
         // picture really changed size (e.g. switching to a stretched
@@ -712,7 +758,6 @@ impl Recorder {
         if !want {
             inner.window_failed = false;
             inner.obs_failed = None;
-            inner.obs = None;
             inner.content_size = None;
             inner.screen_for = None;
             inner.no_screen_for = None;
@@ -787,10 +832,10 @@ impl Recorder {
     pub fn save_clip(&self, clip_root: &Path) -> Result<ClipInfo, String> {
         let obs = {
             let inner = self.lock();
-            inner.obs.as_ref().map(|(_, s)| (s.clone(), inner.settings.clone(), inner.status.game.as_ref().map(|g| g.name.clone())))
+            inner.obs.as_ref().map(|o| (o.clone(), inner.settings.clone(), inner.status.game.as_ref().map(|g| g.name.clone())))
         };
-        if let Some((session, settings, game)) = obs {
-            return self.save_obs_clip(clip_root, &session, &settings, game.filter(|g| !g.is_empty()));
+        if let Some((obs, settings, game)) = obs {
+            return self.save_obs_clip(clip_root, &obs, &settings, game.filter(|g| !g.is_empty()));
         }
         let (plan, settings, game) = {
             let inner = self.lock();
@@ -913,7 +958,7 @@ impl Recorder {
     }
 
     /// F9 while OBS records: OBS saves its replay buffer, which becomes the clip.
-    fn save_obs_clip(&self, clip_root: &Path, session: &Mutex<crate::obs::Session>, settings: &Settings, game: Option<String>) -> Result<ClipInfo, String> {
+    fn save_obs_clip(&self, clip_root: &Path, session: &Mutex<crate::obs::Obs>, settings: &Settings, game: Option<String>) -> Result<ClipInfo, String> {
         let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
         let saved = {
             let mut s = session.lock().unwrap_or_else(|e| e.into_inner());
