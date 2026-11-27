@@ -62,7 +62,7 @@ impl RecorderStatus {
 /// Settings that require restarting FFmpeg when they change.
 fn recording_key(s: &Settings) -> String {
     serde_json::json!([
-        s.fps, s.resolution, s.quality, s.bitrate_mbps, s.encoder, s.codec, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
+        s.fps, s.resolution, s.quality, s.bitrate_mbps, s.encoder, s.codec, s.capture, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
         s.apps, s.microphone, s.mic_device, s.mic_volume, s.separate_tracks
     ])
     .to_string()
@@ -281,7 +281,10 @@ impl Recorder {
         // Another game, or the game moved to another screen: start afresh.
         // Just the game's window when known (a new window, e.g. the game
         // restarting, starts afresh); its screen if window capture failed.
-        let window = game.as_ref().map(|g| g.hwnd).filter(|&h| h != 0 && !inner.window_failed);
+        let window = game
+            .as_ref()
+            .map(|g| g.hwnd)
+            .filter(|&h| h != 0 && !inner.window_failed && inner.settings.capture == crate::settings::Capture::Window);
         let key = format!(
             "{}|{}|{}|{}",
             recording_key(&inner.settings),
@@ -351,8 +354,9 @@ impl Recorder {
             g.hwnd = window.unwrap_or(0);
             let size = if window.is_some() { g.window_size } else { g.screen_size };
             crate::trail(&format!(
-                "recording: {} {}{}",
+                "recording: {} {}{}{}",
                 if window.is_some() { "the game's window" } else { "the whole screen" },
+                g.refresh_hz.map(|hz| format!("(monitor {hz} Hz) ")).unwrap_or_default(),
                 size.map(|(w, h)| format!("{w}x{h}")).unwrap_or_else(|| "(size unknown)".into()),
                 if window.is_some() {
                     ffmpeg::window_output_size(size, settings.resolution).map(|(w, h)| format!(", recorded at {w}x{h}")).unwrap_or_default()

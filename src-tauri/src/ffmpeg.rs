@@ -357,7 +357,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                 Some(hwnd) => {
                     let mut src = format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0");
                     if let Some((w, h)) = window_output_size(plan.source_size, s.resolution) {
-                        src.push_str(&format!(":width={w}:height={h}:resize_mode=scale:scale_mode=bicubic"));
+                        // A real resize (stretch, or shrink to the chosen
+                        // resolution) scales. A size off by a line or two
+                        // (1920x1079 -> 1920x1080) pads with black instead:
+                        // scaling by one line would soften every row.
+                        let (sw, sh) = plan.source_size.unwrap_or((w, h));
+                        let tiny = w.abs_diff(sw) <= 2 && h.abs_diff(sh) <= 2;
+                        let mode = if tiny { "crop" } else { "scale:scale_mode=bicubic" };
+                        src.push_str(&format!(":width={w}:height={h}:resize_mode={mode}"));
                     }
                     a.push(src);
                 }
@@ -661,6 +668,9 @@ mod tests {
         assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1440), None);
         // A borderless window a line short: recorded at the clean size.
         assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1080), Some((1920, 1080)));
+        let near = RecordPlan { window: Some(1), source_size: Some((1920, 1079)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let n = joined(&Settings { resolution: Resolution::P1080, ..Settings::default() }, &near);
+        assert!(n.contains(":width=1920:height=1080:resize_mode=crop"), "a missing line is padded, not scaled: {n}");
         assert_eq!(window_output_size(Some((1920, 1079)), Resolution::Native), Some((1920, 1080)));
         assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1440), Some((1920, 1080)));
         // Other shapes keep their shape.

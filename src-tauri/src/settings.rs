@@ -40,6 +40,15 @@ pub enum Encoder {
     Cpu,
 }
 
+/// What gets recorded: just the game's window (other windows and the desktop
+/// never show up), or its whole screen (what's on the monitor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Capture {
+    Window,
+    Screen,
+}
+
 /// Video format of recordings. H.265 is sharper at the same size, but not
 /// every PC can play it, so the app only offers it where it plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +133,7 @@ pub struct Settings {
     pub encoder: Encoder,
     pub format: Container,
     pub codec: Codec,
+    pub capture: Capture,
     // Which games to record
     /// Any app running fullscreen (or borderless fullscreen) counts as a game.
     pub record_fullscreen: bool,
@@ -183,6 +193,7 @@ impl Default for Settings {
             encoder: Encoder::Auto,
             format: Container::Mp4,
             codec: Codec::H264,
+            capture: Capture::Window,
             record_fullscreen: true,
             custom_games: Vec::new(),
             ignored_games: Vec::new(),

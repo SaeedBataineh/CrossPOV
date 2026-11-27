@@ -282,6 +282,16 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
         </Panel>
         <Panel title="Video file">
           <Row
+            label="Capture"
+            help={
+              draft.capture === "window"
+                ? "Game window: other windows and the desktop never show up in clips"
+                : "Whole screen: everything on the game's monitor, like a screen recording"
+            }
+          >
+            <Seg label="Capture" value={draft.capture} onChange={(v) => set("capture", v)} options={[{ value: "window", label: "Game window" }, { value: "screen", label: "Whole screen" }]} />
+          </Row>
+          <Row
             label="Video format"
             help={
               h265Plays

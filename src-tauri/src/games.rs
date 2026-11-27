@@ -143,6 +143,10 @@ pub struct Game {
     /// shows up here as e.g. 1568x1080), in pixels.
     #[serde(skip)]
     pub screen_size: Option<(u32, u32)>,
+    /// Its screen's refresh rate: window capture can't get more distinct
+    /// frames per second than this.
+    #[serde(skip)]
+    pub refresh_hz: Option<u32>,
     /// The process found fullscreen (kept until it closes).
     #[serde(skip)]
     pid: Option<u32>,
@@ -195,6 +199,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
                 screen_size: g.screen_size,
                 hwnd: g.hwnd,
                 window_size: g.window_size,
+                refresh_hz: g.refresh_hz,
             }),
             _ => {
                 *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
@@ -204,6 +209,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
                     screen_size: g.screen_size,
                     hwnd: g.hwnd,
                     window_size: g.window_size,
+                    refresh_hz: g.refresh_hz,
                 });
                 match (window::screen_of_process(&exe), previous) {
                     // Minimised (alt-tab out of exclusive fullscreen) the window
@@ -229,6 +235,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
             hwnd: spot.hwnd,
             window_size: spot.window_size,
             screen_size: spot.screen_size,
+            refresh_hz: spot.refresh_hz,
             pid: None,
         })
     } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
@@ -258,6 +265,7 @@ pub fn detect(s: &Settings) -> Option<Game> {
             hwnd: front.spot.hwnd,
             window_size: front.spot.window_size,
             screen_size: front.spot.screen_size,
+            refresh_hz: front.spot.refresh_hz,
             pid: Some(front.pid),
         })
     });
@@ -291,6 +299,7 @@ struct Spot {
     screen_size: Option<(u32, u32)>,
     hwnd: u64,
     window_size: Option<(u32, u32)>,
+    refresh_hz: Option<u32>,
 }
 
 /// The front window when it fills its whole screen.
@@ -350,7 +359,26 @@ mod window {
         let mut client = RECT::default();
         // SAFETY: plain query on a window Windows handed us; `client` is a valid local.
         let window_size = unsafe { GetClientRect(hwnd, &mut client) }.ok().and_then(|_| size(client));
-        Spot { output_idx: output_index(monitor), screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size }
+        Spot { output_idx: output_index(monitor), screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size, refresh_hz: refresh_of(monitor) }
+    }
+
+    /// A screen's refresh rate, in Hz.
+    fn refresh_of(monitor: HMONITOR) -> Option<u32> {
+        use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW};
+        // SAFETY: both structs have their size fields set as Windows requires;
+        // MONITORINFOEXW starts with a MONITORINFO, as GetMonitorInfoW expects.
+        unsafe {
+            let mut info = MONITORINFOEXW::default();
+            info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            if !GetMonitorInfoW(monitor, &mut info.monitorInfo).as_bool() {
+                return None;
+            }
+            let mut mode = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
+            EnumDisplaySettingsW(windows::core::PCWSTR(info.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode)
+                .as_bool()
+                .then_some(mode.dmDisplayFrequency)
+                .filter(|&hz| hz > 1)
+        }
     }
 
     /// Whether a window still exists (it may be minimised).
