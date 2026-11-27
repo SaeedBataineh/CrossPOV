@@ -255,7 +255,20 @@ impl Obs {
 
     fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<(), String> {
         let _ = self.request("RemoveInput", json!({ "inputName": name }));
-        self.request("CreateInput", json!({ "sceneName": scene, "inputName": name, "inputKind": kind, "sceneItemEnabled": true, "inputSettings": settings }))?;
+        // OBS frees a removed source's name only once it's really gone, a
+        // moment later: until then "already exists" (601). Wait for it.
+        let data = json!({ "sceneName": scene, "inputName": name, "inputKind": kind, "sceneItemEnabled": true, "inputSettings": settings });
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            match self.request_once("CreateInput", data.clone()) {
+                Ok(_) => break,
+                Err((601 | 207, _)) if Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(250));
+                    let _ = self.request_once("RemoveInput", json!({ "inputName": name }));
+                }
+                Err((_, e)) => return Err(e),
+            }
+        }
         self.inputs.push(name.to_string());
         Ok(())
     }
@@ -418,6 +431,12 @@ fn write_config(config: &Path, p: &Profile, port: u16, password: &str) -> io::Re
         "[General]\r\nFirstRun=true\r\nEnableAutoUpdates=false\r\nConfirmOnExit=false\r\n\r\n[BasicWindow]\r\nSysTrayEnabled=true\r\nSysTrayWhenStarted=true\r\nSysTrayMinimizeToTray=true\r\n\r\n[Basic]\r\nProfile={PROFILE}\r\nProfileDir={PROFILE}\r\nSceneCollection={PROFILE}\r\nSceneCollectionFile={PROFILE}\r\n"
     );
     fs::create_dir_all(config)?;
+    // Start with an empty scene: CrossPOV adds its sources itself (the ones
+    // OBS saved last time would clash with them).
+    let scenes = config.join("basic").join("scenes");
+    for f in [format!("{PROFILE}.json"), format!("{PROFILE}.json.bak")] {
+        let _ = fs::remove_file(scenes.join(f));
+    }
     fs::write(config.join("global.ini"), &app)?;
     fs::write(config.join("user.ini"), &app)?;
 
