@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { appIcon, clipVideoSrc, copyForDiscord, isDesktop, thumbSrc, type ClipInfo } from "../lib/backend";
+import { appIcon, clipVideoSrc, copyForDiscord, isDesktop, shownMs, thumbSrc, type ClipInfo } from "../lib/backend";
 import { Check, Clock, FolderOpen, GameController, Info, PencilSimple, Play, Star, Trash, Warning, WarningCircle } from "@phosphor-icons/react";
 import { openContextMenu, type MenuItem } from "./ContextMenu";
 import { promptDialog } from "./Dialog";
@@ -209,7 +209,7 @@ export function ClipCard({ clip, selected, onSelect, onOpen }: { clip: ClipInfo;
       <span className="meta">
         <b className="ellipsis">{clipTitle(clip)}</b>
         <span className="what">{clipMoment(clip)}</span>
-        <span className="where"><span className="ellipsis">{[clip.map, clockOrAgo(clip.createdMs)].filter(Boolean).join(" · ")}</span><span>{formatSize(clip.sizeBytes)}</span></span>
+        <span className="where"><span className="ellipsis">{[clip.map, clockOrAgo(shownMs(clip))].filter(Boolean).join(" · ")}</span><span>{formatSize(clip.sizeBytes)}</span></span>
       </span>
     </button>
   );
@@ -233,7 +233,7 @@ function clockLabel(ms: number): string {
 export function cardTitle(c: ClipInfo): string {
   const own = customTitle(c.path);
   if (own) return own;
-  if (!isTheirs(c)) return `${c.map ?? c.game ?? "Clip"} · ${clockLabel(c.createdMs)}`;
+  if (!isTheirs(c)) return `${c.map ?? c.game ?? "Clip"} · ${clockLabel(shownMs(c))}${c.madeMs ? " · cut" : ""}`;
   const m = c.moment ?? "Streamer clip";
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
@@ -244,9 +244,13 @@ export async function renameClip(c: ClipInfo) {
   if (name !== null) setTitle(c.path, name);
 }
 
-/** "Ascent · R14 · 35 min ago", or "Apex Legends · 35 min ago" for other games. */
+/**
+ * "Ascent · R14 · 35 min ago". Your own clips' titles already say where
+ * ("VALORANT · 21:03"), so theirs leave it out ("35 min ago") unless renamed.
+ */
 export function cardMeta(c: ClipInfo): string {
-  return [c.map ?? c.game, c.round != null ? `R${c.round}` : null, timeAgo(c.createdMs)].filter(Boolean).join(" · ");
+  const where = isTheirs(c) || customTitle(c.path) ? c.map ?? c.game : null;
+  return [where, c.round != null ? `R${c.round}` : null, timeAgo(shownMs(c))].filter(Boolean).join(" · ");
 }
 
 /** A clip's picture: its own thumbnail, else its map's art. */

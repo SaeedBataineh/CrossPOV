@@ -128,6 +128,13 @@ export interface ClipInfo {
   matchStartSec?: number | null;
   vodUrl?: string | null;
   vodStartSec?: number | null;
+  /** A cut: when it was made (its createdMs stays where the cut part happened, for matching). */
+  madeMs?: number | null;
+}
+
+/** When a clip appeared in your list: when it was saved, or for a cut when it was made. */
+export function shownMs(c: Pick<ClipInfo, "createdMs" | "madeMs">): number {
+  return c.madeMs ?? c.createdMs;
 }
 
 export interface AudioApp {

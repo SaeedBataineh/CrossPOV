@@ -780,6 +780,7 @@ impl Recorder {
             vod_url: None,
             vod_start_sec: None,
             game,
+            made_ms: None,
         })
     }
 }

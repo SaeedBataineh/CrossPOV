@@ -15,6 +15,7 @@ import {
   lookupLatestMatch,
   lookupStreamers,
   saveClipNow,
+  shownMs,
   thumbSrc,
   type RecorderStatus,
   type ClipInfo,
@@ -391,7 +392,7 @@ function RecorderCard({ status, settings, onSaving, onSettings }: { status: Reco
 
 /** Your newest clips, so the last thing you saved is one click away. */
 function RecentClips({ clips, onOpen, onAll }: { clips: ClipInfo[]; onOpen: (c: ClipInfo) => void; onAll: () => void }) {
-  const recent = [...clips].sort((a, b) => b.createdMs - a.createdMs).slice(0, 5);
+  const recent = [...clips].sort((a, b) => shownMs(b) - shownMs(a)).slice(0, 5);
   return (
     <section className={card} aria-label="Recent clips">
       <div className="flex items-center justify-between gap-2">
@@ -415,7 +416,7 @@ function RecentClips({ clips, onOpen, onAll }: { clips: ClipInfo[]; onOpen: (c: 
                   </span>
                   <span className="flex min-w-0 flex-col">
                     <b className="truncate text-[13px] font-medium text-zinc-100">{c.kind === "theirs" && c.round ? `R${c.round} · ` : ""}{cardTitle(c)}</b>
-                    <span className="truncate text-[12px] text-zinc-400">{[c.kind === "theirs" ? c.streamer : c.map ?? c.game, timeAgo(c.createdMs)].filter(Boolean).join(" · ")}</span>
+                    <span className="truncate text-[12px] text-zinc-400">{[c.kind === "theirs" ? c.streamer : c.map ?? c.game, timeAgo(shownMs(c))].filter(Boolean).join(" · ")}</span>
                   </span>
                 </button>
               </li>

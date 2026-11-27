@@ -533,6 +533,7 @@ async fn trim_clip(app: AppHandle, state: State<'_, AppState>, path: String, sta
                 vod_url: info.vod_url.clone(),
                 vod_start_sec: info.vod_start_sec.map(|s| s + start),
                 game: info.game.clone(),
+                made_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64),
             },
         );
         clips::info(&root, &out, info.kind).ok_or_else(|| "The cut clip wasn't saved.".to_string())

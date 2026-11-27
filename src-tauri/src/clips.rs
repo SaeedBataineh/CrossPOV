@@ -51,6 +51,10 @@ pub struct ClipMeta {
     /// Your clips: which game it was recorded in.
     #[serde(default)]
     pub game: Option<String>,
+    /// A cut: when it was made (ms since 1970). Its file date stays where
+    /// the cut part happened, so it still lines up with its match.
+    #[serde(default)]
+    pub made_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,6 +77,8 @@ pub struct ClipInfo {
     pub vod_url: Option<String>,
     pub vod_start_sec: Option<f64>,
     pub game: Option<String>,
+    /// A cut: when it was made, shown on its card and used for "newest".
+    pub made_ms: Option<u64>,
 }
 
 fn is_video(p: &Path) -> bool {
@@ -154,6 +160,7 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
         vod_url: details.vod_url,
         vod_start_sec: details.vod_start_sec,
         game: details.game,
+        made_ms: details.made_ms,
     })
 }
 

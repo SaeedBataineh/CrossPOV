@@ -4,7 +4,7 @@ import { BrandLogo, brandFor } from "../components/Brand";
 import { SegmentedControl, type TabIcon } from "../components/SegmentedControl";
 import { TwitchTabIcon } from "../components/Icons";
 import { cardTitle, GalleryCard } from "../components/ui";
-import { isDesktop, openClipFolder, revealClip, type ClipInfo, type MatchSummary } from "../lib/backend";
+import { isDesktop, openClipFolder, revealClip, shownMs, type ClipInfo, type MatchSummary } from "../lib/backend";
 import { deleteWithUndo } from "../lib/deleteClips";
 import { useTitles } from "../lib/titles";
 import { findPairs } from "../lib/pairs";
@@ -27,7 +27,7 @@ const PAGE = 24;
 const gameOf = (c: ClipInfo) => (c.kind === "theirs" ? "VALORANT" : c.game ?? (c.map ? "VALORANT" : "Other"));
 
 const SORTS: Record<Sort, (a: ClipInfo, b: ClipInfo) => number> = {
-  newest: (a, b) => b.createdMs - a.createdMs,
+  newest: (a, b) => shownMs(b) - shownMs(a),
   longest: (a, b) => (b.durationSec ?? 0) - (a.durationSec ?? 0),
   largest: (a, b) => b.sizeBytes - a.sizeBytes,
 };
