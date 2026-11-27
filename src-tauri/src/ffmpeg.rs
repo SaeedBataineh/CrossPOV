@@ -372,6 +372,13 @@ fn on_gpu_window(plan: &RecordPlan) -> bool {
     plan.source == VideoSource::Desktop && plan.window.is_some()
 }
 
+/// `setpts` that puts each frame in the next free slot of a 1/fps grid (see
+/// record_args). Escaped for a -filter_complex graph.
+fn even_slots_filter(fps: u32) -> String {
+    let slot = format!("round(PTS*TB*{fps})/({fps}*TB)");
+    format!("setpts='if(isnan(PREV_OUTPTS)\\,{slot}\\,max({slot}\\,PREV_OUTPTS+1/({fps}*TB)))'")
+}
+
 /// Builds the FFmpeg arguments for the replay buffer.
 pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
@@ -444,11 +451,15 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     let height = target_height(s.resolution).filter(|h| plan.screen_height.is_none_or(|screen| screen > *h)).filter(|_| !window);
     let on_gpu = plan.source == VideoSource::Desktop;
     let gpu_path = on_gpu && plan.encoder.takes_gpu_frames() && !plan.compat;
-    // Window capture: no `fps` filter. Its frames arrive unevenly, and fitting
-    // them onto a steady grid shows some twice and skips others (looks like a
-    // low frame rate). Each frame keeps the time it was captured instead
-    // (variable frame rate, below).
+    // Window capture hands over frames bunched in pairs (two different frames
+    // stamped 0.01 ms apart, then a double gap), which plays as stutter. Each
+    // frame gets the next free slot on a steady 1/fps grid, never earlier
+    // than its own time: the second of a pair moves into the gap after it, no
+    // frame is dropped or repeated, and timing can't drift from the sound.
     let mut vf: Vec<String> = Vec::new();
+    if on_gpu && plan.window.is_some() {
+        vf.push(even_slots_filter(s.fps));
+    }
     if gpu_path {
         if let Some(h) = height {
             vf.push(format!("scale_d3d11=width=-2:height='min(ih,{h})':format=nv12"));
@@ -864,6 +875,35 @@ mod tests {
         assert_eq!(window_output_size(Some((1568, 1079)), Resolution::P1080, false), Some((1568, 1080)), "a line short: padded, not cut");
         let near = RecordPlan { window: Some(1), source_size: Some((1568, 1079)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         assert!(joined(&s, &near).contains(":width=1568:height=1080:resize_mode=crop"));
+    }
+
+    /// Real FFmpeg, the recorder's way (-filter_complex): frames bunched in
+    /// pairs come out evenly spaced, none dropped, no drift. Skipped without FFmpeg.
+    #[test]
+    fn window_capture_pairs_are_evened_out() {
+        let Some(ff) = locate() else {
+            eprintln!("ffmpeg not found; skipping");
+            return;
+        };
+        let out = std::env::temp_dir().join(format!("crosspov-even-{}.mkv", std::process::id()));
+        // Every 4th frame stamped a frame early: pairs 0 ms apart, then a double gap.
+        let paired = "testsrc2=size=160x90:rate=144,settb=1/10000000,setpts='if(eq(mod(N\\,4)\\,1)\\,PTS-0.00693/TB\\,PTS)'";
+        let graph = format!("[0:v]{}[v]", even_slots_filter(144));
+        let run = std::process::Command::new(&ff)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", paired, "-t", "2", "-filter_complex", &graph, "-map", "[v]"])
+            .args(["-fps_mode", "passthrough", "-enc_time_base", "1:90000", "-c:v", "mjpeg", "-f", "matroska"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let probe = std::process::Command::new(&ff).args(["-hide_banner", "-i"]).arg(&out).args(["-f", "framemd5", "-"]).output().unwrap();
+        let _ = std::fs::remove_file(&out);
+        // framemd5 lines: stream, dts, pts, duration, size, hash (pts in MKV's milliseconds).
+        let pts: Vec<i64> = String::from_utf8_lossy(&probe.stdout).lines().filter(|l| !l.starts_with('#')).filter_map(|l| l.split(',').nth(2)?.trim().parse().ok()).collect();
+        assert!(pts.len() > 250, "all frames kept: {}", pts.len());
+        let gaps: Vec<i64> = pts.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps.iter().all(|&g| g > 0), "no two frames share a time");
+        assert!(gaps.iter().all(|&g| g <= 8), "no double gaps (1/144 s is about 7 ms): {gaps:?}");
     }
 
     #[test]
