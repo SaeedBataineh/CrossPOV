@@ -472,7 +472,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             // skins), which looks soft in moving game footage. B-frames are
             // left out in compatibility mode, in case an older card refuses them.
             push(&mut a, &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-forced-idr", "1"]);
-            if !plan.compat {
+            // Window capture's frames come at uneven times; B-frames then made
+            // duplicate timestamps ("Non-monotonic DTS"). None there.
+            if !plan.compat && plan.window.is_none() {
                 push(&mut a, &["-bf", "3"]);
             }
         }
@@ -501,7 +503,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         // Frames as captured, at their own times; a keyframe every segment by
         // time (frame counts vary), so the buffer can still be cut anywhere.
         let every = format!("expr:gte(t,n_forced*{SEGMENT_SECONDS})");
-        push(&mut a, &["-fps_mode", "passthrough", "-force_key_frames", &every, "-g", &gop]);
+        push(&mut a, &["-fps_mode", "passthrough", "-force_key_frames", &every, "-g", &gop, "-bf", "0"]);
     } else {
         push(&mut a, &["-g", &gop, "-keyint_min", &gop]);
     }
@@ -724,6 +726,9 @@ mod tests {
         assert!(a.contains("gfxcapture=hwnd=132456:max_framerate=60:capture_cursor=0"), "{a}");
         assert!(!a.contains("fps=60,") && !a.contains("[0:v]fps"), "frames keep their own times: {a}");
         assert!(a.contains("-fps_mode passthrough -force_key_frames expr:gte(t,n_forced*2)"), "{a}");
+        assert!(a.contains("-bf 0") && !a.contains("-bf 3"), "no B-frames with uneven frame times: {a}");
+        let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
+        assert!(screen.contains("-bf 3"), "whole screen keeps them: {screen}");
         assert!(!a.contains("ddagrab"));
         let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(screen.contains("ddagrab") && !screen.contains("fps=60"), "{screen}");
