@@ -1,16 +1,13 @@
 import { Diamond, Skull } from "@phosphor-icons/react";
-import "@fontsource/barlow-condensed/600.css";
-import "@fontsource/barlow-condensed/700.css";
-import "@fontsource/barlow-condensed/800.css";
 import type { ReactNode } from "react";
 import type { MatchPlayer, MatchSummary } from "../lib/backend";
 import { TwitchIcon } from "./Icons";
 import { AgentIcon } from "./ValorantArt";
 
 /*
- * The match details in the style of VALORANT's own post-match screen: the
- * result and score in team colours, a two-row round timeline, and one
- * scoreboard of all ten players, your team in teal, theirs in red, you in gold.
+ * The match details, laid out like VALORANT's post-match screen (result and
+ * score, a two-row round timeline, each team's scoreboard) but drawn in the
+ * app's own panels, type and colours.
  */
 
 interface Streamer {
@@ -83,24 +80,22 @@ export function PostMatchScoreboard({ match, me, streamers, children }: { match:
     for (const k of ks) per.set(k.killer, (per.get(k.killer) ?? 0) + 1);
     for (const [who, n] of per) if (n >= 3) multis.set(who, (multis.get(who) ?? 0) + 1);
   }
-  const players = [...match.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  const teams = [ally, ...match.teams.map((t) => t.id).filter((t) => t !== ally)];
 
-  return (
-    <section className="vs-board" aria-label="Scoreboard">
-      <header className="vs-head">
-        <span className={`vs-result ${draw ? "draw" : won ? "win" : "loss"}`}>{draw ? "Draw" : won ? "Victory" : "Defeat"}</span>
-        <span className="vs-score">
-          <b className="ally">{allyTeam?.roundsWon ?? "–"}</b>
-          <i>:</i>
-          <b className="enemy">{enemyTeam?.roundsWon ?? "–"}</b>
-        </span>
-        <span className="vs-mode">{match.mode} · {match.map}</span>
-      </header>
-      {children}
-      <table className="vs-table">
+  const table = (team: string) => {
+    const t = match.teams.find((x) => x.id === team);
+    const side = team === ally ? "ally" : "enemy";
+    const players = match.players.filter((p) => p.team === team).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+    return (
+      <table key={team} className={`vs-table ${side}`}>
         <thead>
           <tr>
-            <th className="vs-player">Player</th>
+            <th className="vs-player">
+              <div className="vs-cell">
+              <span className="vs-team">{side === "ally" ? (me ? "Your team" : `Team ${team}`) : me ? "Enemy team" : `Team ${team}`}</span>
+              {t && <span className="vs-team-score">{t.roundsWon}</span>}
+              </div>
+            </th>
             <th>K</th>
             <th>D</th>
             <th>A</th>
@@ -113,15 +108,15 @@ export function PostMatchScoreboard({ match, me, streamers, children }: { match:
         <tbody>
           {players.map((p) => {
             const mine = p.puuid === me?.puuid;
-            const side = p.team === ally ? "ally" : "enemy";
             const diff = p.kills - p.deaths;
             const live = streamers.get(p.puuid);
             return (
-              <tr key={p.puuid} className={`vs-row ${side}${mine ? " me" : ""}`}>
+              <tr key={p.puuid} className={mine ? "vs-row me" : "vs-row"}>
                 <td className="vs-player">
+                  <div className="vs-cell">
                   <span className="vs-agent"><AgentIcon agent={p.agent} className="size-full" /></span>
                   <span className="vs-name">
-                    <b>{p.name}</b>
+                    <b>{p.name}<i>#{p.tag}</i></b>
                     <small>{p.agent}{mine ? " · you" : ""}</small>
                   </span>
                   {live && (
@@ -129,6 +124,7 @@ export function PostMatchScoreboard({ match, me, streamers, children }: { match:
                       <TwitchIcon size={12} /> Twitch
                     </a>
                   )}
+                  </div>
                 </td>
                 <td>{p.kills}</td>
                 <td>{p.deaths}</td>
@@ -142,6 +138,22 @@ export function PostMatchScoreboard({ match, me, streamers, children }: { match:
           })}
         </tbody>
       </table>
+    );
+  };
+
+  return (
+    <section className="vs-board" aria-label="Scoreboard">
+      <header className="vs-head">
+        <span className={`vs-result ${draw ? "draw" : won ? "win" : "loss"}`}>{draw ? "Draw" : won ? "Victory" : "Defeat"}</span>
+        <span className="vs-score">
+          <b className="ally">{allyTeam?.roundsWon ?? "–"}</b>
+          <i>–</i>
+          <b className="enemy">{enemyTeam?.roundsWon ?? "–"}</b>
+        </span>
+        <span className="vs-mode">{match.mode} · {match.map}</span>
+      </header>
+      {children}
+      {teams.map(table)}
     </section>
   );
 }
