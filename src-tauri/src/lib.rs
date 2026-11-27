@@ -396,8 +396,8 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     }
     let _ = writeln!(
         out,
-        "\n[Settings] {} fps, {:?}, quality {:?}, encoder {:?}, {:?}, buffer {} s, hotkey {}, clips {}",
-        s.fps, s.resolution, s.quality, s.encoder, s.format, s.buffer_seconds, s.hotkey,
+        "\n[Settings] {} fps, {:?}, bitrate {}, encoder {:?}, {:?}, {:?}, capture {:?}, buffer {} s, hotkey {}, clips {}",
+        s.fps, s.resolution, if s.bitrate_mbps > 0 { format!("{} Mbps", s.bitrate_mbps) } else { format!("auto ({:?})", s.quality) }, s.encoder, s.codec, s.format, s.capture, s.buffer_seconds, s.hotkey,
         clip_folder(&app, &s).display()
     );
     out
@@ -742,7 +742,11 @@ pub(crate) fn trail(event: &str) {
 /// The last lines of the trail, for Copy diagnostics.
 pub(crate) fn recent_trail() -> Option<String> {
     let text = std::fs::read_to_string(crash_log_path()?.with_file_name("app.log")).ok()?;
-    let tail: Vec<&str> = text.lines().rev().take(25).collect();
+    // The game-sound helper's step-by-step lines ("app audio 1234: activating")
+    // are for crash reports; here they'd push the useful lines out. Its
+    // outcome ("app audio: process 1234: capturing") stays.
+    let steps = |l: &str| l.split_once(' ').is_some_and(|(_, rest)| rest.starts_with("app audio ") && !rest.starts_with("app audio: "));
+    let tail: Vec<&str> = text.lines().rev().filter(|l| !steps(l)).take(30).collect();
     (!tail.is_empty()).then(|| tail.into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 
