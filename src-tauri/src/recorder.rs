@@ -536,6 +536,11 @@ impl Recorder {
             inner.content_size = None;
         }
 
+        // Recording a listed game's window: keep it drawn the usual way (see
+        // win_graphics::keep_composed), so window capture gets every frame.
+        let cover = inner.running.as_ref().and_then(|r| r.plan.window).filter(|_| game.as_ref().is_some_and(|g| crate::win_graphics::is_listed(&g.exe)));
+        crate::win_graphics::keep_composed(cover);
+
         // Surface audio fallbacks (e.g. older Windows) once they're known.
         let warning = inner.running.as_ref().and_then(|r| r.audio.as_ref()).and_then(AudioPipe::warning);
         if warning.is_some() {

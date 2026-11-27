@@ -7,9 +7,15 @@
 //!
 //! It's Windows' own per-game setting (Settings > System > Display >
 //! Graphics), stored for the game's .exe, and Windows reads it when the game
-//! starts: so it's set while CrossPOV runs (a game started then gets it), and
-//! put back exactly as it was when CrossPOV quits. Anything else stored there
-//! (which graphics card to use) is kept.
+//! starts: so it's set once and stays (closing CrossPOV doesn't undo it), and
+//! every later start of the game gets it. Anything else stored there (which
+//! graphics card to use) is kept; the installer's uninstall puts the
+//! original back (`--restore-game-settings`).
+//!
+//! A game already running when the setting is first made doesn't have it
+//! yet. For that one, `keep_composed` puts a tiny, see-through,
+//! click-through window over a corner of the game while recording: Windows
+//! only draws a game past the desktop while nothing overlaps it.
 
 use std::path::{Path, PathBuf};
 
@@ -59,6 +65,11 @@ fn saved_original(exe: &str) -> Option<PathBuf> {
     Some(PathBuf::from(dir).join("app.crosspov.desktop").join(format!("windowed-optimizations-{}.txt", exe.to_lowercase())))
 }
 
+/// One of the games this is done for.
+pub fn is_listed(exe: &str) -> bool {
+    GAMES.iter().any(|g| g.eq_ignore_ascii_case(exe))
+}
+
 /// Turns the optimization off for the listed games that can be found
 /// (running, or installed where their launcher says), in the background.
 /// Call at start and whenever a game is seen: each game is done once a run.
@@ -90,7 +101,7 @@ fn turn_off_for(exe: &str) {
     }
 }
 
-/// Puts back every game's original setting. Call as CrossPOV quits.
+/// Puts back every game's original setting (uninstalling).
 pub fn restore() {
     if !cfg!(windows) {
         return;
@@ -178,3 +189,73 @@ mod tests {
         assert_eq!(value_from_query("ERROR: not found"), None);
     }
 }
+
+/// While recording `game` (a window handle), keeps a 2x2, almost fully
+/// see-through, click-through window over its top-left corner, so Windows
+/// draws the game the usual way (through the desktop) even when it started
+/// before the setting above. None (or another window) stops the old one.
+pub fn keep_composed(game: Option<u64>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock};
+    /// The window being covered, and how to stop covering it.
+    type Covering = Option<(u64, Arc<AtomicBool>)>;
+    static CURRENT: OnceLock<Mutex<Covering>> = OnceLock::new();
+    let mut cur = CURRENT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if cur.as_ref().map(|(h, _)| *h) == game {
+        return;
+    }
+    if let Some((_, stop)) = cur.take() {
+        stop.store(true, Ordering::Relaxed);
+    }
+    let Some(hwnd) = game.filter(|_| cfg!(windows)) else { return };
+    let stop = Arc::new(AtomicBool::new(false));
+    *cur = Some((hwnd, stop.clone()));
+    std::thread::Builder::new().name("keep-composed".into()).spawn(move || cover(hwnd, &stop)).ok();
+}
+
+#[cfg(windows)]
+fn cover(game: u64, stop: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering;
+    use windows::core::w;
+    use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetWindowRect, IsWindow, PeekMessageW, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos,
+        ShowWindow, TranslateMessage, HWND_TOPMOST, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOACTIVATE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    };
+    unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        // SAFETY: the default handling, with what Windows passed us.
+        unsafe { DefWindowProcW(h, m, w, l) }
+    }
+    let game = HWND(game as usize as *mut core::ffi::c_void);
+    // SAFETY: plain Win32 window calls on a window this thread creates, owns
+    // and destroys; `game` is only read (its position) and checked first.
+    unsafe {
+        let class = WNDCLASSW { lpfnWndProc: Some(proc), lpszClassName: w!("CrossPOVKeepComposed"), ..Default::default() };
+        RegisterClassW(&class); // fails harmlessly if already registered
+        let ex = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+        let Ok(cover) = CreateWindowExW(ex, w!("CrossPOVKeepComposed"), w!(""), WS_POPUP, 0, 0, 2, 2, None, None, None, None) else { return };
+        let _ = SetLayeredWindowAttributes(cover, COLORREF(0), 1, LWA_ALPHA);
+        let _ = ShowWindow(cover, SW_SHOWNOACTIVATE);
+        let mut tick = 0u32;
+        while !stop.load(Ordering::Relaxed) && IsWindow(Some(game)).as_bool() {
+            if tick % 10 == 0 {
+                let mut r = RECT::default();
+                if GetWindowRect(game, &mut r).is_ok() {
+                    let _ = SetWindowPos(cover, Some(HWND_TOPMOST), r.left, r.top, 2, 2, SWP_NOACTIVATE);
+                }
+            }
+            tick = tick.wrapping_add(1);
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = DestroyWindow(cover);
+    }
+}
+
+#[cfg(not(windows))]
+fn cover(_game: u64, _stop: &std::sync::atomic::AtomicBool) {}

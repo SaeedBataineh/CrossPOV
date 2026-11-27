@@ -10,5 +10,10 @@ fn main() {
         let pid = args.get(2).and_then(|p| p.parse().ok()).unwrap_or(0);
         std::process::exit(crosspov_lib::audio_helper(pid));
     }
+    // `crosspov --restore-game-settings`: run by the uninstaller.
+    if args.get(1).map(String::as_str) == Some("--restore-game-settings") {
+        crosspov_lib::restore_game_settings();
+        return;
+    }
     crosspov_lib::run()
 }

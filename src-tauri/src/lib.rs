@@ -832,6 +832,12 @@ fn log_crashes() {
 /// samples) until the main app closes its stdin. Capturing one program's
 /// sound goes deep into Windows; doing it here means a crash in there can
 /// only end this helper, never CrossPOV.
+/// `--restore-game-settings` (the installer's uninstall): puts back the
+/// Windows graphics settings CrossPOV changed for games.
+pub fn restore_game_settings() {
+    win_graphics::restore();
+}
+
 pub fn audio_helper(pid: u32) -> i32 {
     trail(&format!("app audio {pid}: helper running"));
     #[cfg(windows)]
@@ -1056,19 +1062,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building CrossPOV");
 
-    // Windows' windowed-game optimization off for VALORANT while we run
-    // (a game started now gets it); put back as we quit. See win_graphics.
+    // Windows' windowed-game optimization off for VALORANT (from its next
+    // start). See win_graphics.
     win_graphics::turn_off_for_games();
     app.run(|app, event| {
         // `code: None` means the last window closed (not Quit from the tray).
-        match event {
-            RunEvent::ExitRequested { code: None, api, .. } => {
-                if app.state::<AppState>().get().minimize_to_tray {
-                    api.prevent_exit();
-                }
+        if let RunEvent::ExitRequested { code: None, api, .. } = event {
+            if app.state::<AppState>().get().minimize_to_tray {
+                api.prevent_exit();
             }
-            RunEvent::Exit => win_graphics::restore(),
-            _ => {}
         }
     });
 }
