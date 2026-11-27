@@ -585,6 +585,10 @@ impl Recorder {
         }
         // FFmpeg's own warnings about this recording (e.g. a frame rate cap), once each.
         if let Ok(log) = fs::read_to_string(self.work_dir.join("ffmpeg.log")) {
+            let changes = log.matches("Capture size changed to ").count();
+            if changes > 2 {
+                crate::trail(&format!("clip: the game's picture changed size {changes} times while recording"));
+            }
             let mut seen: Vec<&str> = Vec::new();
             for line in log.lines().map(str::trim).filter(|l| !l.is_empty()) {
                 if seen.len() < 3 && !seen.contains(&line) {

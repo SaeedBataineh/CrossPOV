@@ -406,7 +406,14 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                 // (below) makes the steady frame rate the encoder expects.
                 Some(hwnd) => {
                     let mut src = format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0");
-                    if let Some((w, h)) = window_output_size(plan.source_size, s.resolution, s.stretched == crate::settings::Stretched::Stretch) {
+                    // Always a fixed output size: VALORANT's picture wobbles
+                    // between 1079 and 1080 lines, and without one every wobble
+                    // changes the stream's size mid-recording, which costs
+                    // frames (64 fps instead of ~140). Its own size, made even,
+                    // when nothing needs resizing.
+                    let fixed = window_output_size(plan.source_size, s.resolution, s.stretched == crate::settings::Stretched::Stretch)
+                        .or(plan.source_size.map(|(w, h)| ((w + 1) & !1, (h + 1) & !1)));
+                    if let Some((w, h)) = fixed {
                         // A real resize (stretch, or shrink to the chosen
                         // resolution) scales. A size off by a line or two
                         // (1920x1079 -> 1920x1080) pads with black instead:
@@ -795,6 +802,11 @@ mod tests {
         assert!(!a.contains("ddagrab"));
         let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(screen.contains("ddagrab") && !screen.contains("fps=60"), "{screen}");
+        // A 16:9 window that needs no resizing still gets a fixed output size,
+        // so the game's picture wobbling by a line can't change it mid-recording.
+        let fixed = RecordPlan { window: Some(7), source_size: Some((1920, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let f = joined(&Settings { resolution: Resolution::P1080, ..Settings::default() }, &fixed);
+        assert!(f.contains("gfxcapture=hwnd=7:") && f.contains(":width=1920:height=1080:resize_mode=crop"), "{f}");
     }
 
     #[test]
