@@ -223,6 +223,8 @@ pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32,
     if w == 0 || h == 0 || u64::from(w) * 10 >= u64::from(h) * 16 {
         return None;
     }
+    // A window a line short of a standard height (VALORANT: 1079) counts as it.
+    let h = [720, 1080, 1440, 2160].into_iter().find(|&s| h < s && (s - h) * 100 <= s).unwrap_or(h);
     let th = target_height(r)?.min(h);
     let out_w = ((u64::from(th) * 16 / 9) as u32 + 1) & !1;
     let out_h = (u64::from(out_w) * u64::from(h) / u64::from(w)) as u32 & !1;
@@ -369,7 +371,10 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                         // scaling by one line would soften every row.
                         let (sw, sh) = plan.source_size.unwrap_or((w, h));
                         let tiny = w.abs_diff(sw) <= 2 && h.abs_diff(sh) <= 2;
-                        let mode = if tiny { "crop" } else { "scale:scale_mode=bicubic" };
+                        // Bilinear, not window capture's "bicubic": that one is a
+                        // cubic B-spline, which smooths as it enlarges and made
+                        // stretched clips visibly blurry.
+                        let mode = if tiny { "crop" } else { "scale:scale_mode=bilinear" };
                         src.push_str(&format!(":width={w}:height={h}:resize_mode={mode}"));
                     }
                     a.push(src);
@@ -742,6 +747,7 @@ mod tests {
         assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1080), Some((1920, 1322)));
         assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P1440), Some((1920, 1322)), "1440p is a limit, like Medal");
         assert_eq!(stretched_size(Some((1568, 1080)), Resolution::P720), Some((1280, 880)));
+        assert_eq!(stretched_size(Some((1568, 1079)), Resolution::P1440), Some((1920, 1322)), "a line short: same as 1080");
         assert_eq!(stretched_size(Some((1280, 960)), Resolution::P1080), Some((1706, 1278)));
         assert_eq!(stretched_size(Some((1280, 960)), Resolution::Native), None, "its own size");
         // 16:9, 16:10 and ultrawide stay as they are.
@@ -754,7 +760,7 @@ mod tests {
         let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
         let a = joined(&s, &p);
-        assert!(a.contains(":width=1920:height=1322:resize_mode=scale:scale_mode=bicubic"), "{a}");
+        assert!(a.contains(":width=1920:height=1322:resize_mode=scale:scale_mode=bilinear"), "not the B-spline: {a}");
         assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
         // A big window shrunk to the chosen height the same way.
         assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
