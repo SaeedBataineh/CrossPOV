@@ -549,7 +549,11 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
         // Frames as captured, at their own times; a keyframe every segment by
         // time (frame counts vary), so the buffer can still be cut anywhere.
         let every = format!("expr:gte(t,n_forced*{SEGMENT_SECONDS})");
-        push(&mut a, &["-fps_mode", "passthrough", "-force_key_frames", &every, "-g", &gop, "-bf", "0"]);
+        // A fine clock for the encoder (1/90000 s): by default it ticks once
+        // per frame (1/144 s), which rounds uneven capture times onto the
+        // same tick, leaving pairs of frames with one timestamp and a double
+        // gap after them: stutter in fast motion.
+        push(&mut a, &["-fps_mode", "passthrough", "-enc_time_base", "1:90000", "-force_key_frames", &every, "-g", &gop, "-bf", "0"]);
     } else {
         push(&mut a, &["-g", &gop, "-keyint_min", &gop]);
     }
@@ -773,7 +777,7 @@ mod tests {
         let a = joined(&Settings::default(), &p);
         assert!(a.contains("gfxcapture=hwnd=132456:max_framerate=60:capture_cursor=0"), "{a}");
         assert!(!a.contains("fps=60,") && !a.contains("[0:v]fps"), "frames keep their own times: {a}");
-        assert!(a.contains("-fps_mode passthrough -force_key_frames expr:gte(t,n_forced*2)"), "{a}");
+        assert!(a.contains("-fps_mode passthrough -enc_time_base 1:90000 -force_key_frames expr:gte(t,n_forced*2)"), "{a}");
         assert!(a.contains("-bf 0") && !a.contains("-bf 3"), "no B-frames with uneven frame times: {a}");
         let screen = joined(&Settings::default(), &plan(VideoSource::Desktop, VideoEncoder::Nvenc, false));
         assert!(screen.contains("-bf 3"), "whole screen keeps them: {screen}");
