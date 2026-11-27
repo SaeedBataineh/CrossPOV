@@ -50,6 +50,18 @@ pub enum Capture {
     Screen,
 }
 
+/// How a game at a stretched resolution (narrower than 16:9, shown stretched
+/// on the monitor) is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stretched {
+    /// The game's picture exactly as drawn (e.g. 1568x1080): no enlarging,
+    /// the sharpest possible.
+    Keep,
+    /// Enlarged and shown at 16:9, as on the monitor (1920x1324 shown 16:9).
+    Stretch,
+}
+
 /// Video format of recordings. H.265 is sharper at the same size, but not
 /// every PC can play it, so the app only offers it where it plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +150,7 @@ pub struct Settings {
     /// default, which was choppy; that old value is ignored.
     #[serde(rename = "captureMode")]
     pub capture: Capture,
+    pub stretched: Stretched,
     // Which games to record
     /// Any app running fullscreen (or borderless fullscreen) counts as a game.
     pub record_fullscreen: bool,
@@ -198,6 +211,7 @@ impl Default for Settings {
             format: Container::Mp4,
             codec: Codec::H264,
             capture: Capture::Screen,
+            stretched: Stretched::Keep,
             record_fullscreen: true,
             custom_games: Vec::new(),
             ignored_games: Vec::new(),

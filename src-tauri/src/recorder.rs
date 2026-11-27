@@ -62,7 +62,7 @@ impl RecorderStatus {
 /// Settings that require restarting FFmpeg when they change.
 fn recording_key(s: &Settings) -> String {
     serde_json::json!([
-        s.fps, s.resolution, s.quality, s.bitrate_mbps, s.encoder, s.codec, s.capture, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
+        s.fps, s.resolution, s.quality, s.bitrate_mbps, s.encoder, s.codec, s.capture, s.stretched, s.buffer_seconds, s.audio_mode, s.game_audio, s.game_volume,
         s.apps, s.microphone, s.mic_device, s.mic_volume, s.separate_tracks
     ])
     .to_string()
@@ -474,7 +474,7 @@ impl Recorder {
                 g.refresh_hz.map(|hz| format!("(monitor {hz} Hz) ")).unwrap_or_default(),
                 size.map(|(w, h)| format!("{w}x{h}")).unwrap_or_else(|| "(size unknown)".into()),
                 if window.is_some() {
-                    ffmpeg::window_output_size(size, settings.resolution).map(|(w, h)| format!(", recorded at {w}x{h}")).unwrap_or_default()
+                    ffmpeg::window_output_size(size, settings.resolution, settings.stretched == crate::settings::Stretched::Stretch).map(|(w, h)| format!(", recorded at {w}x{h}")).unwrap_or_default()
                 } else {
                     String::new()
                 }

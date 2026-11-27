@@ -237,9 +237,15 @@ pub fn stretched_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32,
 /// refuse). Stretched resolutions become 16:9 at the chosen height, like
 /// Medal; a window taller than the chosen resolution is shrunk to it. None:
 /// record the window at its own size.
-pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(u32, u32)> {
-    if let Some(size) = stretched_size(source, r) {
-        return Some(size);
+pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution, stretch: bool) -> Option<(u32, u32)> {
+    if stretch {
+        if let Some(size) = stretched_size(source, r) {
+            return Some(size);
+        }
+    } else if let Some((w, h)) = source.filter(|&(w, h)| w > 0 && h > 0 && u64::from(w) * 10 < u64::from(h) * 16) {
+        // A stretched game, kept as drawn: exactly its picture (even sizes),
+        // so window capture copies the pixels without enlarging them.
+        return Some((w & !1, h & !1));
     }
     let (w, h) = source?;
     if w == 0 || h == 0 {
@@ -266,11 +272,11 @@ pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(
 /// makes players show the recording at 16:9, stretched as on the monitor,
 /// like Medal does (1920x1324 pixels, shown 16:9). None for everything else.
 pub fn display_tag(s: &Settings, plan: &RecordPlan) -> Option<(u64, u64)> {
-    if plan.source != VideoSource::Desktop {
+    if plan.source != VideoSource::Desktop || s.stretched != crate::settings::Stretched::Stretch {
         return None;
     }
     let (w, h) = if plan.window.is_some() {
-        window_output_size(plan.source_size, s.resolution).or(plan.source_size)?
+        window_output_size(plan.source_size, s.resolution, true).or(plan.source_size)?
     } else {
         plan.source_size?
     };
@@ -391,7 +397,7 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
                 // (below) makes the steady frame rate the encoder expects.
                 Some(hwnd) => {
                     let mut src = format!("gfxcapture=hwnd={hwnd}:max_framerate={fps}:capture_cursor=0:capture_border=0");
-                    if let Some((w, h)) = window_output_size(plan.source_size, s.resolution) {
+                    if let Some((w, h)) = window_output_size(plan.source_size, s.resolution, s.stretched == crate::settings::Stretched::Stretch) {
                         // A real resize (stretch, or shrink to the chosen
                         // resolution) scales. A size off by a line or two
                         // (1920x1079 -> 1920x1080) pads with black instead:
@@ -792,7 +798,7 @@ mod tests {
 
         // Recorded through window capture's own resize: own shape, 1080 level.
         let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
-        let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
+        let s = Settings { resolution: Resolution::P1440, stretched: crate::settings::Stretched::Stretch, ..Settings::default() };
         let a = joined(&s, &p);
         assert!(a.contains(":width=1920:height=1324:resize_mode=scale:scale_mode=bicubic"), "{a}");
         // Shown at 16:9 like Medal: 1920 * sar / 1324 = 16/9.
@@ -802,18 +808,18 @@ mod tests {
         assert_eq!(display_tag(&Settings::default(), &RecordPlan { source_size: Some((1920, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) }), None, "16:9 isn't tagged");
         assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
         // A big window shrunk to the chosen height the same way.
-        assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
-        assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1440), None);
+        assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080, true), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1440, true), None);
         // A borderless window a line short: recorded at the clean size.
-        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1080), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1080, true), Some((1920, 1080)));
         let near = RecordPlan { window: Some(1), source_size: Some((1920, 1079)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let n = joined(&Settings { resolution: Resolution::P1080, ..Settings::default() }, &near);
         assert!(n.contains(":width=1920:height=1080:resize_mode=crop"), "a missing line is padded, not scaled: {n}");
-        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::Native), Some((1920, 1080)));
-        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1440), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::Native, true), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1440, true), Some((1920, 1080)));
         // Other shapes keep their shape.
-        assert_eq!(window_output_size(Some((3440, 1440)), Resolution::P1440), None);
-        assert_eq!(window_output_size(Some((2560, 1600)), Resolution::P1440), Some((2304, 1440)));
+        assert_eq!(window_output_size(Some((3440, 1440)), Resolution::P1440, true), None);
+        assert_eq!(window_output_size(Some((2560, 1600)), Resolution::P1440, true), Some((2304, 1440)));
         // The whole screen, stretched: recorded as it is, never refused.
         let screen = RecordPlan { source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let b = joined(&s, &screen);
@@ -837,6 +843,18 @@ mod tests {
         let a = blackout_args(&PathBuf::from("in.mp4"), &PathBuf::from("out.mp4"), &[(9.75, 18.25)], VideoEncoder::Nvenc, true, 50_000, true).join(" ");
         assert!(a.contains("drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(t,9.750,18.250)'"), "{a}");
         assert!(a.contains("-c:v hevc_nvenc") && a.contains("-c:a copy") && a.contains("-tag:v hvc1"), "{a}");
+    }
+
+    #[test]
+    fn stretched_games_are_kept_as_drawn_by_default() {
+        // Default: the game's own pixels, untouched (like Medal's untouched clips).
+        let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
+        assert_eq!(s.stretched, crate::settings::Stretched::Keep);
+        let p = RecordPlan { window: Some(1), source_size: Some((1568, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        let a = joined(&s, &p);
+        assert!(a.contains(":width=1568:height=1080:resize_mode=crop"), "exact pixels, no enlarging: {a}");
+        assert!(!a.contains("setsar") && display_tag(&s, &p).is_none(), "shown as drawn: {a}");
+        assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1080, false), None, "16:9 unaffected");
     }
 
     #[test]
