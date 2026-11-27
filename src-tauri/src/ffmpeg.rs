@@ -886,8 +886,9 @@ mod tests {
             return;
         };
         let out = std::env::temp_dir().join(format!("crosspov-even-{}.mkv", std::process::id()));
-        // Every 4th frame stamped a frame early: pairs 0 ms apart, then a double gap.
-        let paired = "testsrc2=size=160x90:rate=144,settb=1/10000000,setpts='if(eq(mod(N\\,4)\\,1)\\,PTS-0.00693/TB\\,PTS)'";
+        // Every 4th frame stamped a frame early: pairs 0 ms apart, then a double
+        // gap. (Only filters the small FFmpeg has: testsrc2, setpts.)
+        let paired = "testsrc2=size=160x90:rate=144,setpts='if(eq(mod(N\\,4)\\,1)\\,PTS-1\\,PTS)'";
         let graph = format!("[0:v]{}[v]", even_slots_filter(144));
         let run = std::process::Command::new(&ff)
             .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", paired, "-t", "2", "-filter_complex", &graph, "-map", "[v]"])
