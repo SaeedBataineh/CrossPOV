@@ -67,6 +67,11 @@ perl -0pi -e '
   s/        CHECK_HR_RET\(wgctx->frame_pool->Recreate\(wgctx->d3d_device.Get\(\), fmt, CAPTURE_POOL_SIZE, frame_size\)\);\n/        bool fits = frame_size.Width <= wgctx->pool_size.Width && frame_size.Height <= wgctx->pool_size.Height &&\n                    wgctx->pool_size.Width - frame_size.Width <= 8 && wgctx->pool_size.Height - frame_size.Height <= 8;\n        if (!fits) {\n            CHECK_HR_RET(wgctx->frame_pool->Recreate(wgctx->d3d_device.Get(), fmt, CAPTURE_POOL_SIZE, frame_size));\n            wgctx->pool_size = frame_size;\n        }\n/ or die "pool recreate not found\n";
 ' libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q 'wgctx->pool_size = frame_size;' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't keep window capture buffers on small size changes" >&2; exit 1; }
+# Keep window capture's timeline on real time: drop frames that come faster
+# than the frame rate, spread bunched ones onto the grid, and repeat the last
+# frame while the game sends none (alt-tabbed). See the patch for why.
+perl "$HERE/ffmpeg-patches/gfxcapture-keep-going.pl" libavfilter/vsrc_gfxcapture_winrt.cpp
+grep -q 'repeat_last_frame(outlink)' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't keep window capture on real time" >&2; exit 1; }
 # Window capture enlarges with a cubic B-spline (its "bilinear" and "bicubic"
 # both use it), which smooths as it enlarges: stretched clips looked blurry.
 # Swap in Catmull-Rom, the sharp bicubic (9 bilinear samples; MIT, after

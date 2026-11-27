@@ -30,7 +30,7 @@ concurrency:
 jobs:
   ffmpeg:
     # A small FFmpeg with only what CrossPOV uses (~7 MB instead of ~130 MB).
-    # Cached: it only rebuilds when scripts/build-ffmpeg.sh changes.
+    # Cached: it only rebuilds when scripts/build-ffmpeg.sh or its patches change.
     runs-on: ubuntu-latest
     # Debian testing for MinGW 14: Ubuntu's MinGW 11 is too old for Windows'
     # window capture (gfxcapture), which records just the game's window.
@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ffmpeg-out/ffmpeg.exe
-          key: ffmpeg-mingw14-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+          key: ffmpeg-mingw14-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/ffmpeg-patches/**') }}
       - name: Build FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
