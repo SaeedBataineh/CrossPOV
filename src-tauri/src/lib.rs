@@ -495,7 +495,17 @@ async fn trim_clip(app: AppHandle, state: State<'_, AppState>, path: String, sta
             out = dir.join(format!("{stem}_cut{n}.{ext}"));
             n += 1;
         }
-        run_ffmpeg(&ff, &edit::trim_args(&clip, &out, start, end, exact, enc)).map_err(|e| format!("Couldn't cut the clip: {e}"))?;
+        // Keep the clip's own video format (an H.265 clip's cut stays H.265).
+        let hevc = exact && {
+            use crate::ffmpeg::NoWindow as _;
+            std::process::Command::new(&ff)
+                .args(["-hide_banner", "-i"])
+                .arg(&clip)
+                .no_window()
+                .output()
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stderr).lines().any(|l| l.contains("Video: hevc")))
+        };
+        run_ffmpeg(&ff, &edit::trim_args(&clip, &out, start, end, exact, enc, hevc)).map_err(|e| format!("Couldn't cut the clip: {e}"))?;
         // Your clips are matched to games and fights by when they were saved:
         // date the cut as if it had been saved at its own end.
         if info.kind == clips::ClipKind::Mine {

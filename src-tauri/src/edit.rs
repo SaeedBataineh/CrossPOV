@@ -22,11 +22,14 @@ fn push(a: &mut Vec<String>, items: &[&str]) {
 
 /// Encoder settings for frames that come from a file (not the GPU capture).
 /// `kbps`: a target bitrate (for a size limit); otherwise high quality.
-pub fn encode_args(enc: VideoEncoder, kbps: Option<u32>) -> Vec<String> {
-    let mut a = vec!["-c:v".to_string(), enc.codec().to_string()];
+/// `hevc`: H.265 (a cut of an H.265 clip stays H.265); Discord copies are H.264.
+pub fn encode_args(enc: VideoEncoder, kbps: Option<u32>, hevc: bool) -> Vec<String> {
+    let mut a = vec!["-c:v".to_string(), if hevc { enc.hevc_codec() } else { enc.codec() }.to_string()];
     match (enc, kbps) {
-        (VideoEncoder::Nvenc, None) => push(&mut a, &["-preset", "p5", "-rc", "vbr", "-cq", "21", "-b:v", "0"]),
-        (VideoEncoder::Amf, None) => push(&mut a, &["-quality", "quality", "-rc", "cqp", "-qp_i", "20", "-qp_p", "22"]),
+        // Near-transparent quality for cuts: a second encode should lose
+        // as little as possible.
+        (VideoEncoder::Nvenc, None) => push(&mut a, &["-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", "17", "-b:v", "0"]),
+        (VideoEncoder::Amf, None) => push(&mut a, &["-quality", "quality", "-rc", "cqp", "-qp_i", "17", "-qp_p", "18"]),
         (_, None) => push(&mut a, &["-b:v", "14M"]),
         (enc, Some(k)) => {
             let (b, max, buf) = (format!("{k}k"), format!("{}k", k * 3 / 2), format!("{}k", k * 2));
@@ -44,14 +47,17 @@ pub fn encode_args(enc: VideoEncoder, kbps: Option<u32>) -> Vec<String> {
 /// A trimmed copy from `start` to `end` seconds. `exact` re-encodes so the
 /// cut lands on the very frame; otherwise it copies (instant, but starts at
 /// the keyframe before `start`).
-pub fn trim_args(input: &Path, out: &Path, start: f64, end: f64, exact: bool, enc: VideoEncoder) -> Vec<String> {
+pub fn trim_args(input: &Path, out: &Path, start: f64, end: f64, exact: bool, enc: VideoEncoder, hevc: bool) -> Vec<String> {
     let mut a = Vec::new();
     push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(start), "-i"]);
     a.push(input.to_string_lossy().into_owned());
     push(&mut a, &["-t", &secs(end - start)]);
     if exact {
         push(&mut a, &["-map", "0:v:0", "-map", "0:a?"]);
-        a.extend(encode_args(enc, None));
+        a.extend(encode_args(enc, None, hevc));
+        if hevc && out.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")) {
+            push(&mut a, &["-tag:v", "hvc1"]);
+        }
         push(&mut a, &["-c:a", "aac", "-b:a", "192k"]);
     } else {
         push(&mut a, &["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"]);
@@ -92,7 +98,7 @@ pub fn discord_args(input: &Path, out: &Path, start: f64, end: f64, enc: VideoEn
     // By the shape it's shown in (`dar`), with square pixels: a stretched clip
     // comes out 16:9 wherever it's played.
     push(&mut a, &["-vf", &format!("scale=w='trunc(dar*min({height},ih)/2)*2':h='min({height},ih)',setsar=1")]);
-    a.extend(encode_args(enc, Some(kbps)));
+    a.extend(encode_args(enc, Some(kbps), false));
     push(&mut a, &["-c:a", "aac", "-b:a", &format!("{DISCORD_AUDIO_KBPS}k"), "-ac", "2", "-movflags", "+faststart"]);
     a.push(out.to_string_lossy().into_owned());
     Some(a)
@@ -163,14 +169,16 @@ mod tests {
     #[test]
     fn quick_trim_copies_and_exact_trim_encodes() {
         let (i, o) = (PathBuf::from("in.mp4"), PathBuf::from("out.mp4"));
-        let quick = joined(&trim_args(&i, &o, 55.0, 70.5, false, VideoEncoder::Nvenc));
+        let quick = joined(&trim_args(&i, &o, 55.0, 70.5, false, VideoEncoder::Nvenc, false));
         assert!(quick.contains("-ss 55.000 -i in.mp4 -t 15.500"));
         assert!(quick.contains("-c copy"));
         assert!(quick.contains("+faststart"));
-        let exact = joined(&trim_args(&i, &o, 55.0, 70.5, true, VideoEncoder::Nvenc));
+        let exact = joined(&trim_args(&i, &o, 55.0, 70.5, true, VideoEncoder::Nvenc, false));
         assert!(exact.contains("-c:v h264_nvenc"));
         assert!(exact.contains("-c:a aac"));
         assert!(!exact.contains("-c copy"));
+        let h265 = joined(&trim_args(&i, &o, 55.0, 70.5, true, VideoEncoder::Nvenc, true));
+        assert!(h265.contains("-c:v hevc_nvenc") && h265.contains("-tag:v hvc1"), "an H.265 clip's cut stays H.265: {h265}");
     }
 
     /// A real frame out of a real file, with real FFmpeg, as a full-size PNG.

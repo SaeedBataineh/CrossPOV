@@ -243,9 +243,11 @@ pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution, stretch: bo
             return Some(size);
         }
     } else if let Some((w, h)) = source.filter(|&(w, h)| w > 0 && h > 0 && u64::from(w) * 10 < u64::from(h) * 16) {
-        // A stretched game, kept as drawn: exactly its picture (even sizes),
-        // so window capture copies the pixels without enlarging them.
-        return Some((w & !1, h & !1));
+        // A stretched game, kept as drawn: exactly its picture, so window
+        // capture copies the pixels without enlarging them. A line short of a
+        // standard height (1079) is padded to it, not cut to 1078.
+        let h = [720, 1080, 1440, 2160].into_iter().find(|&s| h < s && (s - h) * 100 <= s).unwrap_or(h);
+        return Some(((w + 1) & !1, (h + 1) & !1));
     }
     let (w, h) = source?;
     if w == 0 || h == 0 {
@@ -855,6 +857,9 @@ mod tests {
         assert!(a.contains(":width=1568:height=1080:resize_mode=crop"), "exact pixels, no enlarging: {a}");
         assert!(!a.contains("setsar") && display_tag(&s, &p).is_none(), "shown as drawn: {a}");
         assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1080, false), None, "16:9 unaffected");
+        assert_eq!(window_output_size(Some((1568, 1079)), Resolution::P1080, false), Some((1568, 1080)), "a line short: padded, not cut");
+        let near = RecordPlan { window: Some(1), source_size: Some((1568, 1079)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
+        assert!(joined(&s, &near).contains(":width=1568:height=1080:resize_mode=crop"));
     }
 
     #[test]
