@@ -337,7 +337,9 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
     fn push(a: &mut Vec<String>, items: &[&str]) {
         a.extend(items.iter().map(|x| x.to_string()));
     }
-    push(&mut a, &["-hide_banner", "-loglevel", "error", "-y"]);
+    // Warnings too: window capture warns when Windows caps its frame rate
+    // ("framerate may be limited"), which the log should show.
+    push(&mut a, &["-hide_banner", "-loglevel", "warning", "-y"]);
     // Live stats (frame rate, dropped and repeated frames) every 5 s, read
     // when a clip is saved so the log shows whether recording keeps up.
     push(&mut a, &["-stats_period", "5", "-progress"]);

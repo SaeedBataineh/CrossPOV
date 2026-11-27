@@ -525,7 +525,21 @@ impl Recorder {
         let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
 
         if let Some(h) = fs::read_to_string(plan.progress_file()).ok().as_deref().and_then(ffmpeg::recording_health) {
-            crate::trail(&format!("clip: recording {h}"));
+            // Window capture: frames as captured, so this is how many real
+            // frames per second Windows delivered.
+            crate::trail(&format!("clip: recording {h}{}", if plan.window.is_some() { " (window capture: real frames)" } else { "" }));
+        }
+        // FFmpeg's own warnings about this recording (e.g. a frame rate cap), once each.
+        if let Ok(log) = fs::read_to_string(self.work_dir.join("ffmpeg.log")) {
+            let mut seen: Vec<&str> = Vec::new();
+            for line in log.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                if seen.len() < 3 && !seen.contains(&line) {
+                    seen.push(line);
+                }
+            }
+            for line in seen {
+                crate::trail(&format!("ffmpeg: {}", line.chars().take(200).collect::<String>()));
+            }
         }
         let before = read_segment_list(&plan);
         let deadline = Instant::now() + Duration::from_secs(u64::from(SEGMENT_SECONDS) + 2);

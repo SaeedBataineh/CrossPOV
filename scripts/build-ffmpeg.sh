@@ -45,6 +45,10 @@ make -s -C nv-codec-headers PREFIX="$PREFIX" install
 mkdir -p "$PREFIX/include/AMF" && cp -r amf/amf/public/include/* "$PREFIX/include/AMF/"
 
 cd ffmpeg
+# Window capture keeps only 2 frames waiting for FFmpeg; when frames arrive
+# bunched up (Windows composes them unevenly), the rest are dropped. Keep 4.
+sed -i 's/^#define CAPTURE_POOL_SIZE 2$/#define CAPTURE_POOL_SIZE 4/' libavfilter/vsrc_gfxcapture_winrt.cpp
+grep -q '^#define CAPTURE_POOL_SIZE 4$' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't set the window capture pool size" >&2; exit 1; }
 PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --prefix="$PREFIX" \
   --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
