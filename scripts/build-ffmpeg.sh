@@ -56,6 +56,17 @@ grep -q '^#define CAPTURE_POOL_SIZE 4$' libavfilter/vsrc_gfxcapture_winrt.cpp ||
 # game's real size.
 sed -i 's/AV_LOG_VERBOSE, "Capture size changed to/AV_LOG_WARNING, "Capture size changed to/' libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q 'AV_LOG_WARNING, "Capture size changed to' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't make window capture report its size" >&2; exit 1; }
+# VALORANT's picture flips between 1079 and 1080 lines. Window capture
+# rebuilds its frame buffers on every size change, dropping the frames in
+# them: 1920x1080 clips came out at ~70 fps instead of 144. Keep the buffers
+# while the picture still fits in them (and is at most 8 px smaller); only
+# what's read from them follows the new size.
+perl -0pi -e '
+  s/(    SizeInt32 cap_size \{ 0, 0 \};\n)/$1    SizeInt32 pool_size { 0, 0 };\n/ or die "cap_size field not found\n";
+  s/(CreateFreeThreaded\([^;]*;\n)/$1    wgctx->pool_size = wgctx->cap_size;\n/ or die "pool creation not found\n";
+  s/        CHECK_HR_RET\(wgctx->frame_pool->Recreate\(wgctx->d3d_device.Get\(\), fmt, CAPTURE_POOL_SIZE, frame_size\)\);\n/        bool fits = frame_size.Width <= wgctx->pool_size.Width && frame_size.Height <= wgctx->pool_size.Height &&\n                    wgctx->pool_size.Width - frame_size.Width <= 8 && wgctx->pool_size.Height - frame_size.Height <= 8;\n        if (!fits) {\n            CHECK_HR_RET(wgctx->frame_pool->Recreate(wgctx->d3d_device.Get(), fmt, CAPTURE_POOL_SIZE, frame_size));\n            wgctx->pool_size = frame_size;\n        }\n/ or die "pool recreate not found\n";
+' libavfilter/vsrc_gfxcapture_winrt.cpp
+grep -q 'wgctx->pool_size = frame_size;' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't keep window capture buffers on small size changes" >&2; exit 1; }
 # Window capture enlarges with a cubic B-spline (its "bilinear" and "bicubic"
 # both use it), which smooths as it enlarges: stretched clips looked blurry.
 # Swap in Catmull-Rom, the sharp bicubic (9 bilinear samples; MIT, after
