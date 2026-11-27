@@ -107,6 +107,8 @@ struct Inner {
     /// Screen capture stopped getting this game window's pictures: window
     /// capture from then on, until the game closes.
     no_screen_for: Option<u64>,
+    /// Logged that the game's window isn't known yet (once per wait).
+    waiting_for_window: bool,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
 }
@@ -261,6 +263,7 @@ impl Recorder {
                 window_failed: false,
                 screen_for: None,
                 no_screen_for: None,
+                waiting_for_window: false,
                 halted: false,
             })),
             work_dir,
@@ -387,7 +390,16 @@ impl Recorder {
 
     fn tick(&self, game: Option<Game>, ffmpeg_path: &Path, detected: VideoEncoder, source: VideoSource) {
         let mut inner = self.lock();
-        let want = game.is_some() && !inner.halted;
+        // Game window mode records only the game: while its window isn't known
+        // (minimised or behind other windows when CrossPOV starts), record
+        // nothing rather than the desktop.
+        let game_only = inner.settings.capture == crate::settings::Capture::Window;
+        let no_window = game_only && game.as_ref().is_some_and(|g| g.hwnd == 0);
+        if no_window && !inner.waiting_for_window {
+            crate::trail("recording: waiting for the game's window (Game window mode never records the desktop)");
+        }
+        inner.waiting_for_window = no_window;
+        let want = game.is_some() && !inner.halted && !no_window;
         // Another game, or the game moved to another screen: start afresh.
         // Just the game's window when known (a new window, e.g. the game
         // restarting, starts afresh); its screen if window capture failed.
@@ -421,7 +433,7 @@ impl Recorder {
             // Not the window's size: it wobbles (VALORANT reports 1080, then
             // 1079), and a restart empties the replay buffer. Window capture
             // resizes every frame to the size it started with anyway.
-            match (window, game.as_ref().map(|g| g.hwnd).filter(|h| inner.screen_for == Some(*h))) {
+            match (window, game.as_ref().map(|g| g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed))) {
                 (Some(h), _) => format!("w{h}"),
                 (None, Some(h)) => format!("s{h}"),
                 _ => "0".into(),
@@ -505,7 +517,9 @@ impl Recorder {
                 settings.codec,
             ));
             let mut g = game.clone().unwrap_or_default();
-            let only_window = Some(g.hwnd).filter(|h| *h != 0 && inner.screen_for == Some(*h));
+            // Screen capture in Game window mode (a full-screen game, or window
+            // capture failed on this PC): only while the game is in front.
+            let only_window = Some(g.hwnd).filter(|h| *h != 0 && game_only && (inner.screen_for == Some(*h) || inner.window_failed));
             g.hwnd = window.unwrap_or(0);
             let window_size_at_start = g.window_size;
             // The game's real picture size, if window capture reported one for this window.
