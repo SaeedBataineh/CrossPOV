@@ -50,6 +50,12 @@ cd ffmpeg
 # bunched up (Windows composes them unevenly), the rest are dropped. Keep 4.
 sed -i 's/^#define CAPTURE_POOL_SIZE 2$/#define CAPTURE_POOL_SIZE 4/' libavfilter/vsrc_gfxcapture_winrt.cpp
 grep -q '^#define CAPTURE_POOL_SIZE 4$' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't set the window capture pool size" >&2; exit 1; }
+# A game can draw a smaller picture than its window (VALORANT at 1568x1080 in
+# a 1920x1080 window). Window capture notices but only says so at "verbose";
+# say it as a warning so CrossPOV (which logs warnings) can record at the
+# game's real size.
+sed -i 's/AV_LOG_VERBOSE, "Capture size changed to/AV_LOG_WARNING, "Capture size changed to/' libavfilter/vsrc_gfxcapture_winrt.cpp
+grep -q 'AV_LOG_WARNING, "Capture size changed to' libavfilter/vsrc_gfxcapture_winrt.cpp || { echo "couldn't make window capture report its size" >&2; exit 1; }
 # Window capture enlarges with a cubic B-spline (its "bilinear" and "bicubic"
 # both use it), which smooths as it enlarges: stretched clips looked blurry.
 # Swap in Catmull-Rom, the sharp bicubic (9 bilinear samples; MIT, after

@@ -76,6 +76,8 @@ struct Running {
     key: String,
     /// Shown on clips saved from this recording.
     game: String,
+    /// The game window's size when recording started (to notice it changing).
+    window_size_at_start: Option<(u32, u32)>,
 }
 
 impl Drop for Running {
@@ -92,6 +94,10 @@ struct Inner {
     status: RecorderStatus,
     /// 0 = direct GPU path, 1 = compatibility mode, 2 = CPU encoder.
     fallback: u8,
+    /// The game's real picture size, as window capture reported it, when it
+    /// differs from its window (a smaller resolution in a full-size window):
+    /// (window handle, size). Recording uses it instead of the window's size.
+    content_size: Option<(u64, (u32, u32))>,
     /// Recording just the game's window failed on this PC (or for this game):
     /// record its screen instead until the game closes.
     window_failed: bool,
@@ -138,6 +144,14 @@ pub struct Recorder {
     work_dir: PathBuf,
     listener: Arc<StatusListener>,
     ffmpeg: Arc<Mutex<Option<(PathBuf, VideoEncoder)>>>,
+}
+
+/// The game's picture size from window capture's "Capture size changed to
+/// 1568x1080" (the last one in FFmpeg's log), if it said so.
+fn captured_size_from_log(log: &str) -> Option<(u32, u32)> {
+    let line = log.lines().rev().find(|l| l.contains("Capture size changed to "))?;
+    let (w, h) = line.split("Capture size changed to ").nth(1)?.trim().split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
 /// Whether a window's size changed for real: more than 8 pixels either way.
@@ -224,6 +238,7 @@ impl Recorder {
                 running: None,
                 status: RecorderStatus::new(RecState::Starting),
                 fallback: 0,
+                content_size: None,
                 window_failed: false,
                 halted: false,
             })),
@@ -374,11 +389,24 @@ impl Recorder {
         // picture really changed size (e.g. switching to a stretched
         // resolution): window capture would leave it off-centre with black
         // beside it. A line or two of wobble (1080/1079) doesn't count.
-        let resized = inner.running.as_ref().is_some_and(|r| {
-            r.plan.window.is_some() && size_changed(r.plan.source_size, game.as_ref().and_then(|g| g.window_size))
+        let mut resized = inner.running.as_ref().is_some_and(|r| {
+            r.plan.window.is_some() && size_changed(r.window_size_at_start, game.as_ref().and_then(|g| g.window_size))
         });
         if resized {
             crate::trail("recording: the game's picture changed size, starting afresh");
+            inner.content_size = None;
+        }
+        // Window capture says the game draws a different size than its window
+        // (VALORANT at 1568x1080 in a 1920x1080 window): record at that size.
+        if !resized {
+            if let Some(r) = inner.running.as_ref().filter(|r| r.plan.window.is_some()) {
+                let log = fs::read_to_string(self.work_dir.join("ffmpeg.log")).unwrap_or_default();
+                if let Some(size) = captured_size_from_log(&log).filter(|&s| size_changed(r.plan.source_size, Some(s))) {
+                    crate::trail(&format!("recording: the game draws at {}x{} inside its window; recording at that size", size.0, size.1));
+                    inner.content_size = r.plan.window.map(|h| (h, size));
+                    resized = true;
+                }
+            }
         }
         let stale = inner.running.as_ref().is_some_and(|r| r.key != key) || resized;
         if (!want || stale) && inner.running.is_some() {
@@ -434,6 +462,11 @@ impl Recorder {
             ));
             let mut g = game.clone().unwrap_or_default();
             g.hwnd = window.unwrap_or(0);
+            let window_size_at_start = g.window_size;
+            // The game's real picture size, if window capture reported one for this window.
+            if let Some((_, size)) = inner.content_size.filter(|(h, _)| *h == g.hwnd && g.hwnd != 0) {
+                g.window_size = Some(size);
+            }
             let size = if window.is_some() { g.window_size } else { g.screen_size };
             crate::trail(&format!(
                 "recording: {} {}{}{}",
@@ -453,6 +486,8 @@ impl Recorder {
                     inner.status.encoder = Some(format!("{}{}", encoder.label(), if compat { " (compatibility mode)" } else { "" }));
                     inner.status.message = None;
                     inner.status.audio_warning = None;
+                    let mut running = running;
+                    running.window_size_at_start = window_size_at_start;
                     inner.running = Some(running);
                 }
                 Err(e) => {
@@ -473,6 +508,7 @@ impl Recorder {
         }
         if !want {
             inner.window_failed = false;
+            inner.content_size = None;
         }
 
         // Surface audio fallbacks (e.g. older Windows) once they're known.
@@ -522,7 +558,7 @@ impl Recorder {
             .spawn()
             .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
         let audio = child.stdin.take().map(|stdin| AudioPipe::start(settings, &game.exe, stdin));
-        Ok(Running { child, audio, plan, started: Instant::now(), key, game: game.name.clone() })
+        Ok(Running { child, audio, plan, started: Instant::now(), key, game: game.name.clone(), window_size_at_start: game.window_size })
     }
 
     /// FFmpeg and the encoder it found, once known (used to cut clips too).
@@ -695,6 +731,13 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_games_real_picture_size() {
+        let log = "[Parsed_gfxcapture_0 @ 000001] Capture size changed to 1920x1080\n[Parsed_gfxcapture_0 @ 000001] Capture size changed to 1568x1080\nother line\n";
+        assert_eq!(captured_size_from_log(log), Some((1568, 1080)));
+        assert_eq!(captured_size_from_log("nothing"), None);
+    }
 
     #[test]
     fn only_real_size_changes_restart_window_recording() {
