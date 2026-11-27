@@ -83,6 +83,11 @@ pub fn get(name: &str) -> Option<PathBuf> {
 }
 
 /// Folders the tools run from (so an update can stop them first).
+/// Where every downloaded FFmpeg lives (one folder per version), if known.
+pub fn ffmpeg_root() -> Option<PathBuf> {
+    root().map(|r| r.join("ffmpeg"))
+}
+
 pub fn dirs() -> Vec<PathBuf> {
     let Some(root) = root() else { return Vec::new() };
     TOOLS.iter().filter_map(|t| t.path(root).parent().map(Path::to_path_buf)).collect()

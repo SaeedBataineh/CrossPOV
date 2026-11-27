@@ -72,6 +72,21 @@ impl Procs {
         }
     }
 
+    /// Kills processes whose executable is anywhere inside `dir`, except `keep`.
+    pub fn kill_under(&self, dir: &std::path::Path, keep: u32) {
+        let Some(sys) = &self.sys else { return };
+        for (pid, p) in sys.processes() {
+            if pid.as_u32() != keep && p.exe().is_some_and(|e| e.starts_with(dir)) {
+                p.kill();
+            }
+        }
+    }
+
+    /// How many processes run from anywhere inside `dir`.
+    pub fn count_under(&self, dir: &std::path::Path) -> usize {
+        self.sys.as_ref().map_or(0, |s| s.processes().values().filter(|p| p.exe().is_some_and(|e| e.starts_with(dir))).count())
+    }
+
     pub fn pid_running(&self, pid: u32) -> bool {
         self.sys.as_ref().is_some_and(|s| s.process(sysinfo::Pid::from_u32(pid)).is_some())
     }
@@ -158,5 +173,70 @@ mod tests {
         let name = procs.names(&[me]).remove(&me).expect("own process listed");
         assert!(procs.is_running(&name));
         assert!(procs.root_pids(&name).contains(&me) || !procs.root_pids(&name).is_empty());
+    }
+}
+
+/// Ends `child` together with CrossPOV, however CrossPOV closes (Quit, an
+/// update, a crash): Windows closes our job when we go, and with it every
+/// process in it. An FFmpeg left running had kept recording the whole screen,
+/// without sound, into the same buffer as the next run's, mixing into clips.
+#[cfg(windows)]
+pub fn tie_to_app(child: &std::process::Child) {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    struct Job(HANDLE);
+    // SAFETY: a job handle can be used from any thread.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+    let job = JOB.get_or_init(|| {
+        // SAFETY: plain Win32 calls on a handle we own for the whole run (never
+        // closed: Windows closes it as we exit, which is the point).
+        unsafe {
+            let job = CreateJobObjectW(None, PCWSTR::null()).ok()?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .ok()?;
+            Some(Job(job))
+        }
+    });
+    if let Some(job) = job {
+        // SAFETY: the child's handle is valid while `child` is alive.
+        if let Err(e) = unsafe { AssignProcessToJobObject(job.0, HANDLE(child.as_raw_handle())) } {
+            crate::trail(&format!("recording: couldn't tie FFmpeg to CrossPOV ({e})"));
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn tie_to_app(_child: &std::process::Child) {}
+
+/// FFmpegs left running by an earlier CrossPOV (closed before this fix, or
+/// killed): end them before recording, so only ours writes the buffer.
+pub fn end_leftover_ffmpeg() {
+    if !cfg!(windows) {
+        return; // Elsewhere FFmpeg is the system's, shared with other programs.
+    }
+    // Downloaded FFmpegs (any version), and the one next to the app.
+    let places: Vec<std::path::PathBuf> = crate::tools::ffmpeg_root().into_iter().chain(crate::ffmpeg::locate()).collect();
+    let procs = Procs::new();
+    for place in places {
+        let n = procs.count_under(&place);
+        if n > 0 {
+            crate::trail(&format!("recording: ended {n} FFmpeg left running by an earlier CrossPOV"));
+            procs.kill_under(&place, std::process::id());
+        }
     }
 }

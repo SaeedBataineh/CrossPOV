@@ -325,6 +325,7 @@ impl Recorder {
     }
 
     fn supervise(&self) {
+        crate::procs::end_leftover_ffmpeg();
         let Some(path) = ffmpeg::locate() else {
             self.set_status(|s| {
                 *s = RecorderStatus { message: Some("FFmpeg is missing. Reinstall CrossPOV.".into()), ..RecorderStatus::new(RecState::NoFfmpeg) };
@@ -590,6 +591,7 @@ impl Recorder {
             .no_window()
             .spawn()
             .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
+        crate::procs::tie_to_app(&child);
         let audio = child.stdin.take().map(|stdin| AudioPipe::start(settings, &game.exe, stdin));
         Ok(Running { child, audio, plan, started: Instant::now(), key, game: game.name.clone(), window_size_at_start: game.window_size })
     }
