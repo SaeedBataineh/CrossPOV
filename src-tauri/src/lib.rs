@@ -14,6 +14,7 @@ mod games;
 mod icons;
 mod matches;
 mod net;
+mod obs;
 mod procs;
 mod recorder;
 mod settings;

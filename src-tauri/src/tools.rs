@@ -150,6 +150,11 @@ fn unpack(zip: &Path, dir: &Path) -> Result<(), String> {
 }
 
 /// Folders the tools run from (so an update can stop them first).
+/// Where every downloaded slim OBS lives (one folder per version), if known.
+pub fn obs_root() -> Option<PathBuf> {
+    root().map(|r| r.join("obs-slim"))
+}
+
 /// Where every downloaded FFmpeg lives (one folder per version), if known.
 pub fn ffmpeg_root() -> Option<PathBuf> {
     root().map(|r| r.join("ffmpeg"))

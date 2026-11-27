@@ -296,7 +296,7 @@ fn gcd(a: u64, b: u64) -> u64 {
     if b == 0 { a } else { gcd(b, a % b) }
 }
 
-fn target_height(r: Resolution) -> Option<u32> {
+pub(crate) fn target_height(r: Resolution) -> Option<u32> {
     match r {
         Resolution::Native => None,
         Resolution::P1440 => Some(1440),

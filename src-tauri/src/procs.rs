@@ -230,7 +230,8 @@ pub fn end_leftover_ffmpeg() {
         return; // Elsewhere FFmpeg is the system's, shared with other programs.
     }
     // Downloaded FFmpegs (any version), and the one next to the app.
-    let places: Vec<std::path::PathBuf> = crate::tools::ffmpeg_root().into_iter().chain(crate::ffmpeg::locate()).collect();
+    // And the slim OBS (any version), which records full-screen games.
+    let places: Vec<std::path::PathBuf> = crate::tools::ffmpeg_root().into_iter().chain(crate::ffmpeg::locate()).chain(crate::tools::obs_root()).collect();
     let procs = Procs::new();
     for place in places {
         let n = procs.count_under(&place);

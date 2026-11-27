@@ -109,6 +109,11 @@ struct Inner {
     no_screen_for: Option<u64>,
     /// Logged that the game's window isn't known yet (once per wait).
     waiting_for_window: bool,
+    /// A full-screen game recorded by OBS's Game Capture (see obs.rs), and
+    /// the recording key it was set up for.
+    obs: Option<(String, Arc<Mutex<crate::obs::Session>>)>,
+    /// OBS couldn't record on this PC (or this game): FFmpeg until the game closes.
+    obs_failed: bool,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
 }
@@ -175,6 +180,40 @@ fn fills_screen(window: Option<(u32, u32)>, screen: Option<(u32, u32)>, content:
     let (Some((w, h)), Some((sw, sh))) = (window, screen) else { return false };
     let near = |(a, b): (u32, u32), (c, d): (u32, u32)| a.abs_diff(c) <= 2 && b.abs_diff(d) <= 2;
     sh > 0 && near((w, h), (sw, sh)) && content.is_none_or(|c| near(c, (w, h))) && u64::from(sw) * 10 >= u64::from(sh) * 16
+}
+
+fn container_ext(c: Container) -> &'static str {
+    match c {
+        Container::Mp4 => "mp4",
+        Container::Mkv => "mkv",
+    }
+}
+
+/// A new clip's file: "Clip_2026-11-27_21-03-15.mp4" in the clip folder.
+fn new_clip_path(clip_root: &Path, ext: &str) -> Result<PathBuf, String> {
+    let out_dir = clip_root.join(MY_CLIPS);
+    fs::create_dir_all(&out_dir).map_err(|e| format!("Could not create {}: {e}", out_dir.display()))?;
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let stamp = now
+        .format(time::macros::format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]"))
+        .unwrap_or_else(|_| now_ms().to_string());
+    let mut out = out_dir.join(format!("Clip_{stamp}.{ext}"));
+    let mut n = 2;
+    while out.exists() {
+        out = out_dir.join(format!("Clip_{stamp}_{n}.{ext}"));
+        n += 1;
+    }
+    Ok(out)
+}
+
+/// The recorded size for a `screen`-sized picture at the chosen resolution:
+/// shrunk to its height (keeping the shape, even numbers), never enlarged.
+fn obs_output_size(screen: (u32, u32), r: crate::settings::Resolution) -> (u32, u32) {
+    let even = |v: u32| v & !1;
+    match ffmpeg::target_height(r).filter(|h| *h < screen.1) {
+        Some(h) => (even((u64::from(screen.0) * u64::from(h) / u64::from(screen.1)) as u32), even(h)),
+        None => (even(screen.0), even(screen.1)),
+    }
 }
 
 fn size_changed(before: Option<(u32, u32)>, now: Option<(u32, u32)>) -> bool {
@@ -264,6 +303,8 @@ impl Recorder {
                 screen_for: None,
                 no_screen_for: None,
                 waiting_for_window: false,
+                obs: None,
+                obs_failed: false,
                 halted: false,
             })),
             work_dir,
@@ -320,6 +361,7 @@ impl Recorder {
         let mut inner = self.lock();
         inner.halted = true;
         inner.running = None;
+        inner.obs = None;
     }
 
     /// Runs the supervisor loop on a background thread.
@@ -440,6 +482,92 @@ impl Recorder {
             }
         );
         inner.status.game = game.clone();
+
+        // A full-screen game in Game window mode, with OBS ready: OBS's Game
+        // Capture records it (frames from the game itself; Windows' capture
+        // APIs can see what's behind such a game instead). See obs.rs.
+        let use_obs = want
+            && game_only
+            && !inner.obs_failed
+            && crate::tools::obs_dir().is_some()
+            && game.as_ref().is_some_and(|g| g.hwnd != 0 && inner.screen_for == Some(g.hwnd));
+        if let Some((obs_key, session)) = inner.obs.clone() {
+            let alive = session.lock().unwrap_or_else(|e| e.into_inner()).alive();
+            if !alive {
+                crate::trail("recording: OBS stopped; recording with FFmpeg until the game closes");
+                inner.obs_failed = true;
+            }
+            if !alive || !use_obs || obs_key != key {
+                inner.obs = None;
+            }
+        }
+        if use_obs && !inner.obs_failed {
+            inner.running = None; // never both
+            if inner.obs.is_none() {
+                let g = game.clone().unwrap_or_default();
+                let settings = inner.settings.clone();
+                let encoder = ffmpeg::resolve_encoder(settings.encoder, detected);
+                let size = g.screen_size.or(g.window_size).unwrap_or((1920, 1080));
+                let (title, class) = crate::obs::window_names(g.hwnd);
+                let setup = crate::obs::Setup {
+                    exe: g.exe.clone(),
+                    title,
+                    class,
+                    size,
+                    out_size: obs_output_size(size, settings.resolution),
+                    fps: settings.fps,
+                    encoder,
+                    hevc: settings.codec == crate::settings::Codec::H265,
+                    kbps: ffmpeg::bitrate_kbps(&settings),
+                    buffer_seconds: settings.buffer_seconds,
+                    format: container_ext(settings.format),
+                    game_audio: settings.game_audio.then(|| settings.game_volume as f32 / 100.0),
+                    mic: settings.microphone.then(|| settings.mic_volume as f32 / 100.0),
+                    denoise_mic: settings.microphone && settings.mic_noise_suppression,
+                    separate_tracks: settings.separate_tracks,
+                    replay_dir: self.work_dir.join("obs-replays"),
+                };
+                crate::trail(&format!(
+                    "recording: {} with OBS Game Capture ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
+                    g.exe,
+                    encoder.label(),
+                    setup.size.0,
+                    setup.size.1,
+                    setup.out_size.0,
+                    setup.out_size.1,
+                    setup.fps,
+                    setup.kbps / 1000
+                ));
+                inner.status.state = RecState::Starting;
+                let status = inner.status.clone();
+                drop(inner);
+                (self.listener)(&status);
+                // OBS takes a few seconds to start: not while holding the lock.
+                let started = crate::tools::obs_dir().ok_or_else(|| "OBS isn't ready".to_string()).and_then(|dir| crate::obs::Session::start(&dir, setup));
+                let mut inner = self.lock();
+                match started {
+                    Ok(session) => {
+                        crate::trail("recording: started (OBS)");
+                        inner.obs = Some((key, Arc::new(Mutex::new(session))));
+                        inner.status.state = RecState::Recording;
+                        inner.status.encoder = Some(format!("OBS Game Capture ({})", encoder.label()));
+                        inner.status.message = None;
+                    }
+                    Err(e) => {
+                        crate::trail(&format!("recording: OBS couldn't record ({e}); recording with FFmpeg"));
+                        inner.obs_failed = true;
+                    }
+                }
+                let status = inner.status.clone();
+                drop(inner);
+                (self.listener)(&status);
+                return;
+            }
+            let status = inner.status.clone();
+            drop(inner);
+            (self.listener)(&status);
+            return;
+        }
 
         // Stop if the game closed or recording settings changed, or the game's
         // picture really changed size (e.g. switching to a stretched
@@ -573,6 +701,8 @@ impl Recorder {
         }
         if !want {
             inner.window_failed = false;
+            inner.obs_failed = false;
+            inner.obs = None;
             inner.content_size = None;
             inner.screen_for = None;
             inner.no_screen_for = None;
@@ -645,6 +775,13 @@ impl Recorder {
     /// written right now to finish, so the clip includes the moment the
     /// hotkey was pressed.
     pub fn save_clip(&self, clip_root: &Path) -> Result<ClipInfo, String> {
+        let obs = {
+            let inner = self.lock();
+            inner.obs.as_ref().map(|(_, s)| (s.clone(), inner.settings.clone(), inner.status.game.as_ref().map(|g| g.name.clone())))
+        };
+        if let Some((session, settings, game)) = obs {
+            return self.save_obs_clip(clip_root, &session, &settings, game.filter(|g| !g.is_empty()));
+        }
         let (plan, settings, game) = {
             let inner = self.lock();
             let r = inner.running.as_ref().ok_or("Not recording right now. Clips are saved while a game is open.")?;
@@ -693,22 +830,8 @@ impl Recorder {
         let wanted = settings.buffer_seconds.div_ceil(SEGMENT_SECONDS) as usize;
         let take = &segments[segments.len().saturating_sub(wanted)..];
 
-        let out_dir = clip_root.join(MY_CLIPS);
-        fs::create_dir_all(&out_dir).map_err(|e| format!("Could not create {}: {e}", out_dir.display()))?;
-        let ext = match settings.format {
-            Container::Mp4 => "mp4",
-            Container::Mkv => "mkv",
-        };
-        let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
-        let stamp = now
-            .format(time::macros::format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]"))
-            .unwrap_or_else(|_| now_ms().to_string());
-        let mut out = out_dir.join(format!("Clip_{stamp}.{ext}"));
-        let mut n = 2;
-        while out.exists() {
-            out = out_dir.join(format!("Clip_{stamp}_{n}.{ext}"));
-            n += 1;
-        }
+        let ext = container_ext(settings.format);
+        let out = new_clip_path(clip_root, ext)?;
 
         // The last segment's file time is when the clip ends.
         let clip_end = take
@@ -775,19 +898,47 @@ impl Recorder {
             let _ = fs::remove_file(&joined);
         }
 
-        let thumb = clips::thumb_path(clip_root, &out);
+        let duration = (take.len() as u32 * SEGMENT_SECONDS) as f64;
+        Ok(Self::finish_clip(clip_root, &out, &ffmpeg_path, &settings, game, duration))
+    }
+
+    /// F9 while OBS records: OBS saves its replay buffer, which becomes the clip.
+    fn save_obs_clip(&self, clip_root: &Path, session: &Mutex<crate::obs::Session>, settings: &Settings, game: Option<String>) -> Result<ClipInfo, String> {
+        let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
+        let saved = {
+            let mut s = session.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(h) = s.health() {
+                crate::trail(&format!("clip: OBS {h}"));
+            }
+            for line in s.log_lines() {
+                crate::trail(&format!("obs: {line}"));
+            }
+            s.save_replay()?
+        };
+        let ext = saved.extension().and_then(|e| e.to_str()).unwrap_or(container_ext(settings.format)).to_string();
+        let out = new_clip_path(clip_root, &ext)?;
+        // The replay is in CrossPOV's own folder; the clip folder may be on another drive.
+        if fs::rename(&saved, &out).is_err() {
+            fs::copy(&saved, &out).map_err(|e| format!("Could not save clip: {e}"))?;
+            let _ = fs::remove_file(&saved);
+        }
+        Ok(Self::finish_clip(clip_root, &out, &ffmpeg_path, settings, game, f64::from(settings.buffer_seconds)))
+    }
+
+    /// Thumbnail, details and storage limit for a saved clip.
+    fn finish_clip(clip_root: &Path, out: &Path, ffmpeg_path: &Path, settings: &Settings, game: Option<String>, duration: f64) -> ClipInfo {
+        let thumb = clips::thumb_path(clip_root, out);
         if let Some(dir) = thumb.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        let _ = run_ffmpeg(&ffmpeg_path, &ffmpeg::thumbnail_args(&out, &thumb));
-        let duration = (take.len() as u32 * SEGMENT_SECONDS) as f64;
-        clips::write_meta(clip_root, &out, &ClipMeta { duration_sec: Some(duration), game: game.clone(), ..ClipMeta::default() });
+        let _ = run_ffmpeg(ffmpeg_path, &ffmpeg::thumbnail_args(out, &thumb));
+        clips::write_meta(clip_root, out, &ClipMeta { duration_sec: Some(duration), game: game.clone(), ..ClipMeta::default() });
         if settings.prune_oldest {
             clips::prune(clip_root, settings.storage_limit_gb);
         }
 
-        let size = fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-        Ok(ClipInfo {
+        let size = fs::metadata(out).map(|m| m.len()).unwrap_or(0);
+        ClipInfo {
             name: out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
             path: out.to_string_lossy().into_owned(),
             kind: clips::ClipKind::Mine,
@@ -805,7 +956,7 @@ impl Recorder {
             vod_start_sec: None,
             game,
             made_ms: None,
-        })
+        }
     }
 }
 
