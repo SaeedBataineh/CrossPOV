@@ -63,8 +63,10 @@ pub struct Capture {
     pub desktop_audio: bool,
     /// Extra apps' sound: (.exe, volume 0..1).
     pub apps: Vec<(String, f32)>,
-    /// The mic (volume 0..1) and its noise suppression.
+    /// The mic (volume 0..1), which one ("default", or its name as Windows
+    /// shows it, as in Settings), and its noise suppression.
     pub mic: Option<f32>,
+    pub mic_device: String,
     pub denoise_mic: bool,
     pub separate_tracks: bool,
 }
@@ -220,6 +222,7 @@ impl Obs {
         }
         if let Some(vol) = c.mic {
             self.create(&scene, MIC, "wasapi_input_capture", json!({ "device_id": "default" }))?;
+            self.pick_mic(&c.mic_device);
             self.audio(MIC, vol, tracks(!c.separate_tracks, c.separate_tracks));
             if c.denoise_mic {
                 let _ = self.request(
@@ -231,6 +234,23 @@ impl Obs {
         self.request("StartReplayBuffer", json!({}))?;
         self.capture = Some(c);
         Ok(())
+    }
+
+    /// Points the mic input at the chosen microphone, like OBS's own device
+    /// list: by its name among the devices OBS lists. "default" (or a mic
+    /// that isn't connected) follows Windows' default mic.
+    fn pick_mic(&mut self, wanted: &str) {
+        if wanted.is_empty() || wanted.eq_ignore_ascii_case("default") {
+            return;
+        }
+        let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": MIC, "propertyName": "device_id" })) else { return };
+        let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
+        match pick_device(&items, wanted) {
+            Some(id) => {
+                let _ = self.request("SetInputSettings", json!({ "inputName": MIC, "inputSettings": { "device_id": id } }));
+            }
+            None => crate::trail(&format!("obs: mic \"{wanted}\" isn't connected; using the default mic")),
+        }
     }
 
     fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<(), String> {
@@ -357,6 +377,19 @@ impl Obs {
         }
         Err((0, format!("OBS: {kind}: no answer")))
     }
+}
+
+/// The device id of the mic named `wanted` among OBS's list ({itemName,
+/// itemValue}): the same name, else one name containing the other.
+fn pick_device(items: &[Value], wanted: &str) -> Option<Value> {
+    let named = |i: &&Value| i["itemName"].as_str().map(str::to_lowercase);
+    let w = wanted.to_lowercase();
+    items
+        .iter()
+        .find(|i| named(i).as_deref() == Some(w.as_str()))
+        .or_else(|| items.iter().find(|i| named(i).is_some_and(|n| !n.is_empty() && (n.contains(&w) || w.contains(&n)))))
+        .map(|i| i["itemValue"].clone())
+        .filter(|v| v.as_str().is_some_and(|s| !s.is_empty() && s != "default"))
 }
 
 /// Game Capture's window string: "title:class:exe", each with ':' as "#3A".
@@ -661,6 +694,19 @@ mod tests {
         let secret = base64(&Sha256::digest(b"supersecretpasswordlpcQWbNQPyAAAp6ckU9RJ2JvMVz9t6c/6fvnZtPJAEM="));
         let auth = base64(&Sha256::digest(format!("{secret}+IxH4CnCiqpX1rM9scsNynZzbOe4KhDeYcTNS3PDaeY=").as_bytes()));
         assert_eq!(auth.len(), 44);
+    }
+
+    #[test]
+    fn picks_the_mic_by_name() {
+        let items = vec![
+            json!({ "itemName": "Default", "itemValue": "default" }),
+            json!({ "itemName": "Microphone (Realtek(R) Audio)", "itemValue": "{0.0.1.00000000}.{aaa}" }),
+            json!({ "itemName": "Headset Microphone (HyperX Cloud II)", "itemValue": "{0.0.1.00000000}.{bbb}" }),
+        ];
+        assert_eq!(pick_device(&items, "Headset Microphone (HyperX Cloud II)"), Some(json!("{0.0.1.00000000}.{bbb}")));
+        assert_eq!(pick_device(&items, "microphone (realtek(r) audio)"), Some(json!("{0.0.1.00000000}.{aaa}")), "any case");
+        assert_eq!(pick_device(&items, "HyperX Cloud II"), Some(json!("{0.0.1.00000000}.{bbb}")), "part of the name");
+        assert_eq!(pick_device(&items, "Blue Yeti"), None, "not connected");
     }
 
     #[test]

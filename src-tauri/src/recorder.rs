@@ -527,6 +527,7 @@ impl Recorder {
                 desktop_audio: settings.audio_mode == crate::settings::AudioMode::Desktop,
                 apps: settings.apps.iter().filter(|a| a.enabled).map(|a| (a.exe.clone(), a.volume as f32 / 100.0)).collect(),
                 mic: settings.microphone.then(|| settings.mic_volume as f32 / 100.0),
+                mic_device: settings.mic_device.clone(),
                 denoise_mic: settings.microphone && settings.mic_noise_suppression,
                 separate_tracks: settings.microphone && settings.separate_tracks,
             }
