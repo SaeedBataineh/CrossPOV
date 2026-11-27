@@ -96,6 +96,41 @@ pub fn discord_args(input: &Path, out: &Path, start: f64, end: f64, enc: VideoEn
     Some(a)
 }
 
+/// The video size from FFmpeg's description of a file ("Video: ..., 1920x1324 ...").
+pub fn video_size(ffmpeg_info: &str) -> Option<(u32, u32)> {
+    let line = ffmpeg_info.lines().find(|l| l.contains("Video:"))?;
+    line.split(|c: char| c == ',' || c == ' ' || c == '[').find_map(|w| {
+        let (a, b) = w.split_once('x')?;
+        let (w, h) = (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?);
+        (w >= 16 && h >= 16).then_some((w, h))
+    })
+}
+
+/// One frame at `at` seconds, at the video's real size, as raw RGB bytes in
+/// a file (made into a PNG by the caller: the small FFmpeg has no PNG encoder).
+pub fn frame_args(input: &Path, raw_out: &Path, at: f64) -> Vec<String> {
+    let mut a = Vec::new();
+    push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(at), "-i"]);
+    a.push(input.to_string_lossy().into_owned());
+    push(&mut a, &["-frames:v", "1", "-vf", "format=rgb24", "-c:v", "rawvideo", "-f", "image2", "-update", "1"]);
+    a.push(raw_out.to_string_lossy().into_owned());
+    a
+}
+
+/// Raw RGB pixels as a PNG file.
+pub fn write_png(out: &Path, w: u32, h: u32, rgb: &[u8]) -> Result<(), String> {
+    if rgb.len() != (w * h * 3) as usize {
+        return Err("The frame came out the wrong size.".into());
+    }
+    let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(rgb).map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())
+}
+
 /// Puts a file on the Windows clipboard, so Ctrl+V in Discord (or Explorer) pastes it.
 #[cfg(windows)]
 pub fn copy_file_to_clipboard(path: &Path) -> Result<(), String> {
@@ -134,6 +169,39 @@ mod tests {
         assert!(exact.contains("-c:v h264_nvenc"));
         assert!(exact.contains("-c:a aac"));
         assert!(!exact.contains("-c copy"));
+    }
+
+    /// A real frame out of a real file, with real FFmpeg, as a full-size PNG.
+    /// Skipped without FFmpeg.
+    #[test]
+    fn saves_a_full_size_frame() {
+        let Some(ff) = crate::ffmpeg::locate() else {
+            eprintln!("ffmpeg not found; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("crosspov-frame-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, raw, png) = (dir.join("in.mp4"), dir.join("f.rgb"), dir.join("f.png"));
+        let run = |args: &[String]| std::process::Command::new(&ff).args(args).output().unwrap();
+        let made = run(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1324:rate=30", "-t", "2", "-vf", "format=nv12", "-c:v", crate::ffmpeg::VideoEncoder::Cpu.codec(), "-b:v", "4M"].map(String::from).into_iter().chain([src.to_string_lossy().into_owned()]).collect::<Vec<_>>());
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        let info = run(&["-hide_banner".to_string(), "-i".to_string(), src.to_string_lossy().into_owned()]);
+        let (w, h) = video_size(&String::from_utf8_lossy(&info.stderr)).expect("size");
+        assert_eq!((w, h), (1920, 1324));
+        let out = run(&frame_args(&src, &raw, 1.0));
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        write_png(&png, w, h, &std::fs::read(&raw).unwrap()).unwrap();
+        let decoded = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&png).unwrap())).read_info().unwrap();
+        assert_eq!((decoded.info().width, decoded.info().height), (1920, 1324));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_the_video_size() {
+        let info = "  Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv, bt709), 1920x1324 [SAR 1:1 DAR 480:331], 49324 kb/s, 120 fps\n  Stream #0:1: Audio: aac, 48000 Hz";
+        assert_eq!(video_size(info), Some((1920, 1324)));
+        assert_eq!(video_size("Audio only"), None);
     }
 
     #[test]

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CaretLeft, CaretRight, FolderOpen, PencilSimple, Trash } from "@phosphor-icons/react";
+import { ArrowRight, Camera, CaretLeft, CaretRight, FolderOpen, PencilSimple, Trash } from "@phosphor-icons/react";
 import { PlayerControls, fine, type Range } from "../components/ClipPlayer";
 import { Avatar, cardMeta, cardTitle, clipPicture, renameClip } from "../components/ui";
-import { clipVideoSrc, copyForDiscord, findMe, isDesktop, openClip, revealClip, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
+import { clipVideoSrc, copyForDiscord, findMe, isDesktop, openClip, revealClip, saveFrame, trimClip, type ClipInfo, type MatchStreamers, type MatchSummary } from "../lib/backend";
 import { result, resultColor } from "../lib/matchInfo";
 import { findPairs, fightMarks, matchOf, pairsWith, vodLink } from "../lib/pairs";
 import type { Settings } from "../lib/settings";
@@ -207,6 +207,16 @@ export default function Viewer({
     }
   }
 
+  async function frame() {
+    const at = video.current?.currentTime ?? 0;
+    try {
+      await saveFrame(target.path, at);
+      notify("Saved the frame as a full-size picture (in Frames, next to your clips).", "good");
+    } catch (err) {
+      notify(String(err), "bad");
+    }
+  }
+
   async function discord() {
     setBusy("Making a Discord copy…");
     try {
@@ -237,6 +247,7 @@ export default function Viewer({
         <span className="spacer" />
         <span className="viewer-acts">
           <button type="button" className="icon-act" onClick={() => void renameClip(clip)} title="Rename" aria-label="Rename this clip"><PencilSimple size={17} aria-hidden /></button>
+          {isDesktop && <button type="button" className="icon-act" onClick={() => void frame()} title="Save this frame as a full-size picture" aria-label="Save this frame as a picture"><Camera size={17} aria-hidden /></button>}
           {isDesktop && <button type="button" className="icon-act" onClick={run(() => revealClip(clip.path))} title="Show in folder" aria-label="Show in folder"><FolderOpen size={17} aria-hidden /></button>}
           <button type="button" className="icon-act danger" onClick={() => void remove()} title="Delete" aria-label="Delete this clip"><Trash size={17} aria-hidden /></button>
           <span className="acts-sep" aria-hidden="true" />

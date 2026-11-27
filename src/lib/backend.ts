@@ -213,6 +213,12 @@ export async function copyForDiscord(path: string, start: number, end: number): 
   return tauriInvoke<number>("copy_for_discord", { path, start, end });
 }
 
+/** Saves the frame at `at` seconds as a full-size PNG (in "Frames") and shows it. */
+export async function saveFrame(path: string, at: number): Promise<string> {
+  if (!isDesktop) throw NEEDS_APP("Saving a frame");
+  return tauriInvoke<string>("save_frame", { path, at });
+}
+
 export async function revealClip(path: string): Promise<void> {
   if (!isDesktop) throw NEEDS_APP("Opening the clip folder");
   await tauriInvoke<void>("reveal_clip", { path });

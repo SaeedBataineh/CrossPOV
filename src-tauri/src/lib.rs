@@ -554,6 +554,39 @@ async fn copy_for_discord(app: AppHandle, state: State<'_, AppState>, path: Stri
     .map_err(|e| e.to_string())?
 }
 
+/// Saves the frame at `at` seconds as a full-size PNG in "Frames" next to the
+/// clips, and shows it in its folder. Pixel-exact: for comparing recordings.
+#[tauri::command]
+async fn save_frame(app: AppHandle, state: State<'_, AppState>, path: String, at: f64) -> Result<String, String> {
+    let (root, clip, _info, ff, _enc) = edit_inputs(&app, &state, &path)?;
+    let at = if at.is_finite() { at.max(0.0) } else { 0.0 };
+    let out = tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
+        // Its size, from FFmpeg's description of the file.
+        use crate::ffmpeg::NoWindow as _;
+        let probe = std::process::Command::new(&ff)
+            .args(["-hide_banner", "-i"])
+            .arg(&clip)
+            .no_window()
+            .output()
+            .map_err(|e| e.to_string())?;
+        let (w, h) = edit::video_size(&String::from_utf8_lossy(&probe.stderr)).ok_or("Couldn't read the video's size.")?;
+        let dir = root.join("Frames");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let stem = clip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let raw = dir.join(format!(".{stem}.rgb"));
+        run_ffmpeg(&ff, &edit::frame_args(&clip, &raw, at)).map_err(|e| format!("Couldn't save the frame: {e}"))?;
+        let rgb = std::fs::read(&raw).map_err(|e| e.to_string());
+        let _ = std::fs::remove_file(&raw);
+        let out = dir.join(format!("{stem}_{:.2}s.png", at));
+        edit::write_png(&out, w, h, &rgb?)?;
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.opener().reveal_item_in_dir(&out);
+    Ok(out.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<(), String> {
     let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
@@ -976,6 +1009,7 @@ pub fn run() {
             known_games,
             trim_clip,
             copy_for_discord,
+            save_frame,
             default_clip_folder,
             open_clip_folder,
             recorder_status,
