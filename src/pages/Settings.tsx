@@ -284,12 +284,12 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row
             label="Capture"
             help={
-              draft.capture === "window"
-                ? "Game window: other windows and the desktop never show up in clips"
-                : "Whole screen: everything on the game's monitor, like a screen recording"
+              draft.captureMode === "window"
+                ? "Game window: other windows never show up, but Windows hands over game frames unevenly, so clips can look choppy"
+                : "Whole screen: smooth, every frame your monitor shows"
             }
           >
-            <Seg label="Capture" value={draft.capture} onChange={(v) => set("capture", v)} options={[{ value: "window", label: "Game window" }, { value: "screen", label: "Whole screen" }]} />
+            <Seg label="Capture" value={draft.captureMode} onChange={(v) => set("captureMode", v)} options={[{ value: "screen", label: "Whole screen" }, { value: "window", label: "Game window" }]} />
           </Row>
           <Row
             label="Video format"

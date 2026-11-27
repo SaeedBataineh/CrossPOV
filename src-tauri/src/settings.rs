@@ -40,8 +40,9 @@ pub enum Encoder {
     Cpu,
 }
 
-/// What gets recorded: just the game's window (other windows and the desktop
-/// never show up), or its whole screen (what's on the monitor).
+/// What gets recorded: the game's whole screen (smooth: every frame the
+/// monitor shows), or just its window (other windows never show up, but
+/// Windows' window capture hands over game frames unevenly: choppy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Capture {
@@ -133,6 +134,9 @@ pub struct Settings {
     pub encoder: Encoder,
     pub format: Container,
     pub codec: Codec,
+    /// Saved as "captureMode": 0.4.6 saved "capture": "window" as everyone's
+    /// default, which was choppy; that old value is ignored.
+    #[serde(rename = "captureMode")]
     pub capture: Capture,
     // Which games to record
     /// Any app running fullscreen (or borderless fullscreen) counts as a game.
@@ -193,7 +197,7 @@ impl Default for Settings {
             encoder: Encoder::Auto,
             format: Container::Mp4,
             codec: Codec::H264,
-            capture: Capture::Window,
+            capture: Capture::Screen,
             record_fullscreen: true,
             custom_games: Vec::new(),
             ignored_games: Vec::new(),
