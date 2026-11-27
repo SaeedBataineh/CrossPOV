@@ -563,9 +563,15 @@ pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: Video
     a.extend(["-map", "0:v:0", "-map", "0:a?", "-vf"].iter().map(|s| s.to_string()));
     a.push(format!("drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='{when}'"));
     a.extend(["-c:v".to_string(), if hevc { enc.hevc_codec() } else { enc.codec() }.to_string()]);
-    if enc == VideoEncoder::Nvenc {
-        a.extend(["-preset", "p4", "-tune", "hq", "-rc", "vbr"].iter().map(|s| s.to_string()));
-    }
+    // The same encoder options recording uses (known to work on each).
+    let opts: &[&str] = match enc {
+        VideoEncoder::Nvenc => &["-preset", "p4", "-tune", "hq", "-rc", "vbr"],
+        VideoEncoder::Amf => &["-usage", "transcoding", "-quality", "quality", "-rc", "vbr_peak"],
+        VideoEncoder::Qsv if cfg!(windows) => &["-hw_encoding", "1", "-rate_control", "cbr", "-scenario", "display_remoting"],
+        VideoEncoder::Cpu if cfg!(windows) => &["-rate_control", "cbr", "-scenario", "display_remoting"],
+        _ => &[],
+    };
+    a.extend(opts.iter().map(|s| s.to_string()));
     a.extend([
         "-b:v".to_string(),
         format!("{kbps}k"),
