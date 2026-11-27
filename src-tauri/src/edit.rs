@@ -89,7 +89,9 @@ pub fn discord_args(input: &Path, out: &Path, start: f64, end: f64, enc: VideoEn
     push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(start), "-i"]);
     a.push(input.to_string_lossy().into_owned());
     push(&mut a, &["-t", &secs(end - start), "-map", "0:v:0", "-map", "0:a:0?"]);
-    push(&mut a, &["-vf", &format!("scale=-2:'min({height},ih)'")]);
+    // By the shape it's shown in (`dar`), with square pixels: a stretched clip
+    // comes out 16:9 wherever it's played.
+    push(&mut a, &["-vf", &format!("scale=w='trunc(dar*min({height},ih)/2)*2':h='min({height},ih)',setsar=1")]);
     a.extend(encode_args(enc, Some(kbps)));
     push(&mut a, &["-c:a", "aac", "-b:a", &format!("{DISCORD_AUDIO_KBPS}k"), "-ac", "2", "-movflags", "+faststart"]);
     a.push(out.to_string_lossy().into_owned());

@@ -262,6 +262,32 @@ pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(
     (out != (w, h)).then_some(out)
 }
 
+/// For a stretched-resolution game: the pixel shape (sample aspect ratio) that
+/// makes players show the recording at 16:9, stretched as on the monitor,
+/// like Medal does (1920x1324 pixels, shown 16:9). None for everything else.
+pub fn display_tag(s: &Settings, plan: &RecordPlan) -> Option<(u64, u64)> {
+    if plan.source != VideoSource::Desktop {
+        return None;
+    }
+    let (w, h) = if plan.window.is_some() {
+        window_output_size(plan.source_size, s.resolution).or(plan.source_size)?
+    } else {
+        plan.source_size?
+    };
+    // Clearly narrower than 16:9 (a 16:10 monitor isn't stretched).
+    if w == 0 || h == 0 || u64::from(w) * 10 >= u64::from(h) * 16 {
+        return None;
+    }
+    // Shown width w*sar : h = 16 : 9  =>  sar = 16h / 9w.
+    let (n, d) = (16 * u64::from(h), 9 * u64::from(w));
+    let g = gcd(n, d);
+    Some((n / g, d / g))
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
 fn target_height(r: Resolution) -> Option<u32> {
     match r {
         Resolution::Native => None,
@@ -428,6 +454,10 @@ pub fn record_args(s: &Settings, plan: &RecordPlan) -> Vec<String> {
             vf.push(format!("scale=-2:'min(ih,{h})':flags=bilinear"));
         }
         vf.push("format=nv12".into());
+    }
+    if let Some((n, d)) = display_tag(s, plan) {
+        // Only marks the shape to show it in: the pixels stay as they are.
+        vf.push(format!("setsar={n}/{d}:max=100000"));
     }
 
     let mut graph: Vec<String> = Vec::new();
@@ -627,7 +657,8 @@ pub fn thumbnail_args(clip: &Path, out: &Path) -> Vec<String> {
         .map(|s| s.to_string())
         .collect();
     a.push(clip.to_string_lossy().into_owned());
-    a.extend(["-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4"].iter().map(|s| s.to_string()));
+    // By the shape it's shown in (`dar`), so a stretched clip's thumbnail is 16:9 too.
+    a.extend(["-frames:v", "1", "-vf", "scale=w=480:h='trunc(480/dar/2)*2',setsar=1", "-q:v", "4"].iter().map(|s| s.to_string()));
     a.push(out.to_string_lossy().into_owned());
     a
 }
@@ -763,6 +794,11 @@ mod tests {
         let s = Settings { resolution: Resolution::P1440, ..Settings::default() };
         let a = joined(&s, &p);
         assert!(a.contains(":width=1920:height=1324:resize_mode=scale:scale_mode=bicubic"), "{a}");
+        // Shown at 16:9 like Medal: 1920 * sar / 1324 = 16/9.
+        let (n, d) = display_tag(&s, &p).unwrap();
+        assert!(((1920.0 * n as f64 / d as f64) / 1324.0 - 16.0 / 9.0).abs() < 1e-9);
+        assert!(a.contains(&format!("setsar={n}/{d}")), "{a}");
+        assert_eq!(display_tag(&Settings::default(), &RecordPlan { source_size: Some((1920, 1080)), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) }), None, "16:9 isn't tagged");
         assert!(!a.contains("scale_d3d11"), "no separate GPU resize step: {a}");
         // A big window shrunk to the chosen height the same way.
         assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
