@@ -1,5 +1,5 @@
 import { Diamond, Skull } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { MatchPlayer, MatchSummary } from "../lib/backend";
 import { TwitchIcon } from "./Icons";
 import { AgentIcon } from "./ValorantArt";
@@ -49,6 +49,7 @@ export function RoundTimeline({ match, me, fightRounds }: { match: MatchSummary;
           return (
             <div
               key={r.index}
+              style={{ "--i": i } as CSSProperties}
               className={`vs-round${half ? " half" : ""}${fightRounds.has(r.index) ? " streamer" : ""}`}
               title={`Round ${r.index + 1}: ${r.side === "ally" ? "won" : r.side === "enemy" ? "lost" : "no result"}${r.side && r.how === "elim" ? " by elimination" : ""}${kills ? ` · ${kills} kill${kills === 1 ? "" : "s"}` : ""}${fightRounds.has(r.index) ? " · you fought a streamer" : ""}`}
             >
@@ -106,12 +107,12 @@ export function PostMatchScoreboard({ match, me, streamers, children }: { match:
           </tr>
         </thead>
         <tbody>
-          {players.map((p) => {
+          {players.map((p, i) => {
             const mine = p.puuid === me?.puuid;
             const diff = p.kills - p.deaths;
             const live = streamers.get(p.puuid);
             return (
-              <tr key={p.puuid} className={mine ? "vs-row me" : "vs-row"}>
+              <tr key={p.puuid} className={mine ? "vs-row me" : "vs-row"} style={{ "--i": i + (side === "enemy" ? 5 : 0) } as CSSProperties}>
                 <td className="vs-player">
                   <div className="vs-cell">
                   <span className="vs-agent"><AgentIcon agent={p.agent} className="size-full" /></span>

@@ -169,6 +169,8 @@ export function MatchCard({
   const what = (f: Fight) => (f.killed && f.died ? "traded kills" : f.killed ? "you killed them" : "they killed you");
 
   const [open, setOpen] = useState(false);
+  // Details render on first open and stay mounted, so closing can animate too.
+  const [opened, setOpened] = useState(false);
   const score = r ? r.score : match.teams.map((t) => t.roundsWon).join("–");
   const progressOf = (puuid: string) => {
     const st = streamers?.players.find((x) => x.puuid === puuid);
@@ -263,7 +265,13 @@ export function MatchCard({
         <button
           type="button"
           aria-expanded={open}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            setOpened(true);
+            setOpen(!open);
+          }}
+          // Render the details as the pointer arrives, so opening starts at once.
+          onPointerEnter={() => setOpened(true)}
+          onFocus={() => setOpened(true)}
           className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border-0 bg-white/[0.05] pr-2.5 pl-3 text-[12.5px] font-medium text-zinc-200 ring-1 ring-white/[0.06] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.96] hover:bg-white/[0.1] hover:text-white focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none"
         >
           {open ? "Hide" : "Details"}
@@ -273,8 +281,10 @@ export function MatchCard({
 
       {tiles.length > 0 && <div className="gallery border-t border-white/[0.05] px-4 pt-4 pb-5">{tiles}</div>}
 
-      {open && (
-        <div className="match-details details-enter mx-4 mb-4">
+      <div className={open ? "expand open" : "expand"} inert={!open}>
+        <div className="expand-inner">
+        {opened && (
+        <div className="match-details mx-4 mb-4">
           {liveList.length > 0 && (
             <div className="streamer-cards">
               {liveList.map((p) => {
@@ -301,7 +311,9 @@ export function MatchCard({
           {!me && <p className="muted" style={{ margin: 0 }}>Your Riot ID isn't in this match, so your fights can't be shown.</p>}
           {actions}
         </div>
-      )}
+        )}
+        </div>
+      </div>
       {streamers?.error && <p className="small bad mx-4 mb-4 mt-0">{streamers.error}</p>}
     </article>
   );

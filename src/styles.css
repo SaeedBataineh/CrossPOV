@@ -896,3 +896,48 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .vs-table td.up { color: var(--win); }
 .vs-table td.down { color: var(--loss); }
 @media (max-width: 1100px) { .vs-table th:nth-child(n+6), .vs-table td:nth-child(n+6) { display: none; } }
+
+/* ================= Motion pass (Impeccable "animate") =================
+   Fast and purposeful: 150-300ms for state, exits faster than entrances,
+   one ease-out curve. The authored moment is a match opening up. */
+:root { --ease-out: cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Pages: a short, quiet arrival. */
+@keyframes page-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.page-enter { animation: page-rise 200ms var(--ease-out) both; }
+.stagger > *, .gallery > * { animation: page-rise 260ms var(--ease-out) both; }
+
+/* Hover never moves the card itself (it would slip from under the pointer): only the picture zooms. */
+.gcard:hover { transform: none; }
+
+/* Match details grow open and shut instead of popping (grid 0fr -> 1fr); closing is quicker. */
+/* Closing: the content fades first (100ms), the panel collapses 60ms later. */
+.expand { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 180ms var(--ease-out) 60ms; }
+.expand.open { grid-template-rows: 1fr; transition-duration: 320ms; transition-delay: 0ms; }
+.expand-inner { min-height: 0; overflow: hidden; }
+.expand .match-details { opacity: 0; transition: opacity 100ms ease-out; }
+.expand.open .match-details { opacity: 1; transition-duration: 240ms; }
+@starting-style { .expand.open .match-details { opacity: 0; } }
+
+/* The match replays: rounds fill in left to right, then each team's rows. */
+@keyframes round-in { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+@keyframes row-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+/* Capped so long (overtime) matches still settle in about half a second. */
+.expand.open .vs-win.on { animation: round-in 240ms var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 14) * 14ms + 100ms); }
+.expand.open .vs-row { animation: row-in 240ms var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 6) * 25ms + 160ms); }
+
+/* Feedback: the star and the tick pop, Copy for Discord confirms with a check. */
+@keyframes pop { 0% { transform: scale(0.6); } 60% { transform: scale(1.2); } 100% { transform: scale(1); } }
+.gstar.on svg, .gsel[aria-checked="true"] svg, .gbtn.discord.done svg { animation: pop 260ms var(--ease-out) both; }
+.gbtn.discord.busy { opacity: 0.55; cursor: progress; }
+.gbtn.discord.done { color: var(--win); }
+.tg[aria-checked="true"]::after { transition-duration: 160ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, .stagger > *, .gallery > * { animation: fade-in 160ms ease-out both; }
+  .expand, .expand.open { transition: none; }
+  .expand.open .vs-win.on, .expand.open .vs-row { animation: fade-in 160ms ease-out both; animation-delay: 0ms; }
+  .gstar.on svg, .gsel[aria-checked="true"] svg, .gbtn.discord.done svg { animation: none; }
+  .gcard:hover .gthumb img { transform: none; }
+  article button[aria-expanded] svg { transition: none; }
+}

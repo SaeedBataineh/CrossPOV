@@ -223,14 +223,16 @@ function Half({ clip }: { clip: ClipInfo }) {
   return <span className={isTheirs(clip) ? "half theirs" : "half"}>{src && <img src={src} alt="" loading="lazy" decoding="async" />}</span>;
 }
 
-/** Copies a Discord-sized version of the whole clip to the clipboard. */
-export async function copyClipForDiscord(c: ClipInfo, notify: (text: string, tone: "good" | "bad" | "info") => void) {
+/** Copies a Discord-sized version of the whole clip to the clipboard. True when it worked. */
+export async function copyClipForDiscord(c: ClipInfo, notify: (text: string, tone: "good" | "bad" | "info") => void): Promise<boolean> {
   try {
     notify("Making a Discord-sized copy…", "info");
     const bytes = await copyForDiscord(c.path, 0, c.durationSec ?? 0);
     notify(`Copied (${formatSize(bytes)}). Paste it into Discord with Ctrl+V.`, "good");
+    return true;
   } catch (err) {
     notify(String(err), "bad");
+    return false;
   }
 }
 
@@ -255,6 +257,15 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
 }) {
   const favs = useFavourites();
   const fav = favs.has(clip.path);
+  /** Copy for Discord: working, then a check for a moment once it's on the clipboard. */
+  const [copy, setCopy] = useState<"idle" | "busy" | "done">("idle");
+  async function copyIt() {
+    if (!notify || copy === "busy") return;
+    setCopy("busy");
+    const ok = await copyClipForDiscord(clip, notify);
+    setCopy(ok ? "done" : "idle");
+    if (ok) setTimeout(() => setCopy("idle"), 1600);
+  }
   const src = picture(clip);
   const t = title ?? cardTitle(clip);
   const mine = isTheirs(clip) ? other : clip;
@@ -295,8 +306,8 @@ export function GalleryCard({ clip, other, title, meta, onPlay, onReveal, onDele
         </span>
         <span className="gbtns">
           {notify && (
-            <button type="button" className="gbtn discord" title="Copy for Discord" aria-label={`Copy ${t} for Discord`} onClick={() => void copyClipForDiscord(clip, notify)}>
-              <DiscordLogo size={16} weight="fill" aria-hidden />
+            <button type="button" className={`gbtn discord ${copy}`} title="Copy for Discord" aria-label={`Copy ${t} for Discord`} aria-busy={copy === "busy"} onClick={() => void copyIt()}>
+              {copy === "done" ? <Check size={16} weight="bold" aria-hidden /> : <DiscordLogo size={16} weight="fill" aria-hidden />}
             </button>
           )}
           {onReveal && <button type="button" className="gbtn" aria-label={`Show ${t} in folder`} title="Show in folder" onClick={onReveal}><FolderOpen size={16} aria-hidden /></button>}
