@@ -6,6 +6,11 @@
 # Before the game's first picture, a black one stands in: the picture must
 # start with the sound (FFmpeg starts each input's clock at its first frame;
 # a late first picture left the sound coming in only in bursts).
+# Windows can stop handing screen capture the game's frames (a windowed
+# game drawn past the desktop); it then returns its last desktop picture as
+# if new. With only_hwnd that is never taken: the last game picture repeats,
+# and after 3 s with the game in front and no new picture a warning says so,
+# so CrossPOV can switch to window capture.
 # Usage: perl ddagrab-game-only.pl libavfilter/vsrc_ddagrab.c
 use strict;
 use warnings;
@@ -28,6 +33,10 @@ patch('option', qr/(                                                   OFFSET\(d
       "                                                   OFFSET(dup_frames), AV_OPT_TYPE_BOOL,       { .i64 = 1    },       0,       1, FLAGS },\n"
     . "    { \"only_hwnd\",  \"take new pictures only while this window is in front\",\n"
     . "                                                   OFFSET(only_hwnd),  AV_OPT_TYPE_INT64,      { .i64 = 0    },       0, INT64_MAX, FLAGS },\n");
+
+patch('game frame time', qr/    int64_t first_pts;\n/, "    int64_t first_pts;\n    int64_t last_game_frame;\n    int64_t stall_warned;\n");
+
+patch('no stale desktop', qr/        if \(need_frame\) \{\n/, "        if (need_frame || dda->only_hwnd) {\n");
 
 patch('render target', qr/    if \(dda->draw_mouse\)\n        dda->frames_hwctx->BindFlags \|= D3D11_BIND_RENDER_TARGET;\n/,
       "    if (dda->draw_mouse || dda->only_hwnd)\n        dda->frames_hwctx->BindFlags |= D3D11_BIND_RENDER_TARGET;\n");
@@ -81,24 +90,34 @@ my $check = <<'C';
     }
 
     // Another window in front of the game: keep the last game picture.
-    // Before the first one, black (also kept, so it repeats until then).
     if (dda->only_hwnd && GetForegroundWindow() != (HWND)(intptr_t)dda->only_hwnd) {
         if (ret == 0) {
             release_resource(&cur_texture);
             IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
             ret = AVERROR(EAGAIN);
         }
-        if (ret == AVERROR(EAGAIN) && !dda->last_frame->buf[0]) {
-            frame = black_frame(outlink);
-            if (!frame)
-                return AVERROR(ENOMEM);
-            ret = av_frame_replace(dda->last_frame, frame);
-            if (ret < 0) {
-                av_frame_free(&frame);
-                return ret;
-            }
-            goto frame_done;
+        dda->last_game_frame = av_gettime_relative();
+    } else if (dda->only_hwnd) {
+        // The game in front: is Windows still giving us its pictures?
+        int64_t t = av_gettime_relative();
+        if (ret == 0 || !dda->last_game_frame)
+            dda->last_game_frame = t;
+        else if (t - dda->last_game_frame > 3000000 && t - dda->stall_warned > 30000000) {
+            dda->stall_warned = t;
+            av_log(avctx, AV_LOG_WARNING, "Game in front but no new pictures for 3 s\n");
         }
+    }
+    // No game picture yet: black (kept, so it repeats until there is one).
+    if (dda->only_hwnd && ret == AVERROR(EAGAIN) && !dda->last_frame->buf[0]) {
+        frame = black_frame(outlink);
+        if (!frame)
+            return AVERROR(ENOMEM);
+        ret = av_frame_replace(dda->last_frame, frame);
+        if (ret < 0) {
+            av_frame_free(&frame);
+            return ret;
+        }
+        goto frame_done;
     }
 C
 patch('frame check', qr/    \} else \{\n        cur_texture = dda->probed_texture;\n        dda->probed_texture = NULL;\n        ret = 0;\n    \}\n/, $check);

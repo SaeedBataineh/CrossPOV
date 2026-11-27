@@ -104,6 +104,9 @@ struct Inner {
     /// A game window found filling its whole screen: recorded from the
     /// screen instead (see `fills_screen`), until the game closes.
     screen_for: Option<u64>,
+    /// Screen capture stopped getting this game window's pictures: window
+    /// capture from then on, until the game closes.
+    no_screen_for: Option<u64>,
     /// Set before an update installs: stop recording and don't start again.
     halted: bool,
 }
@@ -257,6 +260,7 @@ impl Recorder {
                 content_size: None,
                 window_failed: false,
                 screen_for: None,
+                no_screen_for: None,
                 halted: false,
             })),
             work_dir,
@@ -387,7 +391,18 @@ impl Recorder {
         // Another game, or the game moved to another screen: start afresh.
         // Just the game's window when known (a new window, e.g. the game
         // restarting, starts afresh); its screen if window capture failed.
-        if let Some(g) = game.as_ref().filter(|g| g.hwnd != 0 && inner.screen_for != Some(g.hwnd)) {
+        // Screen capture said the game is in front but sends it no pictures
+        // (Windows can draw a windowed game past the desktop): window
+        // capture instead, which always gets them.
+        if let Some(h) = inner.running.as_ref().and_then(|r| r.plan.only_window) {
+            let log = fs::read_to_string(self.work_dir.join("ffmpeg.log")).unwrap_or_default();
+            if log.contains("Game in front but no new pictures") {
+                crate::trail("recording: screen capture isn't getting the game's picture; switching to window capture");
+                inner.no_screen_for = Some(h);
+                inner.screen_for = None;
+            }
+        }
+        if let Some(g) = game.as_ref().filter(|g| g.hwnd != 0 && inner.screen_for != Some(g.hwnd) && inner.no_screen_for != Some(g.hwnd)) {
             let content = inner.content_size.filter(|(h, _)| *h == g.hwnd).map(|(_, s)| s);
             if inner.settings.capture == crate::settings::Capture::Window && fills_screen(g.window_size, g.screen_size, content) {
                 crate::trail("recording: the game fills its screen; recording the screen (steadier than window capture), only while the game is in front");
@@ -540,6 +555,7 @@ impl Recorder {
             inner.window_failed = false;
             inner.content_size = None;
             inner.screen_for = None;
+            inner.no_screen_for = None;
         }
 
         // Surface audio fallbacks (e.g. older Windows) once they're known.
