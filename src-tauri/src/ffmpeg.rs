@@ -717,6 +717,16 @@ pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: Video
     a
 }
 
+/// Arguments that copy an MP4 with its index (moov) at the start, every
+/// stream as it is (no re-encoding).
+pub fn faststart_args(input: &Path, out: &Path) -> Vec<String> {
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-i"].iter().map(|s| s.to_string()).collect();
+    a.push(input.to_string_lossy().into_owned());
+    a.extend(["-map", "0", "-c", "copy", "-movflags", "+faststart"].iter().map(|s| s.to_string()));
+    a.push(out.to_string_lossy().into_owned());
+    a
+}
+
 /// Arguments that grab one small frame from a clip as its thumbnail.
 pub fn thumbnail_args(clip: &Path, out: &Path) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-ss", "1", "-i"]

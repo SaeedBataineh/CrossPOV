@@ -923,8 +923,16 @@ impl Recorder {
         };
         let ext = saved.extension().and_then(|e| e.to_str()).unwrap_or(container_ext(settings.format)).to_string();
         let out = new_clip_path(clip_root, &ext)?;
-        // The replay is in CrossPOV's own folder; the clip folder may be on another drive.
-        if fs::rename(&saved, &out).is_err() {
+        // OBS writes an MP4's index at the end; the app's player loads clips in
+        // pieces and stutters on that (VLC doesn't mind). Copy it into the
+        // clip folder with the index first: no re-encoding, same picture.
+        let moved = ext == "mp4"
+            && run_ffmpeg(&ffmpeg_path, &ffmpeg::faststart_args(&saved, &out)).is_ok()
+            && fs::metadata(&out).is_ok_and(|m| m.len() > 0);
+        if moved {
+            let _ = fs::remove_file(&saved);
+        } else if fs::rename(&saved, &out).is_err() {
+            // The replay is in CrossPOV's own folder; the clip folder may be on another drive.
             fs::copy(&saved, &out).map_err(|e| format!("Could not save clip: {e}"))?;
             let _ = fs::remove_file(&saved);
         }
