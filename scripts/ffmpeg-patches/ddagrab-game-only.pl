@@ -1,7 +1,8 @@
 #!/usr/bin/perl
 # Screen capture (ddagrab) that records only the game: with `only_hwnd` set,
-# new pictures are taken only while that window is in front. While another
-# window is (alt-tabbed), the last game picture is repeated instead, so the
+# new pictures are taken only while that window is in front and is what's
+# seen on the screen. Otherwise (alt-tabbed, or a Discord stream or browser
+# drawn over the game), the last game picture is repeated instead, so the
 # desktop never gets into the recording, and nothing is drawn over it.
 # Before the game's first picture, a black one stands in: the picture must
 # start with the sound (FFmpeg starts each input's clock at its first frame;
@@ -34,7 +35,7 @@ patch('option', qr/(                                                   OFFSET\(d
     . "    { \"only_hwnd\",  \"take new pictures only while this window is in front\",\n"
     . "                                                   OFFSET(only_hwnd),  AV_OPT_TYPE_INT64,      { .i64 = 0    },       0, INT64_MAX, FLAGS },\n");
 
-patch('game frame time', qr/    int64_t first_pts;\n/, "    int64_t first_pts;\n    int64_t last_game_frame;\n    int64_t stall_warned;\n");
+patch('game frame time', qr/    int64_t first_pts;\n/, "    int64_t first_pts;\n    int64_t last_game_frame;\n    int64_t stall_warned;\n    int64_t cover_warned;\n");
 
 patch('no stale desktop', qr/        if \(need_frame\) \{\n/, "        if (need_frame || dda->only_hwnd) {\n");
 
@@ -42,6 +43,35 @@ patch('render target', qr/    if \(dda->draw_mouse\)\n        dda->frames_hwctx-
       "    if (dda->draw_mouse || dda->only_hwnd)\n        dda->frames_hwctx->BindFlags |= D3D11_BIND_RENDER_TARGET;\n");
 
 my $black = <<'C';
+// The game is what's on this screen: the window in front, not minimised,
+// and the window seen in the middle of the screen (Windows can keep a game
+// "in front" while a Discord stream or browser is drawn over it).
+static int game_visible(AVFilterContext *avctx, DdagrabContext *dda)
+{
+    HWND game = (HWND)(intptr_t)dda->only_hwnd;
+    const RECT *r = &dda->output_desc.DesktopCoordinates;
+    POINT mid = { r->left + (r->right - r->left) / 2, r->top + (r->bottom - r->top) / 2 };
+    HWND seen;
+
+    if (GetForegroundWindow() != game || IsIconic(game))
+        return 0;
+    seen = WindowFromPoint(mid);
+    seen = seen ? GetAncestor(seen, GA_ROOT) : NULL;
+    if (seen != game) {
+        // Say what covers it, once a minute (an always-on-top overlay would show up here).
+        int64_t t = av_gettime_relative();
+        if (t - dda->cover_warned > 60000000) {
+            char cls[64] = "";
+            dda->cover_warned = t;
+            if (seen)
+                GetClassNameA(seen, cls, sizeof(cls));
+            av_log(avctx, AV_LOG_WARNING, "Game in front but covered by another window (%s)\n", cls);
+        }
+        return 0;
+    }
+    return 1;
+}
+
 // A black frame, for before the game's first picture.
 static AVFrame *black_frame(AVFilterLink *outlink)
 {
@@ -90,7 +120,7 @@ my $check = <<'C';
     }
 
     // Another window in front of the game: keep the last game picture.
-    if (dda->only_hwnd && GetForegroundWindow() != (HWND)(intptr_t)dda->only_hwnd) {
+    if (dda->only_hwnd && !game_visible(avctx, dda)) {
         if (ret == 0) {
             release_resource(&cur_texture);
             IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
