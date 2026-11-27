@@ -235,12 +235,24 @@ pub fn window_output_size(source: Option<(u32, u32)>, r: Resolution) -> Option<(
         return Some(size);
     }
     let (w, h) = source?;
-    let th = target_height(r)?;
-    if h <= th || h == 0 {
+    if w == 0 || h == 0 {
         return None;
     }
-    let tw = (u64::from(w) * u64::from(th) / u64::from(h)) as u32;
-    Some((tw & !1, th & !1))
+    let th = target_height(r).unwrap_or(h);
+    // A window a hair short of its resolution (VALORANT's borderless window
+    // reports 1079 lines) is recorded at the full, even size: odd sizes make
+    // encoders trim or soften a line and upset some players.
+    let near = h < th && (th - h) * 100 <= th;
+    let out_h = (if near { th } else { h.min(th) } + 1) & !1;
+    // Keep the shape, snapping a nearly-16:9 window to exactly 16:9.
+    let aspect = f64::from(w) / f64::from(h);
+    let out_w = if (aspect / (16.0 / 9.0) - 1.0).abs() < 0.01 {
+        (u64::from(out_h) * 16 / 9) as u32
+    } else {
+        (u64::from(w) * u64::from(out_h) / u64::from(h)) as u32
+    };
+    let out = ((out_w + 1) & !1, out_h);
+    (out != (w, h)).then_some(out)
 }
 
 fn target_height(r: Resolution) -> Option<u32> {
@@ -647,6 +659,13 @@ mod tests {
         // A big window shrunk to the chosen height the same way.
         assert_eq!(window_output_size(Some((2560, 1440)), Resolution::P1080), Some((1920, 1080)));
         assert_eq!(window_output_size(Some((1920, 1080)), Resolution::P1440), None);
+        // A borderless window a line short: recorded at the clean size.
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1080), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::Native), Some((1920, 1080)));
+        assert_eq!(window_output_size(Some((1920, 1079)), Resolution::P1440), Some((1920, 1080)));
+        // Other shapes keep their shape.
+        assert_eq!(window_output_size(Some((3440, 1440)), Resolution::P1440), None);
+        assert_eq!(window_output_size(Some((2560, 1600)), Resolution::P1440), Some((2304, 1440)));
         // The whole screen, stretched: recorded as it is, never refused.
         let screen = RecordPlan { source_size: Some((1568, 1080)), screen_height: Some(1080), ..plan(VideoSource::Desktop, VideoEncoder::Nvenc, false) };
         let b = joined(&s, &screen);
