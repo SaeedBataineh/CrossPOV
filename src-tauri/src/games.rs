@@ -301,6 +301,13 @@ pub fn detect(s: &Settings) -> Option<Game> {
     found
 }
 
+/// Whether another window is in front of the game on its screen (you
+/// tabbed out to the desktop, Discord, a browser). A window in front on
+/// another monitor doesn't count: the game's screen still shows the game.
+pub fn covered(game: &Game) -> bool {
+    window::covered(&game.exe, game.hwnd)
+}
+
 /// The game the recorder last saw, for the updater ("wait until the game closes").
 pub fn last_seen() -> Option<Game> {
     CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -414,6 +421,27 @@ mod window {
         }
     }
 
+    pub(super) fn covered(exe: &str, game_hwnd: u64) -> bool {
+        // SAFETY: plain Win32 queries on the front window and the game's window.
+        unsafe {
+            let front = GetForegroundWindow();
+            if front.is_invalid() {
+                return false;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(front, Some(&mut pid));
+            let front_exe = crate::procs::shared(|p| p.names(&[pid])).remove(&pid);
+            if front_exe.is_some_and(|e| e.eq_ignore_ascii_case(exe)) {
+                return false; // The game itself is in front.
+            }
+            if game_hwnd == 0 {
+                return true;
+            }
+            let game = HWND(game_hwnd as usize as *mut core::ffi::c_void);
+            MonitorFromWindow(front, MONITOR_DEFAULTTONEAREST) == MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST)
+        }
+    }
+
     /// Whether a window still exists (it may be minimised).
     pub(super) fn still_open(hwnd: u64) -> bool {
         // SAFETY: IsWindow only checks the handle; any value is safe to pass.
@@ -499,6 +527,9 @@ mod window {
         None
     }
     pub(super) fn still_open(_hwnd: u64) -> bool {
+        false
+    }
+    pub(super) fn covered(_exe: &str, _hwnd: u64) -> bool {
         false
     }
     pub(super) fn screen_of_process(_exe: &str) -> Option<Spot> {

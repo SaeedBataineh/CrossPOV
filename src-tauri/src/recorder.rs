@@ -115,6 +115,16 @@ fn obs_output_size(screen: (u32, u32), r: crate::settings::Resolution) -> (u32, 
     }
 }
 
+/// The same recording apart from a few pixels of size.
+fn same_capture(a: Option<&crate::obs::Capture>, b: Option<&crate::obs::Capture>) -> bool {
+    let near = |x: (u32, u32), y: (u32, u32)| x.0.abs_diff(y.0) <= 8 && x.1.abs_diff(y.1) <= 8;
+    match (a, b) {
+        (Some(a), Some(b)) => near(a.size, b.size) && near(a.out_size, b.out_size) && crate::obs::Capture { size: b.size, out_size: b.out_size, ..a.clone() } == *b,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -224,6 +234,26 @@ impl Recorder {
             s.message = None;
         });
 
+        // Whole screen: four times a second, is the game in front? Then the
+        // game (Game Capture) shows, else the screen below it.
+        {
+            let inner = self.inner.clone();
+            let _ = thread::Builder::new().name("game-in-front".into()).spawn(move || loop {
+                thread::sleep(Duration::from_millis(250));
+                let (obs, game) = {
+                    let i = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    (i.obs.clone(), i.status.game.clone())
+                };
+                let (Some(obs), Some(game)) = (obs, game) else { continue };
+                let in_front = !games::covered(&game);
+                // Busy (OBS is being set up): next time.
+                let locked = obs.try_lock();
+                if let Ok(mut o) = locked {
+                    o.show_game(in_front);
+                }
+            });
+        }
+
         let always = std::env::var("CROSSPOV_ALWAYS_RECORD").is_ok_and(|v| v == "1");
         // Let the launch update check finish (or give up) first: a newer
         // version then installs before anything is recorded.
@@ -321,7 +351,7 @@ impl Recorder {
                 source: if game_only {
                     crate::obs::Source::Game { exe: g.exe.clone(), class: crate::obs::window_names(g.hwnd).1 }
                 } else {
-                    crate::obs::Source::Screen { origin: g.screen_origin }
+                    crate::obs::Source::Screen { origin: g.screen_origin, game: (g.hwnd != 0).then(|| (g.exe.clone(), crate::obs::window_names(g.hwnd).1)) }
                 },
                 size,
                 out_size: obs_output_size(size, settings.resolution),
@@ -337,7 +367,9 @@ impl Recorder {
         });
         let Some(obs) = inner.obs.clone() else { return };
         let current = obs.lock().unwrap_or_else(|e| e.into_inner()).capture.clone();
-        if desired != current {
+        // A line or two of size wobble (VALORANT reports 1080, then 1079)
+        // isn't worth starting over: that would empty the replay buffer.
+        if !same_capture(desired.as_ref(), current.as_ref()) {
             match &desired {
                 Some(c) => crate::trail(&format!(
                     "recording: {} with OBS {} ({}) {}x{} -> {}x{}, {} fps, {} Mbps",

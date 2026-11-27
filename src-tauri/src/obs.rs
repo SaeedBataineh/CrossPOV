@@ -46,8 +46,11 @@ pub struct Profile {
 pub enum Source {
     /// A game, by its .exe and window class (Game Capture).
     Game { exe: String, class: String },
-    /// The monitor whose top-left corner is at this desktop position (Display Capture).
-    Screen { origin: (i32, i32) },
+    /// The monitor whose top-left corner is at this desktop position
+    /// (Display Capture), with the game (exe, window class) on top through
+    /// Game Capture while it's in front (see `show_game`): Windows can hand a
+    /// full-screen game straight to the monitor, past what screen capture sees.
+    Screen { origin: (i32, i32), game: Option<(String, String)> },
 }
 
 /// What to record right now. A change is applied to the running OBS.
@@ -91,6 +94,10 @@ pub struct Obs {
     pub capture: Option<Capture>,
     /// Inputs CrossPOV made, to remove when the capture changes.
     inputs: Vec<String>,
+    /// The Game Capture layer over the screen (scene, item id), and whether it shows.
+    game_layer: Option<(String, i64, bool)>,
+    /// Counts `apply` calls: each gives its sources new names (see `apply`).
+    round: u32,
 }
 
 impl Drop for Obs {
@@ -148,7 +155,7 @@ impl Obs {
                 Err(_) => std::thread::sleep(Duration::from_millis(500)),
             }
         };
-        let mut obs = Obs { child, ws, next_id: 1, events: Vec::new(), config, profile, capture: None, inputs: Vec::new() };
+        let mut obs = Obs { child, ws, next_id: 1, events: Vec::new(), config, profile, capture: None, inputs: Vec::new(), game_layer: None, round: 0 };
         // Ready: the first request waits until OBS has finished loading.
         obs.request("GetVersion", json!({}))?;
         hide_tray_icon(obs.child.id());
@@ -164,7 +171,14 @@ impl Obs {
             let _ = self.request("RemoveInput", json!({ "inputName": name }));
         }
         self.capture = None;
+        self.game_layer = None;
         let Some(c) = capture else { return Ok(()) };
+        // New names every time: OBS keeps a removed source's name taken for
+        // as long as anything still holds the source (seconds, or longer),
+        // and creating one under the old name then fails ("already exists").
+        self.round += 1;
+        let r = self.round;
+        let (video, game_audio, desktop_audio, mic) = (format!("{VIDEO} {r}"), format!("{GAME_AUDIO} {r}"), format!("{DESKTOP_AUDIO} {r}"), format!("{MIC} {r}"));
 
         self.request(
             "SetVideoSettings",
@@ -172,29 +186,42 @@ impl Obs {
         )?;
         let scene = self.request("GetCurrentProgramScene", json!({}))?;
         let scene = scene.get("currentProgramSceneName").or_else(|| scene.get("sceneName")).and_then(Value::as_str).unwrap_or("Scene").to_string();
-        // Inputs a crashed CrossPOV left in OBS's saved scene.
-        for name in [VIDEO, GAME_AUDIO, DESKTOP_AUDIO, MIC] {
-            let _ = self.request("RemoveInput", json!({ "inputName": name }));
-        }
 
+        let game_capture = |exe: &str, class: &str| {
+            json!({
+                "capture_mode": "window", "window": window_spec(title, class, exe), "priority": 2,
+                "anti_cheat_hook": true, "capture_cursor": false, "capture_overlays": false,
+                "allow_transparency": false, "limit_framerate": false, "hook_rate": 1
+            })
+        };
         match &c.source {
             Source::Game { exe, class } => {
-                let window = window_spec(title, class, exe);
-                self.create(&scene, VIDEO, "game_capture", json!({
-                    "capture_mode": "window", "window": window, "priority": 2,
-                    "anti_cheat_hook": true, "capture_cursor": false, "capture_overlays": false,
-                    "allow_transparency": false, "limit_framerate": false, "hook_rate": 1
-                }))?;
+                self.create(&scene, &video, "game_capture", game_capture(exe, class))?;
             }
-            Source::Screen { origin } => {
+            Source::Screen { origin, game } => {
                 // Display Capture, Windows 10 method; the monitor is picked by
                 // its position among those OBS lists ("... @ 0,0 ...").
-                self.create(&scene, VIDEO, "monitor_capture", json!({ "method": 2, "capture_cursor": false }))?;
+                self.create(&scene, &video, "monitor_capture", json!({ "method": 2, "capture_cursor": false }))?;
                 let at = format!("@ {},{}", origin.0, origin.1);
-                if let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": VIDEO, "propertyName": "monitor_id" })) {
+                if let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": video, "propertyName": "monitor_id" })) {
                     let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
                     if let Some(item) = items.iter().find(|i| i["itemName"].as_str().is_some_and(|n| n.contains(&at))) {
-                        let _ = self.request("SetInputSettings", json!({ "inputName": VIDEO, "inputSettings": { "monitor_id": item["itemValue"] } }));
+                        let _ = self.request("SetInputSettings", json!({ "inputName": video, "inputSettings": { "monitor_id": item["itemValue"] } }));
+                    }
+                }
+                // The game on top, filling the screen (until it's hooked it
+                // shows nothing, so the screen below shows through).
+                if let Some((exe, class)) = game {
+                    let layer = format!("{VIDEO} game {r}");
+                    if let Some(id) = self.create(&scene, &layer, "game_capture", game_capture(exe, class))? {
+                        let _ = self.request(
+                            "SetSceneItemTransform",
+                            json!({ "sceneName": scene, "sceneItemId": id, "sceneItemTransform": {
+                                "boundsType": "OBS_BOUNDS_SCALE_INNER", "boundsWidth": c.size.0 as f64, "boundsHeight": c.size.1 as f64,
+                                "boundsAlignment": 0, "alignment": 5, "positionX": 0.0, "positionY": 0.0
+                            } }),
+                        );
+                        self.game_layer = Some((scene.clone(), id, true));
                     }
                 }
             }
@@ -205,29 +232,32 @@ impl Obs {
         let window_of = |exe: &str, class: &str, title: &str| window_spec(title, class, exe);
         if let Some(vol) = c.game_audio {
             if c.desktop_audio {
-                self.create(&scene, DESKTOP_AUDIO, "wasapi_output_capture", json!({ "device_id": "default" }))?;
-                self.audio(DESKTOP_AUDIO, vol, tracks(true, false));
-            } else if let Source::Game { exe, class } = &c.source {
-                self.create(&scene, GAME_AUDIO, "wasapi_process_output_capture", json!({ "window": window_of(exe, class, title), "priority": 2 }))?;
-                self.audio(GAME_AUDIO, vol, tracks(true, false));
+                self.create(&scene, &desktop_audio, "wasapi_output_capture", json!({ "device_id": "default" }))?;
+                self.audio(&desktop_audio, vol, tracks(true, false));
+            } else if let Some((exe, class)) = match &c.source {
+                Source::Game { exe, class } => Some((exe, class)),
+                Source::Screen { game, .. } => game.as_ref().map(|(e, c)| (e, c)),
+            } {
+                self.create(&scene, &game_audio, "wasapi_process_output_capture", json!({ "window": window_of(exe, class, title), "priority": 2 }))?;
+                self.audio(&game_audio, vol, tracks(true, false));
             }
         }
         if !c.desktop_audio {
             for (i, (exe, vol)) in c.apps.iter().enumerate() {
-                let name = format!("{APP_AUDIO} {}", i + 1);
+                let name = format!("{APP_AUDIO} {r}.{}", i + 1);
                 if self.create(&scene, &name, "wasapi_process_output_capture", json!({ "window": window_of(exe, "", ""), "priority": 2 })).is_ok() {
                     self.audio(&name, *vol, tracks(true, false));
                 }
             }
         }
         if let Some(vol) = c.mic {
-            self.create(&scene, MIC, "wasapi_input_capture", json!({ "device_id": "default" }))?;
-            self.pick_mic(&c.mic_device);
-            self.audio(MIC, vol, tracks(!c.separate_tracks, c.separate_tracks));
+            self.create(&scene, &mic, "wasapi_input_capture", json!({ "device_id": "default" }))?;
+            self.pick_mic(&mic, &c.mic_device);
+            self.audio(&mic, vol, tracks(!c.separate_tracks, c.separate_tracks));
             if c.denoise_mic {
                 let _ = self.request(
                     "CreateSourceFilter",
-                    json!({ "sourceName": MIC, "filterName": "Noise suppression", "filterKind": "noise_suppress_filter_v2", "filterSettings": { "method": "rnnoise" } }),
+                    json!({ "sourceName": mic, "filterName": "Noise suppression", "filterKind": "noise_suppress_filter_v2", "filterSettings": { "method": "rnnoise" } }),
                 );
             }
         }
@@ -239,38 +269,48 @@ impl Obs {
     /// Points the mic input at the chosen microphone, like OBS's own device
     /// list: by its name among the devices OBS lists. "default" (or a mic
     /// that isn't connected) follows Windows' default mic.
-    fn pick_mic(&mut self, wanted: &str) {
+    fn pick_mic(&mut self, input: &str, wanted: &str) {
         if wanted.is_empty() || wanted.eq_ignore_ascii_case("default") {
             return;
         }
-        let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": MIC, "propertyName": "device_id" })) else { return };
+        let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": input, "propertyName": "device_id" })) else { return };
         let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
         match pick_device(&items, wanted) {
             Some(id) => {
-                let _ = self.request("SetInputSettings", json!({ "inputName": MIC, "inputSettings": { "device_id": id } }));
+                let _ = self.request("SetInputSettings", json!({ "inputName": input, "inputSettings": { "device_id": id } }));
             }
             None => crate::trail(&format!("obs: mic \"{wanted}\" isn't connected; using the default mic")),
         }
     }
 
-    fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<(), String> {
+    /// Whole screen: shows the game layer while the game is in front, the
+    /// screen below while you're tabbed out.
+    pub fn show_game(&mut self, on: bool) {
+        let Some((scene, id, shown)) = self.game_layer.clone() else { return };
+        if shown != on && self.request_once("SetSceneItemEnabled", json!({ "sceneName": scene, "sceneItemId": id, "sceneItemEnabled": on })).is_ok() {
+            self.game_layer = Some((scene, id, on));
+        }
+    }
+
+    /// Adds a source to the scene; its scene item id, if OBS says.
+    fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<Option<i64>, String> {
         let _ = self.request("RemoveInput", json!({ "inputName": name }));
         // OBS frees a removed source's name only once it's really gone, a
         // moment later: until then "already exists" (601). Wait for it.
         let data = json!({ "sceneName": scene, "inputName": name, "inputKind": kind, "sceneItemEnabled": true, "inputSettings": settings });
         let until = Instant::now() + Duration::from_secs(10);
-        loop {
+        let made = loop {
             match self.request_once("CreateInput", data.clone()) {
-                Ok(_) => break,
+                Ok(v) => break v,
                 Err((601 | 207, _)) if Instant::now() < until => {
                     std::thread::sleep(Duration::from_millis(250));
                     let _ = self.request_once("RemoveInput", json!({ "inputName": name }));
                 }
                 Err((_, e)) => return Err(e),
             }
-        }
+        };
         self.inputs.push(name.to_string());
-        Ok(())
+        Ok(made["sceneItemId"].as_i64())
     }
 
     fn audio(&mut self, name: &str, volume: f32, tracks: Value) {
