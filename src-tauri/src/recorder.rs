@@ -140,6 +140,15 @@ pub struct Recorder {
     ffmpeg: Arc<Mutex<Option<(PathBuf, VideoEncoder)>>>,
 }
 
+/// Whether a window's size changed for real: more than 8 pixels either way.
+/// Unknown sizes (a minimised window) never count.
+fn size_changed(before: Option<(u32, u32)>, now: Option<(u32, u32)>) -> bool {
+    match (before, now) {
+        (Some((w1, h1)), Some((w2, h2))) => w1.abs_diff(w2) > 8 || h1.abs_diff(h2) > 8,
+        _ => false,
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -361,8 +370,17 @@ impl Recorder {
         );
         inner.status.game = game.clone();
 
-        // Stop if the game closed or recording settings changed.
-        let stale = inner.running.as_ref().is_some_and(|r| r.key != key);
+        // Stop if the game closed or recording settings changed, or the game's
+        // picture really changed size (e.g. switching to a stretched
+        // resolution): window capture would leave it off-centre with black
+        // beside it. A line or two of wobble (1080/1079) doesn't count.
+        let resized = inner.running.as_ref().is_some_and(|r| {
+            r.plan.window.is_some() && size_changed(r.plan.source_size, game.as_ref().and_then(|g| g.window_size))
+        });
+        if resized {
+            crate::trail("recording: the game's picture changed size, starting afresh");
+        }
+        let stale = inner.running.as_ref().is_some_and(|r| r.key != key) || resized;
         if (!want || stale) && inner.running.is_some() {
             inner.running = None;
         }
@@ -647,6 +665,13 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_real_size_changes_restart_window_recording() {
+        assert!(size_changed(Some((1920, 1080)), Some((1568, 1080))), "switched to a stretched resolution");
+        assert!(!size_changed(Some((1920, 1080)), Some((1920, 1079))), "a line of wobble");
+        assert!(!size_changed(Some((1920, 1080)), None), "minimised: size unknown");
+    }
 
     #[test]
     fn tabbed_out_times_are_logged_as_spans() {
