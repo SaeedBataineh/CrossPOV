@@ -101,8 +101,39 @@ struct Inner {
 
 pub type StatusListener = Box<dyn Fn(&RecorderStatus) + Send + Sync>;
 
+/// When another window covered the game's screen (you tabbed out), in ms
+/// since 1970: those parts are blacked out of saved clips.
+#[derive(Default)]
+struct CoveredLog {
+    since: Option<u64>,
+    spans: std::collections::VecDeque<(u64, u64)>,
+}
+
+impl CoveredLog {
+    fn note(&mut self, covered: bool, now: u64) {
+        match (covered, self.since) {
+            (true, None) => self.since = Some(now),
+            (false, Some(start)) => {
+                self.since = None;
+                self.spans.push_back((start, now));
+            }
+            _ => {}
+        }
+        // Older than any clip can reach: forget.
+        while self.spans.front().is_some_and(|&(_, end)| now.saturating_sub(end) > 15 * 60 * 1000) {
+            self.spans.pop_front();
+        }
+    }
+
+    /// All spans, the current one (still tabbed out) running until `now`.
+    fn spans(&self, now: u64) -> Vec<(u64, u64)> {
+        self.spans.iter().copied().chain(self.since.map(|s| (s, now))).collect()
+    }
+}
+
 #[derive(Clone)]
 pub struct Recorder {
+    covered: Arc<Mutex<CoveredLog>>,
     inner: Arc<Mutex<Inner>>,
     work_dir: PathBuf,
     listener: Arc<StatusListener>,
@@ -168,6 +199,7 @@ impl Recorder {
     /// `work_dir` holds the replay buffer files (a temp/cache folder).
     pub fn new(settings: Settings, work_dir: PathBuf, listener: StatusListener) -> Self {
         Self {
+            covered: Arc::new(Mutex::new(CoveredLog::default())),
             inner: Arc::new(Mutex::new(Inner {
                 settings,
                 running: None,
@@ -254,6 +286,28 @@ impl Recorder {
             s.state = RecState::Waiting;
             s.message = None;
         });
+
+        // Four times a second, while recording the whole screen: is another
+        // window covering the game (you tabbed out)? Those parts get blacked
+        // out of saved clips, like ShadowPlay.
+        {
+            let (inner, covered) = (self.inner.clone(), self.covered.clone());
+            let _ = thread::Builder::new().name("tab-watch".into()).spawn(move || loop {
+                thread::sleep(Duration::from_millis(250));
+                let game = {
+                    let i = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    let screen = i.running.as_ref().is_some_and(|r| r.plan.window.is_none());
+                    i.status.game.clone().filter(|_| screen)
+                };
+                let is_covered = game.as_ref().is_some_and(games::covered);
+                let mut log = covered.lock().unwrap_or_else(|e| e.into_inner());
+                let was = log.since.is_some();
+                log.note(is_covered, now_ms());
+                if was != is_covered {
+                    crate::trail(if is_covered { "tabbed out: hiding the screen in clips" } else { "back in the game" });
+                }
+            });
+        }
 
         let always = std::env::var("CROSSPOV_ALWAYS_RECORD").is_ok_and(|v| v == "1");
         let source = if cfg!(windows) && std::env::var("CROSSPOV_TEST_PATTERN").is_err() {
@@ -499,11 +553,40 @@ impl Recorder {
             n += 1;
         }
 
+        // Parts where you'd tabbed out (whole-screen recording only). The last
+        // segment's file time is when the clip ends.
+        let clip_end = take
+            .last()
+            .and_then(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or_else(now_ms, |d| d.as_millis() as u64);
+        let clip_start = clip_end.saturating_sub(u64::from(take.len() as u32 * SEGMENT_SECONDS) * 1000);
+        let hide = if plan.window.is_none() {
+            let spans = self.covered.lock().unwrap_or_else(|e| e.into_inner()).spans(now_ms());
+            ffmpeg::blackout_ranges(&spans, clip_start, clip_end, 300)
+        } else {
+            Vec::new()
+        };
+
         let list = plan.segment_dir.join(format!("concat-{}.txt", now_ms()));
         fs::write(&list, take.iter().map(|p| concat_list_line(p)).collect::<String>()).map_err(|e| e.to_string())?;
-        let result = run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &out, settings.format, plan.hevc));
+        let joined = if hide.is_empty() { out.clone() } else { plan.segment_dir.join(format!("joined-{}.{ext}", now_ms())) };
+        let result = run_ffmpeg(&ffmpeg_path, &ffmpeg::concat_args(&list, &joined, settings.format, plan.hevc));
         let _ = fs::remove_file(&list);
         result.map_err(|e| format!("Could not save clip: {e}"))?;
+        if !hide.is_empty() {
+            let encoder = self.ffmpeg_tools().map_or(VideoEncoder::Cpu, |(_, e)| e);
+            let secs: f64 = hide.iter().map(|(a, b)| b - a).sum();
+            crate::trail(&format!("clip: hiding {secs:.1} s where you'd tabbed out"));
+            let args = ffmpeg::blackout_args(&joined, &out, &hide, encoder, plan.hevc, ffmpeg::bitrate_kbps(&settings));
+            if let Err(e) = run_ffmpeg(&ffmpeg_path, &args) {
+                // Keep the clip rather than lose it.
+                crate::trail(&format!("clip: couldn't hide the tabbed-out parts ({e}); saved as recorded"));
+                let _ = fs::remove_file(&out);
+                fs::rename(&joined, &out).or_else(|_| fs::copy(&joined, &out).map(|_| ())).map_err(|e| format!("Could not save clip: {e}"))?;
+            }
+            let _ = fs::remove_file(&joined);
+        }
 
         let thumb = clips::thumb_path(clip_root, &out);
         if let Some(dir) = thumb.parent() {
@@ -541,6 +624,56 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabbed_out_times_are_logged_as_spans() {
+        let mut log = CoveredLog::default();
+        log.note(false, 1_000);
+        log.note(true, 2_000);
+        log.note(true, 2_250);
+        log.note(false, 5_000);
+        log.note(true, 9_000);
+        assert_eq!(log.spans(10_000), vec![(2_000, 5_000), (9_000, 10_000)], "the open one runs until now");
+        log.note(false, 20 * 60 * 1000);
+        assert_eq!(log.spans(20 * 60 * 1000).len(), 1, "older than any clip: forgotten");
+    }
+
+    /// Blacks out part of a real clip with real FFmpeg, and checks the
+    /// picture there is black while the rest isn't. Skipped without FFmpeg.
+    #[test]
+    fn blacks_out_the_tabbed_out_part_of_a_clip() {
+        let Some(ff) = ffmpeg::locate() else {
+            eprintln!("ffmpeg not found; skipping");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("crosspov-black-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (src, out) = (dir.join("in.mp4"), dir.join("out.mp4"));
+        let made = Command::new(&ff)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-f", "lavfi", "-i", "sine=frequency=440"])
+            .args(["-t", "4", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        run_ffmpeg(&ff, &ffmpeg::blackout_args(&src, &out, &[(1.0, 2.0)], VideoEncoder::Cpu, false, 2_000)).expect("blackout");
+        // Average brightness of one frame, as an 8x8 grey picture.
+        let brightness = |at: &str| -> f64 {
+            let o = Command::new(&ff)
+                .args(["-hide_banner", "-loglevel", "error", "-ss", at, "-i"])
+                .arg(&out)
+                .args(["-frames:v", "1", "-vf", "scale=8:8,format=gray", "-f", "rawvideo", "-"])
+                .output()
+                .unwrap();
+            o.stdout.iter().map(|&b| f64::from(b)).sum::<f64>() / o.stdout.len().max(1) as f64
+        };
+        assert!(brightness("1.5") < 20.0, "tabbed-out part is black");
+        assert!(brightness("3.0") > 40.0, "the rest is the game");
+        let probe = Command::new(&ff).args(["-hide_banner", "-i"]).arg(&out).output().unwrap();
+        assert!(String::from_utf8_lossy(&probe.stderr).contains("Audio"), "sound kept");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn concat_lines_escape_quotes() {

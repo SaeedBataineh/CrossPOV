@@ -527,6 +527,66 @@ pub fn concat_args(concat_list: &Path, out: &Path, format: Container, hevc: bool
     a
 }
 
+/// Parts of a clip to black out, in seconds from its start: the times
+/// (`spans`, ms since 1970) another window covered the game, within the clip
+/// running from `clip_start` to `clip_end` (ms), widened by `pad_ms` on each
+/// side for the capture's small delay. Overlapping parts are merged.
+pub fn blackout_ranges(spans: &[(u64, u64)], clip_start: u64, clip_end: u64, pad_ms: u64) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    let mut spans: Vec<(u64, u64)> = spans
+        .iter()
+        .map(|&(a, b)| (a.saturating_sub(pad_ms).max(clip_start), (b + pad_ms).min(clip_end)))
+        .filter(|(a, b)| a < b)
+        .collect();
+    spans.sort_unstable();
+    for (a, b) in spans {
+        let (a, b) = ((a - clip_start) as f64 / 1000.0, (b - clip_start) as f64 / 1000.0);
+        match out.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
+/// Re-encodes a joined clip with `ranges` (seconds) blacked out, on the same
+/// graphics card and format it was recorded with. Sound is copied as is.
+pub fn blackout_args(input: &Path, out: &Path, ranges: &[(f64, f64)], enc: VideoEncoder, hevc: bool, kbps: u32) -> Vec<String> {
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y"].iter().map(|s| s.to_string()).collect();
+    if cfg!(windows) {
+        // Decode on the graphics card (falls back to the CPU by itself).
+        a.extend(["-hwaccel", "d3d11va"].iter().map(|s| s.to_string()));
+    }
+    a.extend(["-i".to_string(), input.to_string_lossy().into_owned()]);
+    let when = ranges.iter().map(|(s, e)| format!("between(t,{s:.3},{e:.3})")).collect::<Vec<_>>().join("+");
+    a.extend(["-map", "0:v:0", "-map", "0:a?", "-vf"].iter().map(|s| s.to_string()));
+    a.push(format!("drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='{when}'"));
+    a.extend(["-c:v".to_string(), if hevc { enc.hevc_codec() } else { enc.codec() }.to_string()]);
+    if enc == VideoEncoder::Nvenc {
+        a.extend(["-preset", "p4", "-tune", "hq", "-rc", "vbr"].iter().map(|s| s.to_string()));
+    }
+    a.extend([
+        "-b:v".to_string(),
+        format!("{kbps}k"),
+        "-maxrate".to_string(),
+        format!("{}k", kbps * 3 / 2),
+        "-bufsize".to_string(),
+        format!("{}k", kbps * 2),
+        "-pix_fmt".to_string(),
+        "yuv420p".to_string(),
+        "-c:a".to_string(),
+        "copy".to_string(),
+    ]);
+    if out.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")) {
+        if hevc {
+            a.extend(["-tag:v", "hvc1"].iter().map(|s| s.to_string()));
+        }
+        a.extend(["-movflags", "+faststart"].iter().map(|s| s.to_string()));
+    }
+    a.push(out.to_string_lossy().into_owned());
+    a
+}
+
 /// Arguments that grab one small frame from a clip as its thumbnail.
 pub fn thumbnail_args(clip: &Path, out: &Path) -> Vec<String> {
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-ss", "1", "-i"]
@@ -687,6 +747,18 @@ mod tests {
         let p = "frame=100\nfps=60.0\ndup_frames=0\ndrop_frames=0\nspeed=1x\nprogress=continue\nframe=700\nfps=21.4\ndup_frames=480\ndrop_frames=3\nspeed=1.00x\nprogress=continue\n";
         assert_eq!(recording_health(p).unwrap(), "fps=21.4 dup=480 drop=3 speed=1.00x");
         assert_eq!(recording_health(""), None);
+    }
+
+    #[test]
+    fn tabbed_out_times_become_parts_of_the_clip() {
+        // Clip from 100 s to 160 s (ms since 1970, small numbers for clarity).
+        let (start, end) = (100_000, 160_000);
+        let spans = [(110_000, 115_000), (114_000, 118_000), (50_000, 90_000), (158_000, 170_000)];
+        assert_eq!(blackout_ranges(&spans, start, end, 250), vec![(9.75, 18.25), (57.75, 60.0)]);
+        assert!(blackout_ranges(&[(10_000, 20_000)], start, end, 250).is_empty(), "before the clip");
+        let a = blackout_args(&PathBuf::from("in.mp4"), &PathBuf::from("out.mp4"), &[(9.75, 18.25)], VideoEncoder::Nvenc, true, 50_000).join(" ");
+        assert!(a.contains("drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(t,9.750,18.250)'"), "{a}");
+        assert!(a.contains("-c:v hevc_nvenc") && a.contains("-c:a copy") && a.contains("-tag:v hvc1"), "{a}");
     }
 
     #[test]

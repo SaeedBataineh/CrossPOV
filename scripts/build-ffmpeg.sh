@@ -12,7 +12,8 @@
 #                  pan/alimiter filters
 #               -> h264_nvenc / h264_amf / h264_mf (CPU fallback via Windows) + aac
 #               -> segment muxer writing MPEG-TS
-#   save clip:  concat demuxer -> mp4 / matroska, aac_adtstoasc
+#   save clip:  concat demuxer -> mp4 / matroska, aac_adtstoasc; parts where
+#               you'd tabbed out: decode (d3d11va) -> drawbox -> re-encode
 #   thumbnail:  decode h264 -> scale -> mjpeg into a .jpg
 #   streamer clips (via yt-dlp): HLS over HTTPS (Windows' own TLS) -> mp4
 #   encoder check: lavfi color source -> null muxer
@@ -57,7 +58,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-w32threads --enable-d3d11va --enable-ffnvcodec --enable-nvenc --enable-amf \
   --enable-mediafoundation --enable-schannel --enable-network \
   --enable-indev=lavfi \
-  --enable-filter=ddagrab,gfxcapture,fps,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
+  --enable-filter=ddagrab,gfxcapture,fps,drawbox,scale_d3d11,hwdownload,hwupload,format,scale,pan,alimiter,aresample,aformat,anull,null,color,testsrc2,setpts,asetpts,trim,atrim,copy,acopy \
   --enable-encoder=h264_nvenc,h264_amf,h264_mf,hevc_nvenc,hevc_amf,hevc_mf,aac,mjpeg,wrapped_avframe,rawvideo,pcm_s16le \
   --enable-decoder=h264,hevc,aac,aac_fixed,mp3float,pcm_f32le,pcm_s16le,mjpeg,png,rawvideo,wrapped_avframe \
   --enable-demuxer=concat,mpegts,mov,matroska,hls,aac,h264,pcm_f32le,flv,image2,mjpeg \
@@ -65,6 +66,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-parser=h264,hevc,aac,mjpeg \
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,h264_metadata \
   --enable-protocol=file,pipe,http,https,tcp,tls,crypto,hls,data,concat \
+  --enable-hwaccel=h264_d3d11va,hevc_d3d11va \
   --enable-swscale --enable-swresample
 
 # Window capture needs MinGW 13+ (Windows' capture headers); say so plainly

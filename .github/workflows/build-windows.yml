@@ -128,7 +128,7 @@ jobs:
           Copy-Item ffmpeg-small/ffmpeg.exe src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
           $ff = "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
           "FFmpeg size: {0:N1} MB" -f ((Get-Item $ff).Length / 1MB)
-          $need = @{ "-filters" = "ddagrab","gfxcapture","fps","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
+          $need = @{ "-filters" = "ddagrab","gfxcapture","fps","drawbox","hwdownload","scale","pan","alimiter"; "-encoders" = "h264_nvenc","h264_amf","h264_mf","hevc_nvenc","hevc_amf","hevc_mf","aac","mjpeg"; "-muxers" = "segment","mpegts","mp4","matroska","image2"; "-demuxers" = "concat","mpegts","mov","hls"; "-protocols" = "https" }
           foreach ($k in $need.Keys) {
             $list = & $ff -hide_banner $k 2>&1 | Out-String
             foreach ($n in $need[$k]) { if ($list -notmatch "\b$n\b") { throw "FFmpeg is missing $n ($k)" } }
