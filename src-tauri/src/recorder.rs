@@ -234,8 +234,9 @@ impl Recorder {
             s.message = None;
         });
 
-        // Whole screen: four times a second, is the game in front? Then the
-        // game (Game Capture) shows, else the screen below it.
+        // Four times a second: OBS's windows stay off the taskbar, and in
+        // Whole screen, the game (Game Capture) shows while it's in front,
+        // else the screen below it.
         {
             let inner = self.inner.clone();
             let _ = thread::Builder::new().name("game-in-front".into()).spawn(move || loop {
@@ -244,12 +245,15 @@ impl Recorder {
                     let i = inner.lock().unwrap_or_else(|e| e.into_inner());
                     (i.obs.clone(), i.status.game.clone())
                 };
-                let (Some(obs), Some(game)) = (obs, game) else { continue };
-                let in_front = !games::covered(&game);
+                let Some(obs) = obs else { continue };
+                let in_front = game.as_ref().map(|g| !games::covered(g));
                 // Busy (OBS is being set up): next time.
                 let locked = obs.try_lock();
                 if let Ok(mut o) = locked {
-                    o.show_game(in_front);
+                    o.hide_own_windows();
+                    if let Some(in_front) = in_front {
+                        o.show_game(in_front);
+                    }
                 }
             });
         }

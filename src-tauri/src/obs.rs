@@ -424,6 +424,11 @@ impl Obs {
         alive
     }
 
+    /// Keeps OBS's windows hidden and off the taskbar (see `hide_windows`).
+    pub fn hide_own_windows(&self) {
+        hide_windows(self.child.id());
+    }
+
     /// The last lines of OBS's own log about capture, encoding or errors.
     pub fn log_lines(&self) -> Vec<String> {
         let dir = self.config.join("logs");
@@ -755,37 +760,53 @@ fn hide_tray_icon(pid: u32) {
 #[cfg(not(windows))]
 fn hide_tray_icon(_pid: u32) {}
 
-/// Hides OBS's own windows if any shows up (its main window, a dialog):
-/// they'd appear on the taskbar. Says which, for Diagnostics.
+/// Keeps OBS's own windows (its main window, dialogs, pop-ups) off the
+/// taskbar and out of sight: each is made a "tool window", which Windows
+/// never gives a taskbar button even when OBS shows it again (Qt re-showed a
+/// hidden pop-up every few seconds), and hidden. Says which, once each.
 #[cfg(windows)]
 fn hide_windows(pid: u32) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_HIDE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_HIDE,
+        WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
     unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> BOOL {
         // SAFETY: `data` is the &mut (pid, found) passed below, alive for the whole EnumWindows call.
         let (pid, found) = unsafe { &mut *(data.0 as *mut (u32, Vec<HWND>)) };
         let mut owner = 0u32;
-        // SAFETY: plain queries on a window Windows handed us.
-        unsafe {
-            GetWindowThreadProcessId(hwnd, Some(&mut owner));
-            if owner == *pid && IsWindowVisible(hwnd).as_bool() {
-                found.push(hwnd);
-            }
+        // SAFETY: a plain query on a window Windows handed us.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut owner)) };
+        if owner == *pid {
+            found.push(hwnd);
         }
         true.into()
     }
+    static SEEN: OnceLock<Mutex<HashSet<isize>>> = OnceLock::new();
     let mut data = (pid, Vec::<HWND>::new());
     // SAFETY: the callback only uses `data`, which outlives the call.
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut data as *mut _ as isize));
     }
     for hwnd in data.1 {
-        let (title, class) = window_names(hwnd.0 as usize as u64);
-        crate::trail(&format!("obs: hid its window \"{title}\" ({class})"));
-        // SAFETY: hiding a window of OBS, which CrossPOV runs hidden.
+        // SAFETY: style changes and hiding on windows of OBS, which CrossPOV runs hidden.
         unsafe {
-            let _ = ShowWindow(hwnd, SW_HIDE);
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let want = (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+            if want != ex {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want);
+            }
+            if IsWindowVisible(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                let first = SEEN.get_or_init(Default::default).lock().map(|mut s| s.insert(hwnd.0 as isize)).unwrap_or(false);
+                if first {
+                    let (title, class) = window_names(hwnd.0 as usize as u64);
+                    crate::trail(&format!("obs: hid its window \"{title}\" ({class})"));
+                }
+            }
         }
     }
 }
