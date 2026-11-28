@@ -248,9 +248,8 @@ impl Recorder {
             s.message = None;
         });
 
-        // Four times a second: OBS's windows stay off the taskbar, and in
-        // Whole screen, the game (Game Capture) shows while it's in front,
-        // else the screen below it.
+        // Whole screen: four times a second, is the game in front? Then the
+        // game (Game Capture) shows, else the screen below it.
         {
             let inner = self.inner.clone();
             let _ = thread::Builder::new().name("game-in-front".into()).spawn(move || loop {
@@ -264,7 +263,6 @@ impl Recorder {
                 // Busy (OBS is being set up): next time.
                 let locked = obs.try_lock();
                 if let Ok(mut o) = locked {
-                    o.hide_own_windows();
                     if let Some(in_front) = in_front {
                         o.show_game(in_front);
                     }
@@ -313,17 +311,21 @@ impl Recorder {
             separate_tracks: settings.microphone && settings.separate_tracks,
             replay_dir: self.work_dir.join("obs-replays"),
         };
-        // OBS running, with these encoder settings?
+        // The recorder running, with these encoder settings?
         if let Some(obs) = inner.obs.clone() {
             let mut o = obs.lock().unwrap_or_else(|e| e.into_inner());
             if !o.alive() {
-                crate::trail("recording: OBS stopped; starting it again");
+                crate::trail(&format!("recording: the recorder stopped; starting it again ({})", o.log_lines().last().cloned().unwrap_or_default()));
                 drop(o);
                 inner.obs = None;
             } else if o.profile != profile {
-                crate::trail("recording: encoder settings changed; restarting OBS");
-                drop(o);
-                inner.obs = None;
+                crate::trail("recording: encoder settings changed");
+                let title = game.as_ref().map(|g| crate::obs::window_names(g.hwnd).0).unwrap_or_default();
+                if let Err(e) = o.set_profile(profile.clone(), &title) {
+                    crate::trail(&format!("recording: the recorder couldn't change settings ({e}); restarting it"));
+                    drop(o);
+                    inner.obs = None;
+                }
             }
         }
         if inner.obs.is_none() {
@@ -338,19 +340,19 @@ impl Recorder {
                 self.send(&status);
                 return;
             };
-            crate::trail(&format!("recording: starting OBS ({})", encoder.label()));
+            crate::trail(&format!("recording: starting the recorder ({})", encoder.label()));
             drop(inner);
             // OBS takes a few seconds to load: not while holding the lock.
             let launched = crate::obs::Obs::launch(&dir, profile);
             inner = self.lock();
             match launched {
                 Ok(obs) => {
-                    crate::trail("recording: OBS ready");
+                    crate::trail("recording: the recorder is ready");
                     inner.obs = Some(Arc::new(Mutex::new(obs)));
                     inner.obs_failed = None;
                 }
                 Err(e) => {
-                    crate::trail(&format!("recording: OBS couldn't start ({e}); trying again in 30 s"));
+                    crate::trail(&format!("recording: the recorder couldn't start ({e}); trying again in 30 s"));
                     inner.obs_failed = Some(Instant::now());
                     inner.status.state = RecState::Error;
                     inner.status.message = Some(format!("The recorder couldn't start: {e}"));
@@ -390,7 +392,7 @@ impl Recorder {
         if !same_capture(desired.as_ref(), current.as_ref()) {
             match &desired {
                 Some(c) => crate::trail(&format!(
-                    "recording: {} with OBS {} ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
+                    "recording: {} with {} ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
                     game.as_ref().map_or("", |g| g.exe.as_str()),
                     if game_only { "Game Capture" } else { "Display Capture" },
                     encoder.label(),
@@ -408,14 +410,14 @@ impl Recorder {
             let applied = obs.lock().unwrap_or_else(|e| e.into_inner()).apply(desired.clone(), &title);
             inner = self.lock();
             if let Err(e) = applied {
-                crate::trail(&format!("recording: OBS couldn't record ({e}); restarting it"));
+                crate::trail(&format!("recording: the recorder couldn't record ({e}); restarting it"));
                 inner.obs = None;
                 inner.obs_failed = Some(Instant::now());
             }
         }
         let recording = inner.obs.is_some() && desired.is_some();
         inner.status.state = if recording { RecState::Recording } else { RecState::Waiting };
-        inner.status.encoder = recording.then(|| format!("OBS {} ({})", if game_only { "Game Capture" } else { "Display Capture" }, encoder.label()));
+        inner.status.encoder = recording.then(|| format!("{} ({})", if game_only { "Game Capture" } else { "Display Capture" }, encoder.label()));
         inner.status.message = None;
         let status = inner.status.clone();
         drop(inner);
@@ -444,10 +446,10 @@ impl Recorder {
         let saved = {
             let mut s = session.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(h) = s.health() {
-                crate::trail(&format!("clip: OBS {h}"));
+                crate::trail(&format!("clip: recorder {h}"));
             }
             for line in s.log_lines() {
-                crate::trail(&format!("obs: {line}"));
+                crate::trail(&format!("recorder: {line}"));
             }
             s.save_replay()?
         };

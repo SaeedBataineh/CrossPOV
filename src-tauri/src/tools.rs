@@ -96,12 +96,13 @@ pub fn get(name: &str) -> Option<PathBuf> {
     TOOLS.iter().find(|t| t.name == name).map(|t| t.path(root)).filter(|p| p.is_file())
 }
 
-/// The slim OBS's folder (holding bin\64bit\obs64.exe), once downloaded,
+/// The recorder's folder (holding bin\64bit\crosspov-recorder.exe and OBS's
+/// engine), once downloaded,
 /// checked and unpacked. None until then, and always without the feature.
 pub fn obs_dir() -> Option<PathBuf> {
     let (tool, root) = (OBS?, root()?);
     let dir = obs_unpacked(&tool, root);
-    (dir.join(UNPACKED).is_file() && dir.join("bin").join("64bit").join("obs64.exe").is_file()).then_some(dir)
+    (dir.join(UNPACKED).is_file() && dir.join("bin").join("64bit").join("crosspov-recorder.exe").is_file()).then_some(dir)
 }
 
 /// Marks a complete unpack (an interrupted one is unpacked again).
