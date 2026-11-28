@@ -68,7 +68,8 @@ const TOOLS: &[Tool] = &[
 #[cfg(not(feature = "single-exe"))]
 const TOOLS: &[Tool] = &[];
 
-/// The slim OBS Studio that records games (scripts/make-slim-obs.py): a zip,
+/// The recorder that records games with OBS's engine (recorder/, packed by
+/// scripts/make-slim-obs.py): a zip,
 /// unpacked next to itself once checked. Downloaded on its own, after the
 /// tools above, so recording never waits for it.
 #[cfg(feature = "single-exe")]
@@ -112,7 +113,7 @@ fn obs_unpacked(tool: &Tool, root: &Path) -> PathBuf {
     tool.path(root).with_file_name("obs")
 }
 
-/// Gets the slim OBS ready: downloads and checks it if needed (from
+/// Gets the recorder ready: downloads and checks it if needed (from
 /// crosspov.com, else GitHub), then unpacks it. Ok(true) if it's ready.
 pub fn prepare_obs() -> Result<bool, String> {
     let (Some(tool), Some(root)) = (OBS, root()) else { return Ok(false) };
@@ -123,12 +124,19 @@ pub fn prepare_obs() -> Result<bool, String> {
     let list = [tool];
     if !missing_in(&list, Some(root)).is_empty() {
         download_in(&list, root, MIRROR_URL, &agent, &mut |_, _| {}).or_else(|e| {
-            eprintln!("OBS from crosspov.com failed ({e}), trying GitHub");
+            eprintln!("the recorder from crosspov.com failed ({e}), trying GitHub");
             download_in(&list, root, BASE_URL, &agent, &mut |_, _| {})
         })?;
     }
     unpack(&tool.path(root), &obs_unpacked(&tool, root))?;
-    Ok(obs_dir().is_some())
+    let ready = obs_dir().is_some();
+    if ready {
+        // Unpacked and checked: the zip isn't needed any more.
+        let zip = tool.path(root);
+        let _ = fs::remove_file(zip.with_file_name(format!("{}.checked", tool.name)));
+        let _ = fs::remove_file(zip);
+    }
+    Ok(ready)
 }
 
 /// Unpacks `zip` into `dir` with Windows' own tar (Windows 10 1803 and later).
@@ -143,15 +151,15 @@ fn unpack(zip: &Path, dir: &Path) -> Result<(), String> {
         .arg(dir)
         .no_window()
         .output()
-        .map_err(|e| format!("Couldn't unpack OBS: {e}"))?;
+        .map_err(|e| format!("Couldn't unpack the recorder: {e}"))?;
     if !out.status.success() {
-        return Err(format!("Couldn't unpack OBS: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!("Couldn't unpack the recorder: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
     fs::write(dir.join(UNPACKED), b"").map_err(|e| e.to_string())
 }
 
 /// Folders the tools run from (so an update can stop them first).
-/// Where every downloaded slim OBS lives (one folder per version), if known.
+/// Where every downloaded recorder lives (one folder per version), if known.
 pub fn obs_root() -> Option<PathBuf> {
     root().map(|r| r.join("obs-slim"))
 }
@@ -275,17 +283,24 @@ fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent,
             let _ = fs::write(path.with_file_name(format!("{}.checked", tool.name)), now);
         }
     }
-    remove_old(tools, root);
+    let _ = remove_old(tools, root);
     Ok(())
 }
 
-/// Deletes other versions of each tool (best effort: one may still be running).
-fn remove_old(tools: &[Tool], root: &Path) {
+/// Deletes other versions of each tool and half-finished downloads (best
+/// effort: one may still be running; `clean_up` tries again later).
+/// Returns the bytes freed.
+fn remove_old(tools: &[Tool], root: &Path) -> u64 {
+    let mut freed = 0;
     for tool in tools {
         let Ok(entries) = fs::read_dir(root.join(tool.stem())) else { continue };
         for e in entries.flatten() {
             if e.file_name().to_string_lossy() != tool.short() {
-                let _ = fs::remove_dir_all(e.path());
+                freed += remove(&e.path());
+            } else if let Ok(files) = fs::read_dir(e.path()) {
+                for f in files.flatten().filter(|f| f.file_name().to_string_lossy().ends_with(".part")) {
+                    freed += remove(&f.path());
+                }
             }
         }
     }
@@ -294,10 +309,57 @@ fn remove_old(tools: &[Tool], root: &Path) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             if name.starts_with(|c: char| c.is_ascii_digit()) {
-                let _ = fs::remove_dir_all(e.path());
+                freed += remove(&e.path());
             }
         }
     }
+    freed
+}
+
+/// Deletes a file or folder; the bytes it freed (what's still in use stays).
+fn remove(path: &Path) -> u64 {
+    let before = size_of(path);
+    if path.is_dir() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+    }
+    before.saturating_sub(size_of(path))
+}
+
+fn size_of(path: &Path) -> u64 {
+    match fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => fs::read_dir(path).map(|it| it.flatten().map(|e| size_of(&e.path())).sum()).unwrap_or(0),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }
+}
+
+/// Deletes what earlier versions left behind and nothing uses any more, in
+/// the app's local data folder (`base`): other versions of the tools and
+/// the recorder, half-finished downloads, the old FFmpeg recorder's buffer
+/// and log, and replays that never became clips (over a day old). Never
+/// clips, settings or anything current. Returns the bytes freed.
+pub fn clean_up(base: &Path) -> u64 {
+    let mut freed = 0;
+    if let Some(root) = root() {
+        let current: Vec<Tool> = TOOLS.iter().copied().chain(OBS).collect();
+        freed += remove_old(&current, root);
+    }
+    // FFmpeg recorded into 2-second pieces here until 0.9.0.
+    for old in ["buffer", "ffmpeg.log"] {
+        freed += remove(&base.join(old));
+    }
+    if let Ok(entries) = fs::read_dir(base.join("obs-replays")) {
+        let day = Duration::from_secs(24 * 3600);
+        for e in entries.flatten() {
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+            if old {
+                freed += remove(&e.path());
+            }
+        }
+    }
+    freed
 }
 
 /// Like the app's other HTTPS clients (Windows' own TLS), with time for a slow connection.
@@ -316,6 +378,24 @@ fn agent() -> ureq::Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleans_up_old_versions_only() {
+        let root = std::env::temp_dir().join(format!("crosspov-clean-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let t = Tool { name: "ffmpeg.exe", sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" };
+        let current = t.path(&root);
+        let old = root.join("ffmpeg").join("1111111111111111").join("ffmpeg.exe");
+        for f in [&current, &old, &current.with_file_name("yt.part"), &root.join("0.1.4").join("ffmpeg.exe")] {
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(f, vec![0u8; 1000]).unwrap();
+        }
+        let freed = remove_old(&[t], &root);
+        assert!(current.is_file(), "the current version stays");
+        assert!(!old.exists() && !current.with_file_name("yt.part").exists() && !root.join("0.1.4").exists());
+        assert_eq!(freed, 3000);
+        let _ = fs::remove_dir_all(root);
+    }
     use std::net::TcpListener;
 
     fn sha(bytes: &[u8]) -> String {

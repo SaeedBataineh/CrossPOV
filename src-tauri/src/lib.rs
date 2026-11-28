@@ -68,22 +68,37 @@ pub(crate) const MINIMIZED_ARG: &str = "--minimized";
 /// First run of the single exe (or new tool versions): download FFmpeg and
 /// yt-dlp, showing progress where the recorder status goes, then start
 /// recording. Without internet it keeps trying every minute.
-/// Gets the slim OBS (scripts/make-slim-obs.py) ready in the background,
+/// Gets the recorder (recorder/, packed by scripts/make-slim-obs.py) ready in the background,
 /// trying again every 10 minutes until it is. Nothing waits for it.
 fn prepare_obs_in_background() {
     if !tools::EMBEDDED {
         return;
     }
-    let _ = std::thread::Builder::new().name("obs-download".into()).spawn(|| loop {
+    let _ = std::thread::Builder::new().name("recorder-download".into()).spawn(|| loop {
         match tools::prepare_obs() {
             Ok(true) => {
-                trail("obs: ready");
+                trail("recorder: downloaded and ready");
                 return;
             }
             Ok(false) => return,
-            Err(e) => trail(&format!("obs: {e}; trying again in 10 minutes")),
+            Err(e) => trail(&format!("recorder: {e}; trying again in 10 minutes")),
         }
         std::thread::sleep(std::time::Duration::from_secs(600));
+    });
+}
+
+/// Deletes what earlier versions left behind (see `tools::clean_up`): once
+/// the app has settled (an update's old copy has quit), and again later for
+/// files that were still in use.
+fn clean_up_in_background(base: PathBuf) {
+    let _ = std::thread::Builder::new().name("clean-up".into()).spawn(move || {
+        for wait in [30, 600] {
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+            let freed = tools::clean_up(&base);
+            if freed > 0 {
+                trail(&format!("clean-up: deleted {:.0} MB left by earlier versions", freed as f64 / 1e6));
+            }
+        }
     });
 }
 
@@ -397,7 +412,7 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     let missing: Vec<&str> = tools::missing().iter().map(|t| t.name).collect();
     let _ = writeln!(out, "tools: {}", if missing.is_empty() { "ok".to_string() } else { format!("missing {}", missing.join(", ")) });
     if tools::EMBEDDED {
-        let _ = writeln!(out, "obs: {}", if tools::obs_dir().is_some() { "ready" } else { "not downloaded yet" });
+        let _ = writeln!(out, "recorder: {}", if tools::obs_dir().is_some() { "ready" } else { "not downloaded yet" });
     }
     let _ = writeln!(out, "ffmpeg: {}", ffmpeg::locate().map(|p| p.display().to_string()).unwrap_or_else(|| "not found".into()));
     let _ = writeln!(out, "\n[Matches]\nRiot ID: {} ({})", if s.riot_id.is_empty() { "not set" } else { &s.riot_id }, s.region);
@@ -911,6 +926,7 @@ pub fn run() {
             let handle = app.handle().clone();
             // Single-exe build: FFmpeg and yt-dlp are downloaded into the local data folder.
             tools::init(&handle.path().app_local_data_dir()?);
+            clean_up_in_background(handle.path().app_local_data_dir()?);
             let path = handle.path().app_config_dir()?.join("settings.json");
             let mut settings = Settings::load(&path);
             if settings.clip_folder.is_empty() {
