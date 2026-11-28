@@ -159,6 +159,7 @@ impl Obs {
         // Ready: the first request waits until OBS has finished loading.
         obs.request("GetVersion", json!({}))?;
         hide_tray_icon(obs.child.id());
+        hide_windows(obs.child.id());
         Ok(obs)
     }
 
@@ -379,6 +380,7 @@ impl Obs {
         let alive = matches!(self.child.try_wait(), Ok(None));
         if alive {
             hide_tray_icon(self.child.id());
+            hide_windows(self.child.id());
         }
         alive
     }
@@ -713,6 +715,44 @@ fn hide_tray_icon(pid: u32) {
 
 #[cfg(not(windows))]
 fn hide_tray_icon(_pid: u32) {}
+
+/// Hides OBS's own windows if any shows up (its main window, a dialog):
+/// they'd appear on the taskbar. Says which, for Diagnostics.
+#[cfg(windows)]
+fn hide_windows(pid: u32) {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_HIDE};
+    unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> BOOL {
+        // SAFETY: `data` is the &mut (pid, found) passed below, alive for the whole EnumWindows call.
+        let (pid, found) = unsafe { &mut *(data.0 as *mut (u32, Vec<HWND>)) };
+        let mut owner = 0u32;
+        // SAFETY: plain queries on a window Windows handed us.
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut owner));
+            if owner == *pid && IsWindowVisible(hwnd).as_bool() {
+                found.push(hwnd);
+            }
+        }
+        true.into()
+    }
+    let mut data = (pid, Vec::<HWND>::new());
+    // SAFETY: the callback only uses `data`, which outlives the call.
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut data as *mut _ as isize));
+    }
+    for hwnd in data.1 {
+        let (title, class) = window_names(hwnd.0 as usize as u64);
+        crate::trail(&format!("obs: hid its window \"{title}\" ({class})"));
+        // SAFETY: hiding a window of OBS, which CrossPOV runs hidden.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_windows(_pid: u32) {}
 
 /// A window's title and class (Game Capture matches the window by them, and the .exe).
 #[cfg(windows)]
