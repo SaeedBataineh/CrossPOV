@@ -10,3 +10,4 @@ src-tauri/binaries/
 .dev.vars
 *.dev.vars
 __pycache__/
+recorder/target/

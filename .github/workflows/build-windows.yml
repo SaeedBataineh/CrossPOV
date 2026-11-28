@@ -148,38 +148,47 @@ jobs:
         shell: pwsh
         run: ./scripts/get-ytdlp.ps1
 
-      # The slim OBS Studio the app records games with (downloaded on first run,
-      # like FFmpeg). Cached by its script, so the same zip (and fingerprint)
-      # is reused and users only download it again when it really changes.
+      # The recorder the app records games with (downloaded on first run, like
+      # FFmpeg): the CrossPOV Recorder (recorder/) and the parts of OBS Studio
+      # it uses. Cached by its script and the recorder's source, so the same
+      # zip (and fingerprint) is reused and users only download it again when
+      # it really changes.
       - id: obs-cache
         uses: actions/cache@v4
         with:
           path: src-tauri/binaries/obs-slim.zip
-          key: obs-slim-${{ hashFiles('scripts/make-slim-obs.py') }}
-      - name: Make the slim OBS
+          key: obs-slim-${{ hashFiles('scripts/make-slim-obs.py', 'recorder/Cargo.toml', 'recorder/Cargo.lock', 'recorder/src/**') }}
+      - name: Build the recorder and pack it with OBS's engine
         if: steps.obs-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
+          cargo test --manifest-path recorder/Cargo.toml
+          if ($LASTEXITCODE) { throw "recorder tests failed" }
+          cargo build --release --manifest-path recorder/Cargo.toml
+          if ($LASTEXITCODE) { throw "building the recorder failed" }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT" -Directory | Sort-Object FullName | Select-Object -Last 1
           "Visual C++ runtime from $($crt.FullName)"
-          python scripts/make-slim-obs.py src-tauri/binaries/obs-slim.zip $crt.FullName
-          if ($LASTEXITCODE) { throw "making the slim OBS failed" }
+          python scripts/make-slim-obs.py src-tauri/binaries/obs-slim.zip $crt.FullName recorder/target/release/crosspov-recorder.exe
+          if ($LASTEXITCODE) { throw "making the recorder package failed" }
 
-      # Does the slim OBS start with the parts left out? This machine has no
-      # graphics card, so OBS may not get far: logged, not required (yet).
-      - name: Try the slim OBS
-        continue-on-error: true
+      # The recorder for real, from the package: OBS's engine starts, records
+      # the screen with the CPU encoder into the replay buffer, and saves it.
+      - name: Recorder self-test
         shell: pwsh
         run: |
-          $d = Join-Path $env:RUNNER_TEMP "obs-try"
+          $d = Join-Path $env:RUNNER_TEMP "rec-try"
+          Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
           tar -xf src-tauri/binaries/obs-slim.zip -C (New-Item -ItemType Directory -Force $d)
-          "slim OBS: {0:N1} MB unpacked" -f ((Get-ChildItem $d -Recurse | Measure-Object Length -Sum).Sum / 1MB)
-          $p = Start-Process "$d\bin\64bit\obs64.exe" -ArgumentList "--portable","--minimize-to-tray","--disable-updater","--disable-shutdown-check","--multi" -WorkingDirectory "$d\bin\64bit" -PassThru
-          Start-Sleep 25
-          "still running after 25 s: $(-not $p.HasExited)"
-          Get-ChildItem "$d\config\obs-studio\logs" -ErrorAction SilentlyContinue | Select-Object -Last 1 | ForEach-Object { Get-Content $_.FullName -Tail 60 }
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "recorder package: {0:N1} MB unpacked" -f ((Get-ChildItem $d -Recurse | Measure-Object Length -Sum).Sum / 1MB)
+          $out = Join-Path $env:RUNNER_TEMP "rec-out"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $p = Start-Process "$d\bin\64bit\crosspov-recorder.exe" -ArgumentList "--selftest", $out -WorkingDirectory "$d\bin\64bit" -RedirectStandardOutput "$out\log.txt" -RedirectStandardError "$out\err.txt" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; Get-Content "$out\log.txt" -Tail 80; throw "recorder self-test hung" }
+          Get-Content "$out\log.txt" -Tail 80
+          Get-Content "$out\err.txt" -Tail 20
+          Get-ChildItem $out
+          if ($p.ExitCode -ne 0) { throw "recorder self-test failed ($($p.ExitCode))" }
 
       - name: Run Rust tests
         shell: pwsh

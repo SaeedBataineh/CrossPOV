@@ -1,0 +1,18 @@
+[package]
+name = "crosspov-recorder"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "A recorder without windows, built on OBS Studio's libobs, for CrossPOV."
+publish = false
+
+[dependencies]
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
