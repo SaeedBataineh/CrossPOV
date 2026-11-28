@@ -25,7 +25,7 @@ sha2 = "0.10"
 cpal = "0.18.2"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-notification = "2.8.1"
-sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.4", default-features = false, features = ["system", "disk"] }
 ureq = { version = "3.5.2", default-features = false, features = ["json", "native-tls", "gzip"] }
 tauri-plugin-updater = "2"
 time = { version = "0.3", features = ["local-offset", "parsing", "formatting", "macros"] }

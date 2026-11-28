@@ -55,6 +55,9 @@ export interface Settings {
   hotkey: string;
   bufferSeconds: number;
   clipSound: boolean;
+  /** VALORANT: clip your multikills by themselves after each match, for these kill counts in a round (5 = ace). */
+  autoClip: boolean;
+  autoClipKills: number[];
   // Audio
   audioMode: AudioMode;
   gameAudio: boolean;
@@ -106,6 +109,8 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkey: "F9",
   bufferSeconds: 60,
   clipSound: true,
+  autoClip: true,
+  autoClipKills: [3, 4, 5],
   audioMode: "game",
   gameAudio: true,
   gameVolume: 100,

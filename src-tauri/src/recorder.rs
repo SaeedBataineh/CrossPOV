@@ -310,6 +310,7 @@ impl Recorder {
             format: container_ext(settings.format),
             separate_tracks: settings.microphone && settings.separate_tracks,
             replay_dir: self.work_dir.join("obs-replays"),
+            session_dir: crate::autoclip::wanted_session(&self.work_dir, &settings, game.as_ref()),
         };
         // The recorder running, with these encoder settings?
         if let Some(obs) = inner.obs.clone() {
@@ -502,6 +503,8 @@ impl Recorder {
             vod_start_sec: None,
             game,
             made_ms: None,
+            agent: None,
+            kills: None,
         }
     }
 }

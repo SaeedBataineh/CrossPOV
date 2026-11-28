@@ -55,6 +55,12 @@ pub struct ClipMeta {
     /// the cut part happened, so it still lines up with its match.
     #[serde(default)]
     pub made_ms: Option<u64>,
+    /// Your VALORANT clips, once the match's data is in: who you played, and
+    /// how many kills (auto-clips of multikills; 5 is an ace).
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub kills: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +85,8 @@ pub struct ClipInfo {
     pub game: Option<String>,
     /// A cut: when it was made, shown on its card and used for "newest".
     pub made_ms: Option<u64>,
+    pub agent: Option<String>,
+    pub kills: Option<u32>,
 }
 
 fn is_video(p: &Path) -> bool {
@@ -92,6 +100,11 @@ pub fn thumb_path(root: &Path, clip: &Path) -> PathBuf {
 
 pub fn meta_path(root: &Path, clip: &Path) -> PathBuf {
     thumb_path(root, clip).with_extension("json")
+}
+
+/// A clip's details (empty if it has none).
+pub fn read_meta(root: &Path, clip: &Path) -> ClipMeta {
+    fs::read(meta_path(root, clip)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 pub fn write_meta(root: &Path, clip: &Path, meta: &ClipMeta) {
@@ -161,6 +174,8 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
         vod_start_sec: details.vod_start_sec,
         game: details.game,
         made_ms: details.made_ms,
+        agent: details.agent,
+        kills: details.kills,
     })
 }
 

@@ -24,7 +24,7 @@ use crate::{
     settings::Settings,
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchPlayer {
     pub puuid: String,
@@ -37,7 +37,7 @@ pub struct MatchPlayer {
     pub assists: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchRound {
     pub index: u32,
@@ -45,7 +45,7 @@ pub struct MatchRound {
     pub start_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchKill {
     pub round: u32,
@@ -56,7 +56,7 @@ pub struct MatchKill {
     pub weapon: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchTeam {
     pub id: String,
@@ -64,7 +64,7 @@ pub struct MatchTeam {
     pub rounds_won: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchSummary {
     pub id: String,

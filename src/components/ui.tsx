@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { appIcon, clipVideoSrc, copyForDiscord, isDesktop, shownMs, thumbSrc, type ClipInfo } from "../lib/backend";
+import { appIcon, clipVideoSrc, copyForDiscord, isDesktop, killsLabel, shownMs, thumbSrc, type ClipInfo } from "../lib/backend";
 import { Check, Clock, FolderOpen, GameController, Info, PencilSimple, Play, Star, Trash, Warning, WarningCircle } from "@phosphor-icons/react";
 import { openContextMenu, type MenuItem } from "./ContextMenu";
 import { promptDialog } from "./Dialog";
@@ -233,7 +233,13 @@ function clockLabel(ms: number): string {
 export function cardTitle(c: ClipInfo): string {
   const own = customTitle(c.path);
   if (own) return own;
-  if (!isTheirs(c)) return `${c.map ?? c.game ?? "Clip"} · ${clockLabel(shownMs(c))}${c.madeMs ? " · cut" : ""}`;
+  if (!isTheirs(c)) {
+    // After the match: "Ascent · Jett · Round 7 · 3K".
+    if (c.map && c.round != null) {
+      return [c.map, c.agent, `Round ${c.round}`, c.kills ? killsLabel(c.kills) : null].filter(Boolean).join(" · ") + (c.madeMs ? " · cut" : "");
+    }
+    return `${c.map ?? c.game ?? "Clip"} · ${clockLabel(shownMs(c))}${c.madeMs ? " · cut" : ""}`;
+  }
   const m = c.moment ?? "Streamer clip";
   return m.charAt(0).toUpperCase() + m.slice(1);
 }

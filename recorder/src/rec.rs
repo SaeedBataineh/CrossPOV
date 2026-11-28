@@ -33,6 +33,11 @@ pub struct Profile {
     pub separate_tracks: bool,
     /// Where saved replays go.
     pub replay_dir: PathBuf,
+    /// Also record everything into this folder, in 5-minute pieces (CrossPOV
+    /// cuts auto-clips out of them once a match's data is in, then deletes
+    /// them). Shares the encoders: no extra work for the graphics card.
+    #[serde(default)]
+    pub session_dir: Option<PathBuf>,
 }
 
 /// What to record (CrossPOV's `obs::Capture`).
@@ -76,6 +81,8 @@ pub struct Recorder {
     video_enc: Ptr,
     audio_encs: Vec<Ptr>,
     replay: Ptr,
+    /// The pieces recording (`Profile::session_dir`), if any.
+    session: Ptr,
     profile: Option<Profile>,
     capture: Option<Capture>,
 }
@@ -141,6 +148,7 @@ impl Recorder {
                 video_enc: std::ptr::null_mut(),
                 audio_encs: Vec::new(),
                 replay: std::ptr::null_mut(),
+                session: std::ptr::null_mut(),
                 profile: None,
                 capture: None,
             };
@@ -235,8 +243,17 @@ impl Recorder {
     /// change without them).
     fn drop_outputs(&mut self) {
         self.stop_replay();
-        // SAFETY: releasing our own references.
+        // SAFETY: stopping and releasing our own outputs and encoders.
         unsafe {
+            if !self.session.is_null() {
+                (self.o.obs_output_stop)(self.session);
+                let until = Instant::now() + Duration::from_secs(5);
+                while (self.o.obs_output_active)(self.session) && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                (self.o.obs_output_release)(self.session);
+                self.session = std::ptr::null_mut();
+            }
             if !self.replay.is_null() {
                 (self.o.obs_output_release)(self.replay);
             }
@@ -478,6 +495,26 @@ impl Recorder {
                     }
                 }
                 (self.o.obs_data_release)(aac);
+                if let Some(dir) = &p.session_dir {
+                    let _ = std::fs::create_dir_all(dir);
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+                    let first = dir.join(format!("Session {now}.mkv"));
+                    let st = self.data(&json!({
+                        "path": first.to_string_lossy(), "directory": dir.to_string_lossy(), "format": "Session %CCYY-%MM-%DD %hh-%mm-%ss",
+                        "extension": "mkv", "allow_spaces": true, "split_file": true, "max_time_sec": 300, "max_size_mb": 0
+                    }));
+                    let session = (self.o.obs_output_create)(c("ffmpeg_muxer").as_ptr(), c("Session").as_ptr(), st, std::ptr::null_mut());
+                    (self.o.obs_data_release)(st);
+                    if session.is_null() {
+                        println!("recorder: couldn't make the session recording");
+                    } else {
+                        (self.o.obs_output_set_video_encoder)(session, video);
+                        for (i, a) in self.audio_encs.iter().enumerate() {
+                            (self.o.obs_output_set_audio_encoder)(session, *a, i);
+                        }
+                        self.session = session;
+                    }
+                }
                 (self.o.signal_handler_connect)((self.o.obs_output_get_signal_handler)(replay), c("saved").as_ptr(), on_saved, std::ptr::null_mut());
                 self.video_enc = video;
                 self.replay = replay;
@@ -506,6 +543,11 @@ impl Recorder {
                 return Err("the replay buffer didn't start".into());
             }
             std::thread::sleep(Duration::from_millis(50));
+        }
+        // The pieces recording, if wanted: not being able to doesn't stop clips.
+        // SAFETY: our session output.
+        if !self.session.is_null() && !unsafe { (self.o.obs_output_active)(self.session) } && !unsafe { (self.o.obs_output_start)(self.session) } {
+            println!("recorder: the session recording didn't start: {}", text(unsafe { (self.o.obs_output_get_last_error)(self.session) }));
         }
         Ok(())
     }

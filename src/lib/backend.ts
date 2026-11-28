@@ -130,6 +130,14 @@ export interface ClipInfo {
   vodStartSec?: number | null;
   /** A cut: when it was made (its createdMs stays where the cut part happened, for matching). */
   madeMs?: number | null;
+  /** Your VALORANT clips, once the match's data is in: your agent, and an auto-clip's kill count (5 = ace). */
+  agent?: string | null;
+  kills?: number | null;
+}
+
+/** "3K", "4K", "ACE". */
+export function killsLabel(kills: number): string {
+  return kills >= 5 ? "ACE" : `${kills}K`;
 }
 
 /** When a clip appeared in your list: when it was saved, or for a cut when it was made. */
@@ -163,6 +171,8 @@ async function listen<T>(event: string, cb: (payload: T) => void): Promise<Unlis
 
 export const onRecorderStatus = (cb: (s: RecorderStatus) => void) => listen("recorder-status", cb);
 export const onClipSaved = (cb: (c: ClipInfo) => void) => listen("clip-saved", cb);
+/** Clips got new details (auto-names after a match). */
+export const onClipsChanged = (cb: () => void) => listen("clips-changed", () => cb());
 export const onClipFailed = (cb: (msg: string) => void) => listen("clip-failed", cb);
 /** The window was reopened from the tray after its page slept: anything may have changed meanwhile. */
 export const onWindowAwake = (cb: () => void) => listen<null>("window-awake", () => cb());

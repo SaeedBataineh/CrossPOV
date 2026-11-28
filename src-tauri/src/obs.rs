@@ -38,6 +38,8 @@ pub struct Profile {
     pub separate_tracks: bool,
     /// Where saved replays go before CrossPOV moves them.
     pub replay_dir: PathBuf,
+    /// Also record everything here in 5-minute pieces, for auto-clips (see autoclip.rs).
+    pub session_dir: Option<PathBuf>,
 }
 
 /// What the recorder records.
@@ -101,7 +103,8 @@ fn encoder_id(enc: VideoEncoder, hevc: bool) -> &'static str {
 fn profile_json(p: &Profile) -> Value {
     json!({
         "encoder": encoder_id(p.encoder, p.hevc), "kbps": p.kbps, "buffer_seconds": p.buffer_seconds,
-        "format": p.format, "separate_tracks": p.separate_tracks, "replay_dir": p.replay_dir
+        "format": p.format, "separate_tracks": p.separate_tracks, "replay_dir": p.replay_dir,
+        "session_dir": p.session_dir
     })
 }
 
@@ -357,7 +360,7 @@ mod tests {
 
     #[test]
     fn profile_names_obs_encoders() {
-        let p = Profile { encoder: VideoEncoder::Nvenc, hevc: true, kbps: 50_000, buffer_seconds: 60, format: "mp4", separate_tracks: false, replay_dir: PathBuf::from("x") };
+        let p = Profile { encoder: VideoEncoder::Nvenc, hevc: true, kbps: 50_000, buffer_seconds: 60, format: "mp4", separate_tracks: false, replay_dir: PathBuf::from("x"), session_dir: None };
         let v = profile_json(&p);
         assert_eq!(v["encoder"], "obs_nvenc_hevc_tex");
         assert_eq!(v["kbps"], 50_000);
@@ -384,7 +387,7 @@ mod tests {
             }
         });
         let (stream, _) = listener.accept().unwrap();
-        let profile = Profile { encoder: VideoEncoder::Cpu, hevc: false, kbps: 1000, buffer_seconds: 30, format: "mp4", separate_tracks: false, replay_dir: PathBuf::from("x") };
+        let profile = Profile { encoder: VideoEncoder::Cpu, hevc: false, kbps: 1000, buffer_seconds: 30, format: "mp4", separate_tracks: false, replay_dir: PathBuf::from("x"), session_dir: None };
         let child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" }).args(if cfg!(windows) { vec!["/c", "exit"] } else { vec![] }).spawn().unwrap();
         let mut obs = Obs { child, conn: BufReader::new(stream), log: PathBuf::from("none"), profile, capture: None, game_shown: true };
         obs.read_reply(Duration::from_secs(5)).unwrap();

@@ -326,6 +326,34 @@ function GeneralSettings({ settings, onSaved, section }: { settings: S; onSaved:
           <Row label="Clip sound" help="a beep so you know it worked"><Toggle label="Clip sound" checked={draft.clipSound} onChange={(v) => set("clipSound", v)} /></Row>
           <p className="note">A {draft.bufferSeconds} s clip is about {Math.round(estimateClipMb(draft))} MB at your quality setting.</p>
         </Panel>
+        <Panel title="Auto-clips">
+          <Row label="Auto-clip multikills" help="VALORANT: saved after each match, no hotkey needed">
+            <Toggle label="Auto-clip multikills" checked={draft.autoClip} onChange={(v) => set("autoClip", v)} />
+          </Row>
+          {draft.autoClip && (
+            <Row label="Which ones" help="kills by you in one round">
+              <div className="seg" role="group" aria-label="Which multikills to clip">
+                {[2, 3, 4, 5].map((k) => {
+                  const on = draft.autoClipKills.includes(k);
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={on}
+                      onClick={() => set("autoClipKills", on ? draft.autoClipKills.filter((x) => x !== k) : [...draft.autoClipKills, k].sort())}
+                    >
+                      {k === 5 ? "ACE" : `${k}K`}
+                    </button>
+                  );
+                })}
+              </div>
+            </Row>
+          )}
+          {draft.autoClip && (
+            <p className="note">While you play, CrossPOV also keeps the match on disk (about {Math.round(estimateClipMb({ ...draft, bufferSeconds: 60 }) * 30 / 1000)} GB for 30 minutes at your quality setting), cuts your multikills out once the match's data is in, then deletes the rest. Needs your Riot ID in Matches, and 20 GB free.</p>
+          )}
+        </Panel>
         </>
       )}
 

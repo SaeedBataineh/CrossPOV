@@ -149,6 +149,10 @@ pub struct Settings {
     pub hotkey: String,
     pub buffer_seconds: u32,
     pub clip_sound: bool,
+    /// VALORANT: clip your multikills by themselves once each match's data
+    /// is in, for these kill counts in a round (2 to 5; 5 is an ace).
+    pub auto_clip: bool,
+    pub auto_clip_kills: Vec<u32>,
     // Audio
     pub audio_mode: AudioMode,
     pub game_audio: bool,
@@ -226,6 +230,8 @@ impl Default for Settings {
             search_youtube_kick: true,
             vod_wait_hours: 48,
             clip_folder: String::new(),
+            auto_clip: true,
+            auto_clip_kills: vec![3, 4, 5],
             storage_limit_gb: 50,
             prune_oldest: true,
             start_with_windows: true,
@@ -255,6 +261,9 @@ impl Settings {
             self.bitrate_mbps = self.bitrate_mbps.clamp(2, 300);
         }
         self.buffer_seconds = self.buffer_seconds.clamp(5, 300);
+        self.auto_clip_kills.retain(|k| (2..=5).contains(k));
+        self.auto_clip_kills.sort_unstable();
+        self.auto_clip_kills.dedup();
         self.seconds_before = self.seconds_before.min(MAX_PADDING);
         self.seconds_after = self.seconds_after.min(MAX_PADDING);
         self.vod_wait_hours = self.vod_wait_hours.clamp(1, 168);

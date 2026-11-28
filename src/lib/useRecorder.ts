@@ -3,6 +3,8 @@ import {
   listClips,
   onClipFailed,
   onClipSaved,
+  onClipsChanged,
+  killsLabel,
   onRecorderStatus,
   recorderStatus,
   type ClipInfo,
@@ -77,7 +79,7 @@ export function useRecorder(onOpenClip?: (c: ClipInfo) => void) {
     onClipSaved((c) => {
       setClips((prev) => [c, ...prev.filter((p) => p.path !== c.path)]);
       show({
-        text: "Clip saved",
+        text: c.kills ? `Auto-clip saved · ${killsLabel(c.kills)}${c.map ? ` on ${c.map}` : ""}` : "Clip saved",
         tone: "good",
         ms: 6000,
         actions: [
@@ -87,6 +89,7 @@ export function useRecorder(onOpenClip?: (c: ClipInfo) => void) {
       });
     }).then((u) => unlisten.push(u));
     onClipFailed((msg) => notify(msg, "bad")).then((u) => unlisten.push(u));
+    onClipsChanged(() => refreshClips()).then((u) => unlisten.push(u));
     return () => {
       alive = false;
       unlisten.forEach((u) => u());

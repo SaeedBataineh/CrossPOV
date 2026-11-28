@@ -1107,6 +1107,7 @@ impl StreamerWorker {
                         vod_start_sec: Some(from),
                         game: Some("VALORANT".into()),
                         made_ms: None,
+                        ..ClipMeta::default()
                     };
                     clips::write_meta(&root, &clip, &meta);
                     // Learn how long a clip takes here, for the next estimates.

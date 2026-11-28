@@ -6,6 +6,7 @@
 //! while you play. Opening it from the tray builds a fresh window.
 
 mod audio;
+mod autoclip;
 mod clipserve;
 mod clips;
 mod edit;
@@ -87,18 +88,45 @@ fn prepare_obs_in_background() {
     });
 }
 
-/// Deletes what earlier versions left behind (see `tools::clean_up`): once
-/// the app has settled (an update's old copy has quit), and again later for
-/// files that were still in use.
+/// Deletes what earlier versions left behind (see `tools::clean_up`) once
+/// the app has settled (an update's old copy has quit), then every 10
+/// minutes (files that were still in use, auto-clip pieces nothing needs).
 fn clean_up_in_background(base: PathBuf) {
     let _ = std::thread::Builder::new().name("clean-up".into()).spawn(move || {
-        for wait in [30, 600] {
-            std::thread::sleep(std::time::Duration::from_secs(wait));
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        loop {
             let freed = tools::clean_up(&base);
             if freed > 0 {
                 trail(&format!("clean-up: deleted {:.0} MB left by earlier versions", freed as f64 / 1e6));
             }
+            let pieces = autoclip::prune(&base);
+            if pieces > 0 {
+                trail(&format!("auto-clip: deleted {:.0} MB of old match recording", pieces as f64 / 1e6));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(600));
         }
+    });
+}
+
+/// A match's data is in: auto-clips of your multikills, names for the clips
+/// you saved during it (see autoclip.rs). Each new clip shows up in the app.
+fn auto_clip_after(app: &AppHandle, m: matches::MatchSummary) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("auto-clip".into()).spawn(move || {
+        let Some(state) = app.try_state::<AppState>() else { return };
+        let settings = state.get();
+        let Some((ffmpeg, _)) = state.recorder.ffmpeg_tools() else { return };
+        let (Ok(work), root) = (app.path().app_local_data_dir(), clip_folder(&app, &settings)) else { return };
+        let made = autoclip::after_match(&m, &settings, &work, &root, &ffmpeg);
+        for clip in &made {
+            let _ = app.emit("clip-saved", clip);
+        }
+        if !made.is_empty() && settings.notifications {
+            let what: Vec<String> = made.iter().map(|c| autoclip::kills_label(c.kills.unwrap_or(0))).collect();
+            let _ = app.notification().builder().title("Auto-clips saved").body(format!("{} on {}", what.join(", "), m.map)).show();
+        }
+        // Your hotkey clips may have new names now.
+        let _ = app.emit("clips-changed", ());
     });
 }
 
@@ -577,6 +605,8 @@ async fn trim_clip(app: AppHandle, state: State<'_, AppState>, path: String, sta
                 vod_start_sec: info.vod_start_sec.map(|s| s + start),
                 game: info.game.clone(),
                 made_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64),
+                agent: info.agent.clone(),
+                kills: info.kills,
             },
         );
         clips::info(&root, &out, info.kind).ok_or_else(|| "The cut clip wasn't saved.".to_string())
@@ -949,7 +979,10 @@ pub fn run() {
                 settings.clone(),
                 Box::new(move |event| {
                     let _ = match event {
-                        MatchEvent::Found(m) => match_events.emit("match-found", m),
+                        MatchEvent::Found(m) => {
+                            auto_clip_after(&match_events, m.clone());
+                            match_events.emit("match-found", m)
+                        }
                         MatchEvent::Status(s) => match_events.emit("matches-status", s),
                     };
                 }),

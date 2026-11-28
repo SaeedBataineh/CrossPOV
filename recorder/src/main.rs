@@ -32,7 +32,7 @@ fn selftest(dir: &str) -> i32 {
         }
     };
     let steps = [
-        json!({ "op": "setup", "profile": { "encoder": "obs_x264", "kbps": 4000, "buffer_seconds": 20, "format": "mp4", "separate_tracks": true, "replay_dir": dir } }),
+        json!({ "op": "setup", "profile": { "encoder": "obs_x264", "kbps": 4000, "buffer_seconds": 20, "format": "mp4", "separate_tracks": true, "replay_dir": dir, "session_dir": format!("{dir}/session") } }),
         json!({ "op": "apply", "title": "", "capture": {
             "source": { "Screen": { "origin": [0, 0], "game": null } }, "size": [1280, 720], "out_size": [1280, 720], "fps": 30,
             "game_audio": 1.0, "desktop_audio": true, "apps": [], "mic": 1.0, "mic_device": "default", "denoise_mic": true, "separate_tracks": true
@@ -63,7 +63,10 @@ fn selftest(dir: &str) -> i32 {
     // Shutting down cleanly is part of the test (CrossPOV quits it this way).
     rec.stop();
     println!("selftest: stopped cleanly");
-    code
+    // The session recording wrote its piece.
+    let pieces: Vec<u64> = std::fs::read_dir(format!("{dir}/session")).map(|it| it.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).collect()).unwrap_or_default();
+    println!("selftest: session pieces {pieces:?}");
+    if pieces.iter().any(|n| *n > 10_000) { code } else { 1 }
 }
 
 fn main() {
