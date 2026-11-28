@@ -617,6 +617,15 @@ mod tests {
     }
 
     #[test]
+    fn calldata_starts_as_an_empty_list() {
+        let mut buf = [0xffu8; 64];
+        let cd = CallData::on(&mut buf);
+        assert_eq!(cd.size, std::mem::size_of::<usize>());
+        assert!(cd.fixed && cd.capacity == 64);
+        assert!(buf[..std::mem::size_of::<usize>()].iter().all(|b| *b == 0));
+    }
+
+    #[test]
     fn calldata_layout_matches_libobs() {
         assert_eq!(std::mem::size_of::<CallData>(), 4 * std::mem::size_of::<usize>());
         assert_eq!(std::mem::size_of::<lo::VideoInfo>(), 56);

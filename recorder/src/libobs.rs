@@ -77,9 +77,13 @@ pub struct CallData {
 }
 
 impl CallData {
-    /// `calldata_init_fixed` on `buf`: libobs never frees or grows it.
+    /// `calldata_init_fixed` on `buf` (libobs never frees or grows it),
+    /// then `calldata_clear`: an empty list is one zero size_t, which libobs
+    /// needs to find the end (without it, it writes through a null pointer).
     pub fn on(buf: &mut [u8]) -> CallData {
-        CallData { stack: buf.as_mut_ptr(), size: 0, capacity: buf.len(), fixed: true }
+        let end = std::mem::size_of::<usize>();
+        buf[..end].fill(0);
+        CallData { stack: buf.as_mut_ptr(), size: end, capacity: buf.len(), fixed: true }
     }
 }
 
