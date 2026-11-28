@@ -247,9 +247,7 @@ impl Settings {
         if self.server_url == OLD_SERVER_URL {
             self.server_url = DEFAULT_SERVER_URL.into();
         }
-        if !(self.server_url.starts_with("https://")
-            || self.server_url.starts_with("http://localhost"))
-        {
+        if !(self.server_url.starts_with("https://") || self.server_url.starts_with("http://localhost")) {
             self.server_url = DEFAULT_SERVER_URL.into();
         }
         self.fps = self.fps.clamp(24, 240);
@@ -266,32 +264,19 @@ impl Settings {
         }
         self.clip_folder = self.clip_folder.trim().to_string();
         // Games: a plain "name.exe" each, no duplicates, a sane number.
-        let exe_ok = |e: &str| {
-            e.to_lowercase().ends_with(".exe") && !e.contains(['/', '\\']) && e.len() <= 120
-        };
+        let exe_ok = |e: &str| e.to_lowercase().ends_with(".exe") && !e.contains(['/', '\\']) && e.len() <= 120;
         for g in &mut self.custom_games {
             g.exe = g.exe.trim().to_string();
             g.name = g.name.trim().chars().take(60).collect();
             if g.name.is_empty() {
-                g.name = g
-                    .exe
-                    .trim_end_matches(".exe")
-                    .trim_end_matches(".EXE")
-                    .to_string();
+                g.name = g.exe.trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
             }
         }
         let mut seen = std::collections::HashSet::new();
-        self.custom_games
-            .retain(|g| exe_ok(&g.exe) && seen.insert(g.exe.to_lowercase()));
+        self.custom_games.retain(|g| exe_ok(&g.exe) && seen.insert(g.exe.to_lowercase()));
         self.custom_games.truncate(100);
         let mut seen = std::collections::HashSet::new();
-        self.ignored_games = self
-            .ignored_games
-            .iter()
-            .map(|e| e.trim().to_string())
-            .filter(|e| exe_ok(e) && seen.insert(e.to_lowercase()))
-            .take(100)
-            .collect();
+        self.ignored_games = self.ignored_games.iter().map(|e| e.trim().to_string()).filter(|e| exe_ok(e) && seen.insert(e.to_lowercase())).take(100).collect();
         self.game_volume = self.game_volume.min(200);
         self.mic_volume = self.mic_volume.min(200);
         for app in &mut self.apps {
@@ -300,13 +285,11 @@ impl Settings {
         }
         // One entry per app, no blanks.
         let mut seen = Vec::new();
-        self.apps.retain(|a| {
-            !a.exe.is_empty() && {
-                let key = a.exe.to_lowercase();
-                let new = !seen.contains(&key);
-                seen.push(key);
-                new
-            }
+        self.apps.retain(|a| !a.exe.is_empty() && {
+            let key = a.exe.to_lowercase();
+            let new = !seen.contains(&key);
+            seen.push(key);
+            new
         });
     }
 
@@ -355,14 +338,7 @@ mod tests {
     fn default_hotkey_formats_parse() {
         use std::str::FromStr;
         use tauri_plugin_global_shortcut::Shortcut;
-        for k in [
-            "F9",
-            "Ctrl+Shift+F8",
-            "Alt+A",
-            "Ctrl+1",
-            "PageUp",
-            "Shift+PrintScreen",
-        ] {
+        for k in ["F9", "Ctrl+Shift+F8", "Alt+A", "Ctrl+1", "PageUp", "Shift+PrintScreen"] {
             assert!(Shortcut::from_str(k).is_ok(), "{k} should parse");
         }
     }
@@ -376,12 +352,7 @@ mod tests {
 
     #[test]
     fn sanitize_clamps_numbers() {
-        let mut s = Settings {
-            fps: 5000,
-            buffer_seconds: 0,
-            hotkey: "  ".into(),
-            ..Settings::default()
-        };
+        let mut s = Settings { fps: 5000, buffer_seconds: 0, hotkey: "  ".into(), ..Settings::default() };
         s.sanitize();
         assert_eq!(s.fps, 240);
         assert_eq!(s.buffer_seconds, 5);
@@ -392,11 +363,7 @@ mod tests {
     fn save_then_load_round_trips() {
         let dir = std::env::temp_dir().join(format!("crosspov-test-{}", std::process::id()));
         let path = dir.join("settings.json");
-        let s = Settings {
-            fps: 120,
-            clip_folder: "D:\\Clips".into(),
-            ..Settings::default()
-        };
+        let s = Settings { fps: 120, clip_folder: "D:\\Clips".into(), ..Settings::default() };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
         let _ = fs::remove_dir_all(dir);
@@ -404,29 +371,15 @@ mod tests {
 
     #[test]
     fn account_fields_are_cleaned() {
-        let mut s = Settings {
-            region: " EU ".into(),
-            server_url: "ftp://x/".into(),
-            riot_id: " Me#EUW ".into(),
-            ..Settings::default()
-        };
+        let mut s = Settings { region: " EU ".into(), server_url: "ftp://x/".into(), riot_id: " Me#EUW ".into(), ..Settings::default() };
         s.sanitize();
         assert_eq!(s.region, "eu");
         assert_eq!(s.server_url, DEFAULT_SERVER_URL);
         assert_eq!(s.riot_id, "Me#EUW");
-        let mut old = Settings {
-            server_url: "https://crosspov.batainehsaeed1.workers.dev/".into(),
-            ..Settings::default()
-        };
+        let mut old = Settings { server_url: "https://crosspov.batainehsaeed1.workers.dev/".into(), ..Settings::default() };
         old.sanitize();
-        assert_eq!(
-            old.server_url, "https://crosspov.com",
-            "old address moves to the domain"
-        );
-        let mut bad = Settings {
-            region: "mars".into(),
-            ..Settings::default()
-        };
+        assert_eq!(old.server_url, "https://crosspov.com", "old address moves to the domain");
+        let mut bad = Settings { region: "mars".into(), ..Settings::default() };
         bad.sanitize();
         assert_eq!(bad.region, "eu");
     }

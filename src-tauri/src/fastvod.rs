@@ -47,11 +47,7 @@ pub fn resolve(base: &str, uri: &str) -> String {
     let no_query = base.split(['?', '#']).next().unwrap_or(base);
     if let Some(rest) = uri.strip_prefix('/') {
         // Root-relative: keep scheme and host.
-        let host_end = no_query
-            .find("://")
-            .map(|i| i + 3)
-            .and_then(|i| no_query[i..].find('/').map(|j| i + j))
-            .unwrap_or(no_query.len());
+        let host_end = no_query.find("://").map(|i| i + 3).and_then(|i| no_query[i..].find('/').map(|j| i + j)).unwrap_or(no_query.len());
         return format!("{}/{}", &no_query[..host_end], rest);
     }
     let dir = &no_query[..no_query.rfind('/').map(|i| i + 1).unwrap_or(0)];
@@ -72,11 +68,7 @@ pub fn parse(text: &str, base: &str) -> Playlist {
             }
         } else if !line.is_empty() && !line.starts_with('#') {
             if let Some(d) = next_duration.take() {
-                out.segments.push(Segment {
-                    start: t,
-                    duration: d,
-                    url: resolve(base, line),
-                });
+                out.segments.push(Segment { start: t, duration: d, url: resolve(base, line) });
                 t += d;
             }
         }
@@ -86,17 +78,8 @@ pub fn parse(text: &str, base: &str) -> Playlist {
 
 /// The chunks that cover [from, to] seconds of the VOD.
 pub fn covering(p: &Playlist, from: f64, to: f64) -> &[Segment] {
-    let first = p
-        .segments
-        .iter()
-        .position(|s| s.start + s.duration > from)
-        .unwrap_or(p.segments.len());
-    let last = p
-        .segments
-        .iter()
-        .rposition(|s| s.start < to)
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let first = p.segments.iter().position(|s| s.start + s.duration > from).unwrap_or(p.segments.len());
+    let last = p.segments.iter().rposition(|s| s.start < to).map(|i| i + 1).unwrap_or(0);
     if first >= last {
         &[]
     } else {
@@ -107,36 +90,18 @@ pub fn covering(p: &Playlist, from: f64, to: f64) -> &[Segment] {
 /// The address of the VOD's chunk playlist at the chosen quality, from yt-dlp.
 pub fn playlist_url(ytdlp: &Path, vod_url: &str, format: &str) -> Result<String, String> {
     let out = Command::new(ytdlp)
-        .args([
-            "--no-warnings",
-            "-q",
-            "--no-playlist",
-            "-g",
-            "-f",
-            format,
-            "--",
-            vod_url,
-        ])
+        .args(["--no-warnings", "-q", "--no-playlist", "-g", "-f", format, "--", vod_url])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .background()
         .output()
         .map_err(|e| format!("couldn't run yt-dlp: {e}"))?;
-    let url = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let url = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string();
     if out.status.success() && url.starts_with("https://") {
         Ok(url)
     } else {
-        Err(String::from_utf8_lossy(&out.stderr)
-            .trim()
-            .chars()
-            .take(400)
-            .collect())
+        Err(String::from_utf8_lossy(&out.stderr).trim().chars().take(400).collect())
     }
 }
 
@@ -145,11 +110,7 @@ fn get(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, String> {
     if res.status().as_u16() != 200 {
         return Err(format!("HTTP {}", res.status().as_u16()));
     }
-    res.body_mut()
-        .with_config()
-        .limit(MAX_CHUNK)
-        .read_to_vec()
-        .map_err(|e| e.to_string())
+    res.body_mut().with_config().limit(MAX_CHUNK).read_to_vec().map_err(|e| e.to_string())
 }
 
 type Download = Result<Vec<u8>, String>;
@@ -171,26 +132,13 @@ fn get_all(agent: &ureq::Agent, urls: &[String]) -> Result<Vec<Vec<u8>>, String>
             });
         }
     });
-    results
-        .into_inner()
-        .unwrap_or_else(|e| e.into_inner())
-        .into_iter()
-        .map(|r| r.unwrap_or_else(|| Err("not downloaded".into())))
-        .collect()
+    results.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().map(|r| r.unwrap_or_else(|| Err("not downloaded".into()))).collect()
 }
 
 /// Downloads seconds [from, to] of the stream whose chunk playlist is at
 /// `playlist` into `out` (an .mp4), cut exactly with FFmpeg.
-pub fn fetch_clip(
-    agent: &ureq::Agent,
-    playlist: &str,
-    from: f64,
-    to: f64,
-    ffmpeg: &Path,
-    out: &Path,
-) -> Result<(), String> {
-    let text =
-        String::from_utf8(get(agent, playlist)?).map_err(|_| "playlist isn't text".to_string())?;
+pub fn fetch_clip(agent: &ureq::Agent, playlist: &str, from: f64, to: f64, ffmpeg: &Path, out: &Path) -> Result<(), String> {
+    let text = String::from_utf8(get(agent, playlist)?).map_err(|_| "playlist isn't text".to_string())?;
     let p = parse(&text, playlist);
     let chunks = covering(&p, from, to);
     if chunks.is_empty() {
@@ -202,11 +150,7 @@ pub fn fetch_clip(
     let parts = get_all(agent, &urls)?;
 
     // MPEG-TS chunks (and fMP4 chunks after their header) can simply be joined.
-    let joined = out.with_extension(if p.init.is_some() {
-        "part.mp4"
-    } else {
-        "part.ts"
-    });
+    let joined = out.with_extension(if p.init.is_some() { "part.mp4" } else { "part.ts" });
     fs::write(&joined, parts.concat()).map_err(|e| format!("couldn't write the download: {e}"))?;
     let result = Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y", "-ss"])
@@ -215,18 +159,7 @@ pub fn fetch_clip(
         .arg(&joined)
         .arg("-t")
         .arg(format!("{:.3}", to - from))
-        .args([
-            "-map",
-            "0:v:0?",
-            "-map",
-            "0:a:0?",
-            "-c",
-            "copy",
-            "-bsf:a",
-            "aac_adtstoasc",
-            "-movflags",
-            "+faststart",
-        ])
+        .args(["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"])
         .arg(out)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -239,11 +172,7 @@ pub fn fetch_clip(
         Ok(())
     } else {
         let _ = fs::remove_file(out);
-        Err(String::from_utf8_lossy(&result.stderr)
-            .trim()
-            .chars()
-            .take(300)
-            .collect())
+        Err(String::from_utf8_lossy(&result.stderr).trim().chars().take(300).collect())
     }
 }
 
@@ -257,10 +186,7 @@ mod tests {
     fn reads_a_twitch_style_playlist() {
         let p = parse(PL, "https://cdn.example/abc/chunked/index-dvr.m3u8?token=1");
         assert_eq!(p.segments.len(), 4);
-        assert_eq!(
-            p.segments[1].url,
-            "https://cdn.example/abc/chunked/1-muted.ts"
-        );
+        assert_eq!(p.segments[1].url, "https://cdn.example/abc/chunked/1-muted.ts");
         assert_eq!(p.segments[3].start, 30.0);
         assert!(p.init.is_none());
     }
@@ -269,10 +195,7 @@ mod tests {
     fn picks_only_the_chunks_a_clip_needs() {
         let p = parse(PL, "https://cdn.example/x/index.m3u8");
         let c = covering(&p, 12.0, 25.0);
-        assert_eq!(
-            c.iter().map(|s| s.start).collect::<Vec<_>>(),
-            vec![10.0, 20.0]
-        );
+        assert_eq!(c.iter().map(|s| s.start).collect::<Vec<_>>(), vec![10.0, 20.0]);
         assert_eq!(covering(&p, 0.0, 10.0).len(), 1, "exactly the first chunk");
         assert!(covering(&p, 40.0, 50.0).is_empty(), "past the end");
     }
@@ -280,33 +203,9 @@ mod tests {
     /// Tiny grey picture of the frame at `t` seconds, for comparing two videos.
     /// Written with the image2 muxer (the app's small FFmpeg has no rawvideo muxer).
     fn frame(ff: &Path, input: &str, t: f64) -> Vec<u8> {
-        let raw = std::env::temp_dir().join(format!(
-            "crosspov-frame-{}-{}.gray",
-            std::process::id(),
-            (t * 100.0) as u64
-        ));
+        let raw = std::env::temp_dir().join(format!("crosspov-frame-{}-{}.gray", std::process::id(), (t * 100.0) as u64));
         let status = Command::new(ff)
-            .args([
-                "-v",
-                "error",
-                "-y",
-                "-ss",
-                &format!("{t:.2}"),
-                "-i",
-                input,
-                "-frames:v",
-                "1",
-                "-s",
-                "64x36",
-                "-pix_fmt",
-                "gray",
-                "-c:v",
-                "rawvideo",
-                "-f",
-                "image2",
-                "-update",
-                "1",
-            ])
+            .args(["-v", "error", "-y", "-ss", &format!("{t:.2}"), "-i", input, "-frames:v", "1", "-s", "64x36", "-pix_fmt", "gray", "-c:v", "rawvideo", "-f", "image2", "-update", "1"])
             .arg(&raw)
             .status()
             .unwrap();
@@ -320,72 +219,33 @@ mod tests {
     /// the clip must be the requested 10 s and start at the requested second.
     #[test]
     fn fast_download_cuts_the_right_seconds() {
-        let Ok(url) = std::env::var("CROSSPOV_TEST_HLS") else {
-            return;
-        };
-        let (ytdlp, ff) = (
-            crate::streamers::locate_ytdlp().expect("yt-dlp"),
-            crate::ffmpeg::locate().expect("ffmpeg"),
-        );
+        let Ok(url) = std::env::var("CROSSPOV_TEST_HLS") else { return };
+        let (ytdlp, ff) = (crate::streamers::locate_ytdlp().expect("yt-dlp"), crate::ffmpeg::locate().expect("ffmpeg"));
         let pl = playlist_url(&ytdlp, &url, "best").expect("playlist");
         let out = std::env::temp_dir().join(format!("crosspov-fast-{}.mp4", std::process::id()));
         let started = std::time::Instant::now();
         fetch_clip(&crate::streamers::test_agent(), &pl, 20.0, 30.0, &ff, &out).expect("download");
         eprintln!("fast download took {:?}", started.elapsed());
-        let probe = Command::new(&ff)
-            .args(["-hide_banner", "-i"])
-            .arg(&out)
-            .output()
-            .unwrap();
+        let probe = Command::new(&ff).args(["-hide_banner", "-i"]).arg(&out).output().unwrap();
         let info = String::from_utf8_lossy(&probe.stderr);
-        let dur = info
-            .lines()
-            .find(|l| l.contains("Duration:"))
-            .unwrap_or("")
-            .to_string();
-        assert!(
-            dur.contains("00:00:10") || dur.contains("00:00:09") || dur.contains("00:00:11"),
-            "{dur}"
-        );
+        let dur = info.lines().find(|l| l.contains("Duration:")).unwrap_or("").to_string();
+        assert!(dur.contains("00:00:10") || dur.contains("00:00:09") || dur.contains("00:00:11"), "{dur}");
         // The clip's frame 2 s in should be the stream's frame at 22 s, not some other moment.
         let a = frame(&ff, &out.to_string_lossy(), 2.0);
         let near = frame(&ff, &pl, 22.0);
         let far = frame(&ff, &pl, 12.0);
-        let diff = |x: &[u8], y: &[u8]| {
-            x.iter()
-                .zip(y)
-                .map(|(p, q)| (i32::from(*p) - i32::from(*q)).abs())
-                .sum::<i32>()
-                / x.len().max(1) as i32
-        };
+        let diff = |x: &[u8], y: &[u8]| x.iter().zip(y).map(|(p, q)| (i32::from(*p) - i32::from(*q)).abs()).sum::<i32>() / x.len().max(1) as i32;
         assert!(!a.is_empty() && a.len() == near.len());
-        assert!(
-            diff(&a, &near) < diff(&a, &far).max(1),
-            "clip starts at the requested second ({} vs {})",
-            diff(&a, &near),
-            diff(&a, &far)
-        );
+        assert!(diff(&a, &near) < diff(&a, &far).max(1), "clip starts at the requested second ({} vs {})", diff(&a, &near), diff(&a, &far));
         let _ = fs::remove_file(out);
     }
 
     #[test]
     fn resolves_chunk_addresses() {
-        assert_eq!(
-            resolve("https://h.test/a/b/p.m3u8", "c.ts"),
-            "https://h.test/a/b/c.ts"
-        );
-        assert_eq!(
-            resolve("https://h.test/a/b/p.m3u8", "/root/c.ts"),
-            "https://h.test/root/c.ts"
-        );
-        assert_eq!(
-            resolve("https://h.test/a/p.m3u8", "https://o.test/c.ts"),
-            "https://o.test/c.ts"
-        );
-        let p = parse(
-            "#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2,\nseg1.m4s\n",
-            "https://h.test/v/p.m3u8",
-        );
+        assert_eq!(resolve("https://h.test/a/b/p.m3u8", "c.ts"), "https://h.test/a/b/c.ts");
+        assert_eq!(resolve("https://h.test/a/b/p.m3u8", "/root/c.ts"), "https://h.test/root/c.ts");
+        assert_eq!(resolve("https://h.test/a/p.m3u8", "https://o.test/c.ts"), "https://o.test/c.ts");
+        let p = parse("#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2,\nseg1.m4s\n", "https://h.test/v/p.m3u8");
         assert_eq!(p.init.as_deref(), Some("https://h.test/v/init.mp4"));
     }
 }
