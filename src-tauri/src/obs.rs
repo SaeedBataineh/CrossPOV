@@ -173,7 +173,15 @@ impl Obs {
         }
         self.capture = None;
         self.game_layer = None;
-        let Some(c) = capture else { return Ok(()) };
+        let Some(c) = capture else {
+            // No game: a tiny, slow canvas, so OBS waiting in the background
+            // costs next to nothing (it draws its canvas all the time).
+            let _ = self.request(
+                "SetVideoSettings",
+                json!({ "baseWidth": 320, "baseHeight": 180, "outputWidth": 320, "outputHeight": 180, "fpsNumerator": 5, "fpsDenominator": 1 }),
+            );
+            return Ok(());
+        };
         // New names every time: OBS keeps a removed source's name taken for
         // as long as anything still holds the source (seconds, or longer),
         // and creating one under the old name then fails ("already exists").
@@ -530,7 +538,7 @@ fn write_config(config: &Path, p: &Profile, port: u16, password: &str) -> io::Re
     fs::create_dir_all(&profile)?;
     let tracks = if p.separate_tracks { 3 } else { 1 };
     let ini = format!(
-        "[General]\r\nName={PROFILE}\r\n\r\n[Video]\r\nBaseCX=1920\r\nBaseCY=1080\r\nOutputCX=1920\r\nOutputCY=1080\r\nFPSType=1\r\nFPSInt=60\r\n\r\n\
+        "[General]\r\nName={PROFILE}\r\n\r\n[Video]\r\nBaseCX=320\r\nBaseCY=180\r\nOutputCX=320\r\nOutputCY=180\r\nFPSType=1\r\nFPSInt=5\r\n\r\n\
          [Audio]\r\nSampleRate=48000\r\nChannelSetup=Stereo\r\nDesktopDevice1=disabled\r\nDesktopDevice2=disabled\r\nAuxDevice1=disabled\r\nAuxDevice2=disabled\r\nAuxDevice3=disabled\r\nAuxDevice4=disabled\r\n\r\n\
          [Output]\r\nMode=Advanced\r\n\r\n\
          [AdvOut]\r\nRecType=Standard\r\nRecFilePath={dir}\r\nRecFormat2={fmt}\r\nRecEncoder={enc}\r\nRecTracks={tracks}\r\nRecRB=true\r\nRecRBTime={secs}\r\nRecRBSize=8192\r\nRecRBPrefix=Replay\r\n",

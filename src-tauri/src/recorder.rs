@@ -38,7 +38,7 @@ pub enum RecState {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecorderStatus {
     pub state: RecState,
@@ -78,6 +78,8 @@ pub struct Recorder {
     inner: Arc<Mutex<Inner>>,
     work_dir: PathBuf,
     listener: Arc<StatusListener>,
+    /// The status last sent to the app's window: only changes are sent.
+    sent: Arc<Mutex<Option<RecorderStatus>>>,
     ffmpeg: Arc<Mutex<Option<(PathBuf, VideoEncoder)>>>,
 }
 
@@ -160,6 +162,7 @@ impl Recorder {
             })),
             work_dir,
             listener: Arc::new(listener),
+            sent: Arc::new(Mutex::new(None)),
             ffmpeg: Arc::new(Mutex::new(None)),
         }
     }
@@ -172,13 +175,24 @@ impl Recorder {
         self.lock().status.clone()
     }
 
+    /// Tells the app's window, only when something changed (the recorder
+    /// checks every 2 s; the window then doesn't redraw for nothing).
+    fn send(&self, status: &RecorderStatus) {
+        let mut sent = self.sent.lock().unwrap_or_else(|e| e.into_inner());
+        if sent.as_ref() != Some(status) {
+            *sent = Some(status.clone());
+            drop(sent);
+            (self.listener)(status);
+        }
+    }
+
     fn set_status(&self, f: impl FnOnce(&mut RecorderStatus)) {
         let status = {
             let mut inner = self.lock();
             f(&mut inner.status);
             inner.status.clone()
         };
-        (self.listener)(&status);
+        self.send(&status);
     }
 
     /// True while a game is being recorded (a clip can be saved).
@@ -321,7 +335,7 @@ impl Recorder {
                 inner.status.message = Some("Getting the recorder ready (one-time download)…".into());
                 let status = inner.status.clone();
                 drop(inner);
-                (self.listener)(&status);
+                self.send(&status);
                 return;
             };
             crate::trail(&format!("recording: starting OBS ({})", encoder.label()));
@@ -342,7 +356,7 @@ impl Recorder {
                     inner.status.message = Some(format!("The recorder couldn't start: {e}"));
                     let status = inner.status.clone();
                     drop(inner);
-                    (self.listener)(&status);
+                    self.send(&status);
                     return;
                 }
             }
@@ -405,7 +419,7 @@ impl Recorder {
         inner.status.message = None;
         let status = inner.status.clone();
         drop(inner);
-        (self.listener)(&status);
+        self.send(&status);
     }
 
     /// FFmpeg and the encoder it found, once known (used to cut clips too).
