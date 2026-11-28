@@ -59,6 +59,14 @@ pub fn url_for(path: PathBuf) -> Option<String> {
 
 /// One connection: requests one after another (the player reuses it).
 fn serve(conn: TcpStream) {
+    if let Ok(out) = conn.try_clone() {
+        serve_requests(conn);
+        // Close gently (Windows otherwise cuts the connection, losing what's unsent).
+        let _ = out.shutdown(std::net::Shutdown::Write);
+    }
+}
+
+fn serve_requests(conn: TcpStream) {
     let _ = conn.set_read_timeout(Some(Duration::from_secs(60)));
     let Ok(mut out) = conn.try_clone() else { return };
     let mut reader = BufReader::new(conn);
@@ -172,9 +180,21 @@ mod tests {
             let mut c = TcpStream::connect(addr).unwrap();
             write!(c, "GET {path} HTTP/1.1\r\nHost: x\r\n{range}Connection: close\r\n\r\n").unwrap();
             c.shutdown(std::net::Shutdown::Write).unwrap();
-            let mut s = String::new();
-            c.read_to_string(&mut s).unwrap();
-            s
+            // Everything until the server closes (an abrupt close at the end is fine).
+            let mut got = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match c.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => got.extend_from_slice(&buf[..n]),
+                    Err(e) if !got.is_empty() => {
+                        let _ = e;
+                        break;
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            String::from_utf8_lossy(&got).into_owned()
         };
         let path = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
         let part = get(&path, "Range: bytes=2-4\r\n");
