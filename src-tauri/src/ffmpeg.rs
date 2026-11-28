@@ -10,7 +10,6 @@ use serde::Serialize;
 
 use crate::settings::{Encoder, Quality, Resolution, Settings};
 
-
 #[cfg(windows)]
 const FFMPEG_EXE: &str = "ffmpeg.exe";
 #[cfg(not(windows))]
@@ -27,7 +26,10 @@ pub fn locate() -> Option<PathBuf> {
     if let Some(p) = crate::tools::get(FFMPEG_EXE) {
         return Some(p);
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         let p = dir.join(FFMPEG_EXE);
         if p.is_file() {
             return Some(p);
@@ -39,7 +41,9 @@ pub fn locate() -> Option<PathBuf> {
 /// Full path of a program on PATH (other tools need a real path, not a bare name).
 pub fn which(name: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths).map(|dir| dir.join(name)).find(|p| p.is_file())
+    std::env::split_paths(&paths)
+        .map(|dir| dir.join(name))
+        .find(|p| p.is_file())
 }
 
 /// Stops a console window flashing up for every FFmpeg run on Windows.
@@ -139,7 +143,17 @@ impl VideoEncoder {
 /// Tries a one-frame encode to see whether this machine's GPU supports an encoder.
 fn encoder_works(ffmpeg: &Path, enc: VideoEncoder) -> bool {
     Command::new(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=640x360:r=30", "-frames:v", "3"])
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=640x360:r=30",
+            "-frames:v",
+            "3",
+        ])
         .args(["-pix_fmt", "nv12", "-c:v", enc.codec()])
         .args(enc.probe_args())
         .args(["-f", "null", "-"])
@@ -204,9 +218,16 @@ pub(crate) fn target_height(r: Resolution) -> Option<u32> {
 /// Arguments that copy an MP4 with its index (moov) at the start, every
 /// stream as it is (no re-encoding).
 pub fn faststart_args(input: &Path, out: &Path) -> Vec<String> {
-    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-i"].iter().map(|s| s.to_string()).collect();
+    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-i"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     a.push(input.to_string_lossy().into_owned());
-    a.extend(["-map", "0", "-c", "copy", "-movflags", "+faststart"].iter().map(|s| s.to_string()));
+    a.extend(
+        ["-map", "0", "-c", "copy", "-movflags", "+faststart"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
     a.push(out.to_string_lossy().into_owned());
     a
 }
@@ -219,7 +240,18 @@ pub fn thumbnail_args(clip: &Path, out: &Path) -> Vec<String> {
         .collect();
     a.push(clip.to_string_lossy().into_owned());
     // By the shape it's shown in (`dar`), so a stretched clip's thumbnail is 16:9 too.
-    a.extend(["-frames:v", "1", "-vf", "scale=w=480:h='trunc(480/dar/2)*2',setsar=1", "-q:v", "4"].iter().map(|s| s.to_string()));
+    a.extend(
+        [
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=w=480:h='trunc(480/dar/2)*2',setsar=1",
+            "-q:v",
+            "4",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
     a.push(out.to_string_lossy().into_owned());
     a
 }
@@ -229,7 +261,12 @@ mod tests {
 
     #[test]
     fn a_picked_bitrate_is_used_as_is() {
-        let s = Settings { bitrate_mbps: 50, fps: 120, resolution: Resolution::P1440, ..Settings::default() };
+        let s = Settings {
+            bitrate_mbps: 50,
+            fps: 120,
+            resolution: Resolution::P1440,
+            ..Settings::default()
+        };
         assert_eq!(bitrate_kbps(&s), 50_000);
         assert_eq!(bitrate_kbps(&Settings::default()), 25_000, "Auto as before");
     }
@@ -237,7 +274,10 @@ mod tests {
     #[test]
     fn bitrate_scales_with_quality() {
         let high = bitrate_kbps(&Settings::default());
-        let low = bitrate_kbps(&Settings { quality: Quality::Low, ..Settings::default() });
+        let low = bitrate_kbps(&Settings {
+            quality: Quality::Low,
+            ..Settings::default()
+        });
         assert_eq!(high, 25_000);
         assert!(low < high);
     }

@@ -17,8 +17,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    fastvod,
     clips::{self, ClipInfo, ClipMeta, STREAMER_CLIPS},
+    fastvod,
     ffmpeg::{self, NoWindow},
     matches::{find_me, MatchStore, MatchSummary},
     procs,
@@ -59,13 +59,17 @@ impl Vod {
         if !self.live {
             return self.duration_sec;
         }
-        let started = time::OffsetDateTime::parse(&self.started_at, &time::format_description::well_known::Rfc3339)
-            .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as f64)
-            .unwrap_or(0.0);
+        let started = time::OffsetDateTime::parse(
+            &self.started_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as f64)
+        .unwrap_or(0.0);
         if started <= 0.0 {
             return self.duration_sec;
         }
-        self.duration_sec.max((now_ms as f64 - started) / 1000.0 - LIVE_VOD_LAG_S)
+        self.duration_sec
+            .max((now_ms as f64 - started) / 1000.0 - LIVE_VOD_LAG_S)
     }
 }
 
@@ -170,8 +174,17 @@ fn agent() -> ureq::Agent {
 }
 
 /// Asks the server which players in a match were streaming.
-pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Result<StreamerCheck, String> {
-    let url = format!("{}/api/match/{}/{}/streamers", server.trim_end_matches('/'), m.region, m.id);
+pub fn fetch_streamers(
+    server: &str,
+    m: &MatchSummary,
+    me: Option<&str>,
+) -> Result<StreamerCheck, String> {
+    let url = format!(
+        "{}/api/match/{}/{}/streamers",
+        server.trim_end_matches('/'),
+        m.region,
+        m.id
+    );
     let mut req = agent().get(&url);
     if let Some(me) = me {
         req = req.query("me", me);
@@ -179,10 +192,21 @@ pub fn fetch_streamers(server: &str, m: &MatchSummary, me: Option<&str>) -> Resu
     let mut res = req.call().map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status == 200 {
-        let body: StreamersResponse = res.body_mut().read_json().map_err(|e| format!("Unexpected answer from the server: {e}"))?;
-        Ok(StreamerCheck { hits: body.streamers, suggested: body.suggested, scanner_pending: body.scanner.as_deref() == Some("pending") })
+        let body: StreamersResponse = res
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("Unexpected answer from the server: {e}"))?;
+        Ok(StreamerCheck {
+            hits: body.streamers,
+            suggested: body.suggested,
+            scanner_pending: body.scanner.as_deref() == Some("pending"),
+        })
     } else {
-        Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")))
+        Err(res
+            .body_mut()
+            .read_json::<ErrorResponse>()
+            .map(|e| e.error)
+            .unwrap_or_else(|_| format!("Server error ({status})")))
     }
 }
 
@@ -229,7 +253,12 @@ pub struct Window {
 impl Window {
     /// Stable id so a window is only downloaded once.
     pub fn key(&self) -> String {
-        format!("{}-{}-{}", self.round, self.moment.slug(), (self.start * 10.0).round() as i64)
+        format!(
+            "{}-{}-{}",
+            self.round,
+            self.moment.slug(),
+            (self.start * 10.0).round() as i64
+        )
     }
 }
 
@@ -250,11 +279,29 @@ pub fn fight_windows(m: &MatchSummary, me: &str, them: &str, s: &Settings) -> Ve
             .collect();
         rounds.dedup();
         for r in rounds {
-            let start = m.rounds.iter().find(|x| x.index == r).and_then(|x| x.start_ms);
-            let next = m.rounds.iter().find(|x| x.index == r + 1).and_then(|x| x.start_ms);
-            let last_kill = m.kills.iter().filter(|k| k.round == r).map(|k| k.at_ms).max();
+            let start = m
+                .rounds
+                .iter()
+                .find(|x| x.index == r)
+                .and_then(|x| x.start_ms);
+            let next = m
+                .rounds
+                .iter()
+                .find(|x| x.index == r + 1)
+                .and_then(|x| x.start_ms);
+            let last_kill = m
+                .kills
+                .iter()
+                .filter(|k| k.round == r)
+                .map(|k| k.at_ms)
+                .max();
             if let (Some(a), Some(b)) = (start, next.or(last_kill.map(|t| t + 5_000))) {
-                out.push(Window { start: a as f64 / 1000.0, end: b as f64 / 1000.0, round: r, moment: Moment::Round });
+                out.push(Window {
+                    start: a as f64 / 1000.0,
+                    end: b as f64 / 1000.0,
+                    round: r,
+                    moment: Moment::Round,
+                });
             }
         }
         return out;
@@ -280,7 +327,12 @@ pub fn fight_windows(m: &MatchSummary, me: &str, them: &str, s: &Settings) -> Ve
                     prev.moment = Moment::Trade;
                 }
             }
-            _ => out.push(Window { start: (t - before).max(0.0), end: t + after, round: k.round, moment }),
+            _ => out.push(Window {
+                start: (t - before).max(0.0),
+                end: t + after,
+                round: k.round,
+                moment,
+            }),
         }
         last_kill_at = Some(t);
     }
@@ -307,7 +359,10 @@ pub fn locate_ytdlp() -> Option<PathBuf> {
     if let Some(p) = crate::tools::get(YTDLP_EXE) {
         return Some(p);
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         let p = dir.join(YTDLP_EXE);
         if p.is_file() {
             return Some(p);
@@ -325,7 +380,14 @@ pub fn ytdlp_format(quality: DownloadQuality) -> &'static str {
     }
 }
 
-pub fn ytdlp_args(vod_url: &str, from: f64, to: f64, quality: DownloadQuality, ffmpeg: &Path, out_stem: &Path) -> Vec<String> {
+pub fn ytdlp_args(
+    vod_url: &str,
+    from: f64,
+    to: f64,
+    quality: DownloadQuality,
+    ffmpeg: &Path,
+    out_stem: &Path,
+) -> Vec<String> {
     let format = ytdlp_format(quality);
     vec![
         "--no-warnings".into(),
@@ -352,13 +414,23 @@ pub fn ytdlp_args(vod_url: &str, from: f64, to: f64, quality: DownloadQuality, f
 /// Only plain Twitch VOD links are downloaded, whatever the server says.
 pub fn is_twitch_vod_url(url: &str) -> bool {
     url.strip_prefix("https://www.twitch.tv/videos/")
-        .is_some_and(|id| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit()))
+        .is_some_and(|id| {
+            !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit())
+        })
 }
 
 /// A channel name or match id made safe for a file name: letters, digits and _ only.
 pub fn file_safe(s: &str, max: usize) -> String {
-    let out: String = s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(max).collect();
-    if out.is_empty() { "unknown".into() } else { out }
+    let out: String = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(max)
+        .collect();
+    if out.is_empty() {
+        "unknown".into()
+    } else {
+        out
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -373,10 +445,23 @@ pub fn classify_error(stderr: &str) -> DownloadError {
     let s = stderr.to_lowercase();
     if s.contains("subscriber") || s.contains("sub-only") || s.contains("subs only") {
         DownloadError::SubOnly
-    } else if s.contains("does not exist") || s.contains("404") || s.contains("not available") || s.contains("was deleted") {
+    } else if s.contains("does not exist")
+        || s.contains("404")
+        || s.contains("not available")
+        || s.contains("was deleted")
+    {
         DownloadError::Gone
     } else {
-        DownloadError::Other(stderr.trim().lines().last().unwrap_or("download failed").chars().take(300).collect())
+        DownloadError::Other(
+            stderr
+                .trim()
+                .lines()
+                .last()
+                .unwrap_or("download failed")
+                .chars()
+                .take(300)
+                .collect(),
+        )
     }
 }
 
@@ -463,7 +548,10 @@ pub struct MatchStreamers {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Clone)]
@@ -476,14 +564,20 @@ impl StreamerStore {
         Self { dir }
     }
     fn path(&self, id: &str) -> PathBuf {
-        let safe: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+        let safe: String = id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
         self.dir.join(format!("{safe}.streamers.json"))
     }
     pub fn get(&self, id: &str) -> MatchStreamers {
         fs::read(self.path(id))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_else(|| MatchStreamers { match_id: id.to_string(), ..Default::default() })
+            .unwrap_or_else(|| MatchStreamers {
+                match_id: id.to_string(),
+                ..Default::default()
+            })
     }
     pub fn put(&self, s: &MatchStreamers) {
         let _ = fs::create_dir_all(&self.dir);
@@ -519,10 +613,16 @@ pub struct LinkStore {
 
 impl LinkStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, lock: Arc::new(Mutex::new(())) }
+        Self {
+            path,
+            lock: Arc::new(Mutex::new(())),
+        }
     }
     pub fn all(&self) -> Vec<Link> {
-        fs::read(&self.path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        fs::read(&self.path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
     }
     fn write(&self, links: &[Link]) {
         if let Some(dir) = self.path.parent() {
@@ -542,7 +642,14 @@ impl LinkStore {
         // One link per player and one player per channel: relinking a channel
         // to someone else (e.g. the wrong player was picked) replaces it.
         links.retain(|l| l.puuid != puuid && l.login != login);
-        links.push(Link { puuid: puuid.into(), login: login.into(), label: label.into(), added_ms: now_ms(), seen: 0, delay_sec });
+        links.push(Link {
+            puuid: puuid.into(),
+            login: login.into(),
+            label: label.into(),
+            added_ms: now_ms(),
+            seen: 0,
+            delay_sec,
+        });
         self.write(&links);
     }
     pub fn remove(&self, puuid: &str) {
@@ -563,15 +670,33 @@ impl LinkStore {
 
 /// A Twitch login from what the user typed ("twitch.tv/Name", a full URL, or just the name).
 pub fn clean_login(input: &str) -> Option<String> {
-    let l = input.trim().trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.").trim_start_matches("twitch.tv/");
+    let l = input
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("www.")
+        .trim_start_matches("twitch.tv/");
     let l = l.split(['/', '?', '#']).next().unwrap_or("").to_lowercase();
-    (3..=25).contains(&l.len()).then_some(l).filter(|l| l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+    (3..=25)
+        .contains(&l.len())
+        .then_some(l)
+        .filter(|l| l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
 }
 
 /// Asks the server whether `login` was live during this match as player `puuid`,
 /// and whether their VOD's scoreboard shows this match.
-pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -> Result<(Option<StreamerHit>, VerifyInfo), String> {
-    let url = format!("{}/api/match/{}/{}/channel", server.trim_end_matches('/'), m.region, m.id);
+pub fn fetch_channel(
+    server: &str,
+    m: &MatchSummary,
+    puuid: &str,
+    login: &str,
+) -> Result<(Option<StreamerHit>, VerifyInfo), String> {
+    let url = format!(
+        "{}/api/match/{}/{}/channel",
+        server.trim_end_matches('/'),
+        m.region,
+        m.id
+    );
     let mut res = agent()
         .get(&url)
         .query("login", login)
@@ -580,10 +705,17 @@ pub fn fetch_channel(server: &str, m: &MatchSummary, puuid: &str, login: &str) -
         .map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status != 200 {
-        return Err(res.body_mut().read_json::<ErrorResponse>().map(|e| e.error).unwrap_or_else(|_| format!("Server error ({status})")));
+        return Err(res
+            .body_mut()
+            .read_json::<ErrorResponse>()
+            .map(|e| e.error)
+            .unwrap_or_else(|_| format!("Server error ({status})")));
     }
     let hits: StreamersResponse = res.body_mut().read_json().map_err(|e| e.to_string())?;
-    let verify = hits.verify.unwrap_or_else(|| VerifyInfo { verdict: "unknown".into(), delay_sec: None });
+    let verify = hits.verify.unwrap_or_else(|| VerifyInfo {
+        verdict: "unknown".into(),
+        delay_sec: None,
+    });
     Ok((hits.streamers.into_iter().next(), verify))
 }
 
@@ -601,13 +733,19 @@ fn apply_verify(p: &mut PlayerState, v: &VerifyInfo) {
     } else if p.message.as_deref() == Some("Checking their VOD shows this match…") {
         p.message = None;
     }
-    if let Some(d) = v.delay_sec.filter(|_| matches!(v.verdict.as_str(), "match" | "unknown")) {
+    if let Some(d) = v
+        .delay_sec
+        .filter(|_| matches!(v.verdict.as_str(), "match" | "unknown"))
+    {
         p.delay_sec = d.clamp(0.0, 300.0);
     }
 }
 
 /// "Enemy · Raze": how a player is shown, without their Riot name.
-pub fn player_label(player: &crate::matches::MatchPlayer, me: Option<&crate::matches::MatchPlayer>) -> String {
+pub fn player_label(
+    player: &crate::matches::MatchPlayer,
+    me: Option<&crate::matches::MatchPlayer>,
+) -> String {
     let side = match me {
         Some(me) if me.team == player.team => "Teammate",
         Some(_) => "Enemy",
@@ -623,7 +761,11 @@ pub const NOT_YOUR_MATCH: &str = "Your Riot ID in Settings isn't one of the play
 /// for ever: no fights with you means nothing to clip, and a match that ran out
 /// of time keeps what it got.
 pub fn settle_stuck(state: &mut MatchStreamers, me_known: bool) {
-    for p in state.players.iter_mut().filter(|p| p.status == StreamerStatus::Working && !p.checking) {
+    for p in state
+        .players
+        .iter_mut()
+        .filter(|p| p.status == StreamerStatus::Working && !p.checking)
+    {
         if !me_known {
             // Your Riot ID isn't one of this match's players (another account,
             // or it changed): there's no way to find your fights, so don't wait.
@@ -646,9 +788,17 @@ pub fn settle_stuck(state: &mut MatchStreamers, me_known: bool) {
 }
 
 /// Merges a fresh server answer into what we already know for a match.
-pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchSummary, me: Option<&str>, s: &Settings) {
+pub fn merge_hits(
+    state: &mut MatchStreamers,
+    hits: Vec<StreamerHit>,
+    m: &MatchSummary,
+    me: Option<&str>,
+    s: &Settings,
+) {
     for hit in hits {
-        let fights = me.map(|me| fight_windows(m, me, &hit.puuid, s).len() as u32).unwrap_or(0);
+        let fights = me
+            .map(|me| fight_windows(m, me, &hit.puuid, s).len() as u32)
+            .unwrap_or(0);
         // Nothing between you two to clip (a teammate, or an enemy you never
         // fought): settle now instead of lining up their VOD for nothing.
         let nothing = me.is_some() && fights == 0;
@@ -672,7 +822,13 @@ pub fn merge_hits(state: &mut MatchStreamers, hits: Vec<StreamerHit>, m: &MatchS
                 puuid: hit.puuid,
                 name: hit.name,
                 channel: hit.channel,
-                status: if hit.vod.is_none() { StreamerStatus::NoVod } else if nothing { StreamerStatus::NoFights } else { StreamerStatus::Working },
+                status: if hit.vod.is_none() {
+                    StreamerStatus::NoVod
+                } else if nothing {
+                    StreamerStatus::NoFights
+                } else {
+                    StreamerStatus::Working
+                },
                 vod: hit.vod,
                 clips: 0,
                 fights,
@@ -705,12 +861,24 @@ fn apply_shift(p: &mut PlayerState, v: &VerifyInfo) {
 
 /// Seconds until every fight is saved: the ones the VOD already covers at
 /// `per_clip` each, plus the wait for a live stream's VOD to reach the rest.
-pub fn eta(windows: &[Window], done: &[String], shift: f64, available: f64, per_clip: f64) -> Option<u64> {
-    let left: Vec<&Window> = windows.iter().filter(|w| !done.contains(&w.key())).collect();
+pub fn eta(
+    windows: &[Window],
+    done: &[String],
+    shift: f64,
+    available: f64,
+    per_clip: f64,
+) -> Option<u64> {
+    let left: Vec<&Window> = windows
+        .iter()
+        .filter(|w| !done.contains(&w.key()))
+        .collect();
     if left.is_empty() {
         return None;
     }
-    let wait = left.iter().map(|w| shift + w.end - available).fold(0.0_f64, f64::max);
+    let wait = left
+        .iter()
+        .map(|w| shift + w.end - available)
+        .fold(0.0_f64, f64::max);
     Some((wait + left.len() as f64 * per_clip).ceil().max(1.0) as u64)
 }
 
@@ -757,7 +925,14 @@ pub struct StreamerWorker {
 }
 
 impl StreamerWorker {
-    pub fn new(matches: MatchStore, store: StreamerStore, links: LinkStore, settings: Settings, clip_root: PathBuf, listener: StreamerListener) -> Self {
+    pub fn new(
+        matches: MatchStore,
+        store: StreamerStore,
+        links: LinkStore,
+        settings: Settings,
+        clip_root: PathBuf,
+        listener: StreamerListener,
+    ) -> Self {
         Self {
             matches,
             store,
@@ -777,7 +952,11 @@ impl StreamerWorker {
     }
 
     pub fn all(&self) -> Vec<MatchStreamers> {
-        self.matches.list().iter().map(|m| self.store.get(&m.id)).collect()
+        self.matches
+            .list()
+            .iter()
+            .map(|m| self.store.get(&m.id))
+            .collect()
     }
 
     pub fn spawn(&self) {
@@ -790,13 +969,26 @@ impl StreamerWorker {
 
     fn run(&self) {
         loop {
-            let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let s = self
+                .settings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             // Without "grab right after the match", wait until the game is closed.
             let may_download = s.grab_after_match || !procs::game_running();
             let mut lining_up = false;
             if s.streamer_auto {
-                let settled = self.settled.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                for m in self.matches.list().into_iter().filter(|m| !settled.contains(&m.id)) {
+                let settled = self
+                    .settled
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                for m in self
+                    .matches
+                    .list()
+                    .into_iter()
+                    .filter(|m| !settled.contains(&m.id))
+                {
                     if let Err(e) = self.process(&m, false, may_download) {
                         eprintln!("streamer clips for {}: {e}", m.id);
                     }
@@ -809,7 +1001,12 @@ impl StreamerWorker {
 
     /// Checks one match now (the "Check again" button).
     pub fn check_now(&self, match_id: &str) -> Result<MatchStreamers, String> {
-        let m = self.matches.list().into_iter().find(|m| m.id == match_id).ok_or("Match not found")?;
+        let m = self
+            .matches
+            .list()
+            .into_iter()
+            .find(|m| m.id == match_id)
+            .ok_or("Match not found")?;
         self.process(&m, true, true)?;
         Ok(self.store.get(match_id))
     }
@@ -817,10 +1014,29 @@ impl StreamerWorker {
     /// Adds a channel the user says belongs to a player in this match, and
     /// remembers it on this PC so later matches against them are checked too.
     /// `delay_sec`: the streamer's broadcast delay when the scoreboard scanner measured it.
-    pub fn add_manual(&self, match_id: &str, puuid: &str, login: &str, delay_sec: Option<f64>) -> Result<MatchStreamers, String> {
-        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let m = self.matches.list().into_iter().find(|m| m.id == match_id).ok_or("Match not found")?;
-        let player = m.players.iter().find(|p| p.puuid == puuid).ok_or("Player not in this match")?;
+    pub fn add_manual(
+        &self,
+        match_id: &str,
+        puuid: &str,
+        login: &str,
+        delay_sec: Option<f64>,
+    ) -> Result<MatchStreamers, String> {
+        let s = self
+            .settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let m = self
+            .matches
+            .list()
+            .into_iter()
+            .find(|m| m.id == match_id)
+            .ok_or("Match not found")?;
+        let player = m
+            .players
+            .iter()
+            .find(|p| p.puuid == puuid)
+            .ok_or("Player not in this match")?;
         let login = clean_login(login).ok_or("That isn't a Twitch channel name.")?;
         let (hit, verify) = fetch_channel(&s.server_url, &m, puuid, &login)?;
         let hit = hit.ok_or_else(|| format!("{login} wasn't streaming during this match."))?;
@@ -829,13 +1045,25 @@ impl StreamerWorker {
         }
         let me_player = find_me(&m, &s.riot_id);
         // Keep a delay measured earlier unless the scanner measured it now.
-        let delay = delay_sec.or_else(|| self.links.all().into_iter().find(|l| l.login == login).map(|l| l.delay_sec)).unwrap_or(0.0).clamp(0.0, 300.0);
-        self.links.save(puuid, &login, &player_label(player, me_player), delay);
+        let delay = delay_sec
+            .or_else(|| {
+                self.links
+                    .all()
+                    .into_iter()
+                    .find(|l| l.login == login)
+                    .map(|l| l.delay_sec)
+            })
+            .unwrap_or(0.0)
+            .clamp(0.0, 300.0);
+        self.links
+            .save(puuid, &login, &player_label(player, me_player), delay);
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.store.get(&m.id);
         let me = me_player.map(|p| p.puuid.clone());
         // Replace whatever this player or this channel had before in this match.
-        state.players.retain(|p| p.puuid != player.puuid && p.channel.login != login);
+        state
+            .players
+            .retain(|p| p.puuid != player.puuid && p.channel.login != login);
         merge_hits(&mut state, vec![hit], &m, me.as_deref(), &s);
         if let Some(p) = state.players.iter_mut().find(|p| p.puuid == player.puuid) {
             p.manual = true;
@@ -862,13 +1090,21 @@ impl StreamerWorker {
     }
 
     /// Players in this match the user linked before: ask whether their channel was live.
-    fn check_links(&self, m: &MatchSummary, s: &Settings, me: Option<&str>, state: &mut MatchStreamers) {
+    fn check_links(
+        &self,
+        m: &MatchSummary,
+        s: &Settings,
+        me: Option<&str>,
+        state: &mut MatchStreamers,
+    ) {
         let links = self.links.all();
         for p in &m.players {
             if Some(p.puuid.as_str()) == me || state.players.iter().any(|x| x.puuid == p.puuid) {
                 continue;
             }
-            let Some(link) = links.iter().find(|l| l.puuid == p.puuid) else { continue };
+            let Some(link) = links.iter().find(|l| l.puuid == p.puuid) else {
+                continue;
+            };
             match fetch_channel(&s.server_url, m, &p.puuid, &link.login) {
                 Ok((Some(_), v)) if v.rejection(&link.login).is_some() => {} // live, but in another game
                 Ok((Some(hit), v)) => {
@@ -888,50 +1124,90 @@ impl StreamerWorker {
 
     fn process(&self, m: &MatchSummary, force: bool, may_download: bool) -> Result<(), String> {
         let _guard = self.busy.lock().unwrap_or_else(|e| e.into_inner());
-        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let s = self
+            .settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let mut state = self.store.get(&m.id);
         // A VOD still being lined up keeps the match going however old it is
         // (e.g. an old match checked again by hand), or it would never finish.
         let lining_up = state.players.iter().any(|p| p.checking);
         if force {
-            self.settled.lock().unwrap_or_else(|e| e.into_inner()).remove(&m.id);
+            self.settled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&m.id);
         }
         if state.finished && !force && !lining_up {
-            if state.players.iter().any(|p| p.status == StreamerStatus::Working) {
+            if state
+                .players
+                .iter()
+                .any(|p| p.status == StreamerStatus::Working)
+            {
                 settle_stuck(&mut state, find_me(m, &s.riot_id).is_some());
                 self.store.put(&state);
                 (self.listener)(&state, None);
             }
-            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
+            self.settled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(m.id.clone());
             return Ok(());
         }
-        let started = time::OffsetDateTime::parse(&m.started_at, &time::format_description::well_known::Rfc3339)
-            .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as u64)
-            .unwrap_or(0);
+        let started = time::OffsetDateTime::parse(
+            &m.started_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as u64)
+        .unwrap_or(0);
         let window_ms = u64::from(s.vod_wait_hours) * 3_600_000;
         if !force && !lining_up && now_ms().saturating_sub(started) > window_ms + m.length_ms {
             state.finished = true;
             let me_known = find_me(m, &s.riot_id).is_some();
             settle_stuck(&mut state, me_known);
             self.store.put(&state);
-            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
+            self.settled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(m.id.clone());
             return Ok(());
         }
         let me = find_me(m, &s.riot_id).map(|p| p.puuid.clone());
 
         // Ask the server (at most every RECHECK, unless forced).
         // While clips are still to come (VOD still growing), ask more often.
-        let pending = state.players.iter().any(|p| p.status == StreamerStatus::Working);
-        let every = if lining_up { RECHECK_CHECKING } else if pending { RECHECK_PENDING } else { RECHECK };
-        let due = force || state.checked_ms.is_none_or(|t| now_ms().saturating_sub(t) >= every.as_millis() as u64);
+        let pending = state
+            .players
+            .iter()
+            .any(|p| p.status == StreamerStatus::Working);
+        let every = if lining_up {
+            RECHECK_CHECKING
+        } else if pending {
+            RECHECK_PENDING
+        } else {
+            RECHECK
+        };
+        let due = force
+            || state
+                .checked_ms
+                .is_none_or(|t| now_ms().saturating_sub(t) >= every.as_millis() as u64);
         if due {
             let mut scanner_pending = false;
             match fetch_streamers(&s.server_url, m, me.as_deref()) {
                 Ok(check) => {
                     merge_hits(&mut state, check.hits, m, me.as_deref(), &s);
                     // Scanner finds not yet linked to a player (and not one the user already linked).
-                    let linked: Vec<String> = state.players.iter().map(|p| p.channel.login.to_lowercase()).collect();
-                    state.suggested = check.suggested.into_iter().filter(|x| !linked.contains(&x.login.to_lowercase())).collect();
+                    let linked: Vec<String> = state
+                        .players
+                        .iter()
+                        .map(|p| p.channel.login.to_lowercase())
+                        .collect();
+                    state.suggested = check
+                        .suggested
+                        .into_iter()
+                        .filter(|x| !linked.contains(&x.login.to_lowercase()))
+                        .collect();
                     scanner_pending = check.scanner_pending;
                     state.error = None;
                 }
@@ -968,7 +1244,11 @@ impl StreamerWorker {
 
         // Count fights again: an older answer may have come in before your Riot ID matched.
         if let Some(me) = me.as_deref() {
-            for p in state.players.iter_mut().filter(|p| p.status == StreamerStatus::Working) {
+            for p in state
+                .players
+                .iter_mut()
+                .filter(|p| p.status == StreamerStatus::Working)
+            {
                 p.fights = fight_windows(m, me, &p.puuid, &s).len() as u32;
             }
         }
@@ -976,28 +1256,50 @@ impl StreamerWorker {
         // Done when every streamer is settled and no VOD is still growing.
         // Most matches have no streamers at all: two clean checks (10 min
         // apart) are enough, so they aren't re-checked for an hour.
-        let settled = state.players.iter().all(|p| p.status != StreamerStatus::Working);
-        let nobody_streaming = state.players.is_empty() && state.suggested.is_empty() && state.checks >= NO_STREAMER_CHECKS && state.error.is_none();
-        let all_done = settled && state.checked_ms.is_some() && state.error.is_none() && now_ms().saturating_sub(started) > m.length_ms + 3_600_000;
+        let settled = state
+            .players
+            .iter()
+            .all(|p| p.status != StreamerStatus::Working);
+        let nobody_streaming = state.players.is_empty()
+            && state.suggested.is_empty()
+            && state.checks >= NO_STREAMER_CHECKS
+            && state.error.is_none();
+        let all_done = settled
+            && state.checked_ms.is_some()
+            && state.error.is_none()
+            && now_ms().saturating_sub(started) > m.length_ms + 3_600_000;
         if nobody_streaming || all_done {
             state.finished = true;
             settle_stuck(&mut state, me.is_some());
         }
         if state.finished && !state.players.iter().any(|p| p.checking) {
-            self.settled.lock().unwrap_or_else(|e| e.into_inner()).insert(m.id.clone());
+            self.settled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(m.id.clone());
         }
         self.store.put(&state);
         (self.listener)(&state, None);
         Ok(())
     }
 
-    fn download_fights(&self, m: &MatchSummary, me: &str, s: &Settings, state: &mut MatchStreamers) {
+    fn download_fights(
+        &self,
+        m: &MatchSummary,
+        me: &str,
+        s: &Settings,
+        state: &mut MatchStreamers,
+    ) {
         let (Some(ytdlp), Some(ff)) = (locate_ytdlp(), ffmpeg::locate()) else {
             state.error = Some("yt-dlp or FFmpeg is missing. Reinstall CrossPOV.".into());
             return;
         };
         let todo: Vec<usize> = (0..state.players.len())
-            .filter(|&i| state.players[i].status == StreamerStatus::Working && !state.players[i].checking && state.players[i].vod.is_some())
+            .filter(|&i| {
+                state.players[i].status == StreamerStatus::Working
+                    && !state.players[i].checking
+                    && state.players[i].vod.is_some()
+            })
             .collect();
         if todo.is_empty() {
             return;
@@ -1021,9 +1323,22 @@ impl StreamerWorker {
     /// Clips one streamer's side of your fights. Holds the lock only to read
     /// or record progress, never while downloading.
     #[allow(clippy::too_many_arguments)]
-    fn download_player(&self, i: usize, m: &MatchSummary, me: &str, s: &Settings, shared: &Mutex<MatchStreamers>, ytdlp: &Path, ff: &Path) {
+    fn download_player(
+        &self,
+        i: usize,
+        m: &MatchSummary,
+        me: &str,
+        s: &Settings,
+        shared: &Mutex<MatchStreamers>,
+        ytdlp: &Path,
+        ff: &Path,
+    ) {
         let lock = || shared.lock().unwrap_or_else(|e| e.into_inner());
-        let root = self.clip_root.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let root = self
+            .clip_root
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let out_dir = root.join(STREAMER_CLIPS);
         let p = lock().players[i].clone();
         let Some(vod) = p.vod.clone() else { return };
@@ -1035,11 +1350,21 @@ impl StreamerWorker {
         let mut waiting = false;
         // Fast path: the VOD's chunk playlist, asked of yt-dlp once per streamer.
         let mut fast_playlist: Option<Result<String, String>> = None;
-        let late = if p.delay_sec > 0.0 { p.delay_sec } else { FALLBACK_SHIFT_S };
+        let late = if p.delay_sec > 0.0 {
+            p.delay_sec
+        } else {
+            FALLBACK_SHIFT_S
+        };
         let per_clip = *self.clip_secs.lock().unwrap_or_else(|e| e.into_inner());
         {
             let mut st = lock();
-            st.players[i].eta_sec = eta(&windows, &st.players[i].done, vod.offset_sec + late, vod.available_sec(now_ms()), per_clip);
+            st.players[i].eta_sec = eta(
+                &windows,
+                &st.players[i].done,
+                vod.offset_sec + late,
+                vod.available_sec(now_ms()),
+                per_clip,
+            );
             (self.listener)(&st, None);
         }
         for w in &windows {
@@ -1047,7 +1372,11 @@ impl StreamerWorker {
                 continue;
             }
             let clip_started = std::time::Instant::now();
-            crate::trail(&format!("streamer clip: {} round {}", p.channel.login, w.round + 1));
+            crate::trail(&format!(
+                "streamer clip: {} round {}",
+                p.channel.login,
+                w.round + 1
+            ));
             // Agent select and their broadcast delay put each moment this much later in the VOD.
             let shift = vod.offset_sec + late;
             let (from, to) = (shift + w.start, shift + w.end);
@@ -1061,21 +1390,39 @@ impl StreamerWorker {
             if !is_twitch_vod_url(&vod.url) {
                 let mut st = lock();
                 st.players[i].status = StreamerStatus::Failed;
-                st.players[i].message = Some("The server sent an unexpected video link, so nothing was downloaded.".into());
+                st.players[i].message = Some(
+                    "The server sent an unexpected video link, so nothing was downloaded.".into(),
+                );
                 break;
             }
             let _ = fs::create_dir_all(&out_dir);
             let short = file_safe(&m.id, 8);
-            let stem = out_dir.join(format!("{}_R{}_{}_{}", file_safe(&p.channel.login, 40), w.round + 1, w.moment.slug(), short));
+            let stem = out_dir.join(format!(
+                "{}_R{}_{}_{}",
+                file_safe(&p.channel.login, 40),
+                w.round + 1,
+                w.moment.slug(),
+                short
+            ));
             let clip_path = stem.with_extension("mp4");
-            let playlist = fast_playlist.get_or_insert_with(|| fastvod::playlist_url(ytdlp, &vod.url, ytdlp_format(s.download_quality)));
-            let slow = || download(ytdlp, ff, ytdlp_args(&vod.url, from, to, s.download_quality, ff, &stem));
+            let playlist = fast_playlist.get_or_insert_with(|| {
+                fastvod::playlist_url(ytdlp, &vod.url, ytdlp_format(s.download_quality))
+            });
+            let slow = || {
+                download(
+                    ytdlp,
+                    ff,
+                    ytdlp_args(&vod.url, from, to, s.download_quality, ff, &stem),
+                )
+            };
             let result = match playlist {
                 // The fast way; if a chunk or the cut fails, the slower way, one chunk at a time.
-                Ok(pl) => fastvod::fetch_clip(&agent(), pl, from, to, ff, &clip_path).or_else(|e| {
-                    eprintln!("fast download failed ({e}), using yt-dlp");
-                    slow()
-                }),
+                Ok(pl) => {
+                    fastvod::fetch_clip(&agent(), pl, from, to, ff, &clip_path).or_else(|e| {
+                        eprintln!("fast download failed ({e}), using yt-dlp");
+                        slow()
+                    })
+                }
                 // yt-dlp couldn't get the VOD: sub-only or deleted would fail the slow way too.
                 Err(e) => match classify_error(e) {
                     err @ (DownloadError::SubOnly | DownloadError::Gone) => Err(err),
@@ -1121,7 +1468,13 @@ impl StreamerWorker {
                     let pl = &mut st.players[i];
                     pl.done.push(w.key());
                     pl.clips += 1;
-                    pl.eta_sec = eta(&windows, &pl.done, vod.offset_sec + late, vod.available_sec(now_ms()), avg);
+                    pl.eta_sec = eta(
+                        &windows,
+                        &pl.done,
+                        vod.offset_sec + late,
+                        vod.available_sec(now_ms()),
+                        avg,
+                    );
                     if let Some(info) = info {
                         (self.listener)(&st, Some(&info));
                     }
@@ -1150,7 +1503,10 @@ impl StreamerWorker {
         }
         let mut st = lock();
         let pl = &mut st.players[i];
-        if pl.status == StreamerStatus::Working && !waiting && windows.iter().all(|w| pl.done.contains(&w.key())) {
+        if pl.status == StreamerStatus::Working
+            && !waiting
+            && windows.iter().all(|w| pl.done.contains(&w.key()))
+        {
             pl.status = StreamerStatus::Clipped;
         }
         if pl.status != StreamerStatus::Working {
@@ -1165,7 +1521,11 @@ mod tests {
     use crate::matches::{MatchKill, MatchPlayer, MatchRound};
 
     fn five_sec() -> Settings {
-        Settings { seconds_before: 5, seconds_after: 5, ..Settings::default() }
+        Settings {
+            seconds_before: 5,
+            seconds_after: 5,
+            ..Settings::default()
+        }
     }
 
     #[test]
@@ -1174,13 +1534,24 @@ mod tests {
         // centred on its fight, never one long clip of everything between.
         let w = fight_windows(&sample(), "me", "st", &Settings::default());
         assert_eq!(w.len(), 2);
-        assert_eq!((w[0].start, w[0].end, w[0].moment), (0.0, 90.0, Moment::YouKilled), "30 s before the kill is all the match has");
-        assert_eq!((w[1].start, w[1].end, w[1].moment), (90.0, 210.0, Moment::KilledYou));
+        assert_eq!(
+            (w[0].start, w[0].end, w[0].moment),
+            (0.0, 90.0, Moment::YouKilled),
+            "30 s before the kill is all the match has"
+        );
+        assert_eq!(
+            (w[1].start, w[1].end, w[1].moment),
+            (90.0, 210.0, Moment::KilledYou)
+        );
         // Two fights 50 s apart in one round overlap but stay separate clips.
         let mut m = sample();
         m.kills.push(kill(1, 200_000, "me", "st"));
         m.kills.sort_by_key(|k| k.at_ms);
-        let s = Settings { seconds_before: 30, seconds_after: 30, ..Settings::default() };
+        let s = Settings {
+            seconds_before: 30,
+            seconds_after: 30,
+            ..Settings::default()
+        };
         let w = fight_windows(&m, "me", "st", &s);
         assert_eq!(w.len(), 3);
         for win in &w[1..] {
@@ -1192,15 +1563,29 @@ mod tests {
     #[test]
     fn padding_settings_are_used() {
         for (before, after) in [(15, 15), (60, 60), (120, 30), (0, 120)] {
-            let s = Settings { seconds_before: before, seconds_after: after, ..Settings::default() };
+            let s = Settings {
+                seconds_before: before,
+                seconds_after: after,
+                ..Settings::default()
+            };
             let w = fight_windows(&sample(), "me", "st", &s);
             let death = w.iter().find(|w| w.moment == Moment::KilledYou).unwrap();
-            assert_eq!((death.start, death.end), (150.0 - f64::from(before), 150.0 + f64::from(after)));
+            assert_eq!(
+                (death.start, death.end),
+                (150.0 - f64::from(before), 150.0 + f64::from(after))
+            );
         }
     }
 
     fn kill(round: u32, at: u64, killer: &str, victim: &str) -> MatchKill {
-        MatchKill { round, at_ms: at, in_round_ms: 0, killer: killer.into(), victim: victim.into(), weapon: None }
+        MatchKill {
+            round,
+            at_ms: at,
+            in_round_ms: 0,
+            killer: killer.into(),
+            victim: victim.into(),
+            weapon: None,
+        }
     }
 
     fn sample() -> MatchSummary {
@@ -1224,8 +1609,16 @@ mod tests {
             teams: vec![],
             players: vec![p("me", "Me"), p("st", "streamer")],
             rounds: vec![
-                MatchRound { index: 0, winner: None, start_ms: Some(5_000) },
-                MatchRound { index: 1, winner: None, start_ms: Some(110_000) },
+                MatchRound {
+                    index: 0,
+                    winner: None,
+                    start_ms: Some(5_000),
+                },
+                MatchRound {
+                    index: 1,
+                    winner: None,
+                    start_ms: Some(110_000),
+                },
             ],
             kills: vec![
                 kill(0, 30_000, "me", "st"),
@@ -1241,13 +1634,22 @@ mod tests {
         let s = five_sec(); // 5 s before, 5 s after
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 2);
-        assert_eq!((w[0].start, w[0].end, w[0].moment), (25.0, 35.0, Moment::YouKilled));
-        assert_eq!((w[1].start, w[1].end, w[1].moment, w[1].round), (145.0, 155.0, Moment::KilledYou, 1));
+        assert_eq!(
+            (w[0].start, w[0].end, w[0].moment),
+            (25.0, 35.0, Moment::YouKilled)
+        );
+        assert_eq!(
+            (w[1].start, w[1].end, w[1].moment, w[1].round),
+            (145.0, 155.0, Moment::KilledYou, 1)
+        );
     }
 
     #[test]
     fn respects_which_moments_to_clip() {
-        let s = Settings { clip_you_killed: false, ..five_sec() };
+        let s = Settings {
+            clip_you_killed: false,
+            ..five_sec()
+        };
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].moment, Moment::KilledYou);
@@ -1255,13 +1657,21 @@ mod tests {
 
     #[test]
     fn can_skip_deaths_to_the_streamer() {
-        let s = Settings { clip_killed_you: false, ..five_sec() };
+        let s = Settings {
+            clip_killed_you: false,
+            ..five_sec()
+        };
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].moment, Moment::YouKilled);
         // Whole-round mode must skip rounds where the only fight was them killing you.
-        let whole = Settings { clip_whole_round: true, ..s };
-        assert!(fight_windows(&sample(), "me", "st", &whole).iter().all(|w| w.round != 1));
+        let whole = Settings {
+            clip_whole_round: true,
+            ..s
+        };
+        assert!(fight_windows(&sample(), "me", "st", &whole)
+            .iter()
+            .all(|w| w.round != 1));
     }
 
     #[test]
@@ -1270,34 +1680,63 @@ mod tests {
         m.kills.push(kill(0, 36_000, "st", "me"));
         m.kills.sort_by_key(|k| k.at_ms);
         let w = fight_windows(&m, "me", "st", &five_sec());
-        assert_eq!((w[0].start, w[0].end, w[0].moment), (25.0, 41.0, Moment::Trade), "kill at 30s and death at 36s: one clip");
+        assert_eq!(
+            (w[0].start, w[0].end, w[0].moment),
+            (25.0, 41.0, Moment::Trade),
+            "kill at 30s and death at 36s: one clip"
+        );
         assert_eq!(w.len(), 2);
     }
 
     #[test]
     fn whole_rounds_use_round_start_and_next_round() {
-        let s = Settings { clip_whole_round: true, ..Settings::default() };
+        let s = Settings {
+            clip_whole_round: true,
+            ..Settings::default()
+        };
         let w = fight_windows(&sample(), "me", "st", &s);
         assert_eq!(w.len(), 2);
         assert_eq!((w[0].start, w[0].end), (5.0, 110.0));
-        assert_eq!((w[1].start, w[1].end), (110.0, 157.0), "last round ends 5 s after its last kill");
+        assert_eq!(
+            (w[1].start, w[1].end),
+            (110.0, 157.0),
+            "last round ends 5 s after its last kill"
+        );
     }
 
     #[test]
     fn ytdlp_downloads_only_the_section() {
-        let a = ytdlp_args("https://www.twitch.tv/videos/1", 3625.0, 3635.5, DownloadQuality::P1080, Path::new("/x/ffmpeg"), Path::new("/c/vs_st"));
+        let a = ytdlp_args(
+            "https://www.twitch.tv/videos/1",
+            3625.0,
+            3635.5,
+            DownloadQuality::P1080,
+            Path::new("/x/ffmpeg"),
+            Path::new("/c/vs_st"),
+        );
         let j = a.join(" ");
         assert!(j.contains("--download-sections *3625.0-3635.5"), "{j}");
         assert!(j.contains("-f best[height<=1080]/best"));
         assert!(j.contains("-o /c/vs_st.%(ext)s"));
-        assert!(j.ends_with("-- https://www.twitch.tv/videos/1"), "the URL can never be read as an option");
+        assert!(
+            j.ends_with("-- https://www.twitch.tv/videos/1"),
+            "the URL can never be read as an option"
+        );
     }
 
     #[test]
     fn reads_scanner_suggestions_from_the_server() {
         let body = r#"{"matchId":"m","streamers":[],"suggested":[{"login":"streamer_x","team":"Red","delaySec":30}],"scanner":"done"}"#;
         let r: StreamersResponse = serde_json::from_str(body).unwrap();
-        assert_eq!(r.suggested, vec![Suggested { login: "streamer_x".into(), display_name: None, team: "Red".into(), delay_sec: Some(30.0) }]);
+        assert_eq!(
+            r.suggested,
+            vec![Suggested {
+                login: "streamer_x".into(),
+                display_name: None,
+                team: "Red".into(),
+                delay_sec: Some(30.0)
+            }]
+        );
         // Older servers send neither field.
         let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
         assert!(old.suggested.is_empty() && old.scanner.is_none());
@@ -1312,7 +1751,12 @@ mod tests {
         let mut p = PlayerState {
             puuid: "p".into(),
             name: "x".into(),
-            channel: Channel { id: "1".into(), login: "wtfslump".into(), display_name: "wtfslump".into(), avatar: None },
+            channel: Channel {
+                id: "1".into(),
+                login: "wtfslump".into(),
+                display_name: "wtfslump".into(),
+                avatar: None,
+            },
             vod: None,
             status: StreamerStatus::Working,
             clips: 0,
@@ -1326,21 +1770,41 @@ mod tests {
             eta_sec: None,
         };
         // Still reading their VOD: wait, download nothing.
-        apply_verify(&mut p, &VerifyInfo { verdict: "pending".into(), delay_sec: None });
+        apply_verify(
+            &mut p,
+            &VerifyInfo {
+                verdict: "pending".into(),
+                delay_sec: None,
+            },
+        );
         assert!(p.checking && p.status == StreamerStatus::Working);
         // Confirmed: go, with the delay the scanner measured.
-        apply_verify(&mut p, &VerifyInfo { verdict: "match".into(), delay_sec: Some(30.0) });
+        apply_verify(
+            &mut p,
+            &VerifyInfo {
+                verdict: "match".into(),
+                delay_sec: Some(30.0),
+            },
+        );
         assert!(!p.checking && p.message.is_none());
         assert_eq!(p.delay_sec, 30.0);
         // Another game, or the wrong side: stopped with the reason.
         apply_verify(&mut p, &v);
         assert_eq!(p.status, StreamerStatus::Failed);
         assert!(p.message.as_deref().unwrap().contains("different game"));
-        let other = VerifyInfo { verdict: "otherTeam".into(), delay_sec: None };
+        let other = VerifyInfo {
+            verdict: "otherTeam".into(),
+            delay_sec: None,
+        };
         assert!(other.rejection("x").unwrap().contains("other team"));
         // Can't tell (HUD hidden, scanner down, older server): links work as before.
         for verdict in ["unknown", "off"] {
-            assert!(VerifyInfo { verdict: verdict.into(), delay_sec: None }.rejection("x").is_none());
+            assert!(VerifyInfo {
+                verdict: verdict.into(),
+                delay_sec: None
+            }
+            .rejection("x")
+            .is_none());
         }
         let old: StreamersResponse = serde_json::from_str(r#"{"streamers":[]}"#).unwrap();
         assert!(old.verify.is_none());
@@ -1348,12 +1812,20 @@ mod tests {
 
     #[test]
     fn estimates_the_time_left() {
-        let w = |start: f64, round: u32| Window { start, end: start + 120.0, round, moment: Moment::YouKilled };
+        let w = |start: f64, round: u32| Window {
+            start,
+            end: start + 120.0,
+            round,
+            moment: Moment::YouKilled,
+        };
         let windows = vec![w(100.0, 1), w(400.0, 3), w(900.0, 7)];
         // VOD covers everything: 3 clips at 15 s each.
         assert_eq!(eta(&windows, &[], 80.0, 99_999.0, 15.0), Some(45));
         // One done: 2 left.
-        assert_eq!(eta(&windows, &[windows[0].key()], 80.0, 99_999.0, 15.0), Some(30));
+        assert_eq!(
+            eta(&windows, &[windows[0].key()], 80.0, 99_999.0, 15.0),
+            Some(30)
+        );
         // Live stream: the last fight ends at 80 + 1020 = 1100 s into the VOD, which has 1000 s so far.
         assert_eq!(eta(&windows, &[], 80.0, 1000.0, 15.0), Some(100 + 45));
         // All done: nothing to show.
@@ -1364,16 +1836,34 @@ mod tests {
     #[test]
     fn a_live_vod_counts_as_long_as_the_stream_so_far() {
         let started = "2026-11-24T19:00:00Z";
-        let vod = Vod { id: "1".into(), url: String::new(), started_at: started.into(), duration_sec: 600.0, offset_sec: 0.0, live: true };
+        let vod = Vod {
+            id: "1".into(),
+            url: String::new(),
+            started_at: started.into(),
+            duration_sec: 600.0,
+            offset_sec: 0.0,
+            live: true,
+        };
         let two_hours_later = 1_795_546_800_000 + 7_200_000; // 2026-11-24T19:00:00Z + 2 h, in ms
-        assert_eq!(vod.available_sec(two_hours_later), 7_200.0 - LIVE_VOD_LAG_S, "doesn't wait for the server's 600 s");
+        assert_eq!(
+            vod.available_sec(two_hours_later),
+            7_200.0 - LIVE_VOD_LAG_S,
+            "doesn't wait for the server's 600 s"
+        );
         let ended = Vod { live: false, ..vod };
-        assert_eq!(ended.available_sec(two_hours_later), 600.0, "a finished VOD is as long as Twitch says");
+        assert_eq!(
+            ended.available_sec(two_hours_later),
+            600.0,
+            "a finished VOD is as long as Twitch says"
+        );
     }
 
     #[test]
     fn cleans_typed_channel_names() {
-        assert_eq!(clean_login("https://www.twitch.tv/Some_Streamer/videos").as_deref(), Some("some_streamer"));
+        assert_eq!(
+            clean_login("https://www.twitch.tv/Some_Streamer/videos").as_deref(),
+            Some("some_streamer")
+        );
         assert_eq!(clean_login("twitch.tv/abc?x=1").as_deref(), Some("abc"));
         assert_eq!(clean_login("  Name123 ").as_deref(), Some("name123"));
         assert_eq!(clean_login("ab"), None);
@@ -1390,11 +1880,20 @@ mod tests {
         let all = store.all();
         assert_eq!(all.len(), 2, "one link per player");
         store.save("p3", "renamed", "Enemy · Jett", 0.0);
-        assert!(store.all().iter().all(|l| l.puuid != "p1"), "one player per channel: relinking moves it");
+        assert!(
+            store.all().iter().all(|l| l.puuid != "p1"),
+            "one player per channel: relinking moves it"
+        );
         store.save("p1", "renamed", "Enemy · Raze", 0.0);
-        assert_eq!(all.iter().find(|l| l.puuid == "p1").unwrap().login, "renamed");
+        assert_eq!(
+            all.iter().find(|l| l.puuid == "p1").unwrap().login,
+            "renamed"
+        );
         store.mark_seen("p2");
-        assert_eq!(store.all().iter().find(|l| l.puuid == "p2").unwrap().seen, 1);
+        assert_eq!(
+            store.all().iter().find(|l| l.puuid == "p2").unwrap().seen,
+            1
+        );
         store.remove("p1");
         assert_eq!(store.all().len(), 1);
         let _ = fs::remove_file(path);
@@ -1403,7 +1902,13 @@ mod tests {
     #[test]
     fn only_twitch_vod_links_and_safe_file_names() {
         assert!(is_twitch_vod_url("https://www.twitch.tv/videos/2290000000"));
-        for bad in ["--exec calc", "https://evil.example/videos/1", "https://www.twitch.tv/videos/1?x=--exec", "https://www.twitch.tv/videos/", "file:///c/x"] {
+        for bad in [
+            "--exec calc",
+            "https://evil.example/videos/1",
+            "https://www.twitch.tv/videos/1?x=--exec",
+            "https://www.twitch.tv/videos/",
+            "file:///c/x",
+        ] {
             assert!(!is_twitch_vod_url(bad), "{bad}");
         }
         assert_eq!(file_safe("../../Windows/x", 40), "Windowsx");
@@ -1416,8 +1921,13 @@ mod tests {
     /// requested seconds come back as a playable MP4.
     #[test]
     fn downloads_just_the_section() {
-        let Ok(url) = std::env::var("CROSSPOV_TEST_HLS") else { return };
-        let (ytdlp, ff) = (locate_ytdlp().expect("yt-dlp"), ffmpeg::locate().expect("ffmpeg"));
+        let Ok(url) = std::env::var("CROSSPOV_TEST_HLS") else {
+            return;
+        };
+        let (ytdlp, ff) = (
+            locate_ytdlp().expect("yt-dlp"),
+            ffmpeg::locate().expect("ffmpeg"),
+        );
         let dir = std::env::temp_dir().join(format!("crosspov-ytdlp-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -1426,19 +1936,41 @@ mod tests {
         download(&ytdlp, &ff, args).expect("download");
         let clip = stem.with_extension("mp4");
         assert!(clip.is_file(), "mp4 written");
-        let out = Command::new(&ff).args(["-hide_banner", "-i"]).arg(&clip).output().unwrap();
+        let out = Command::new(&ff)
+            .args(["-hide_banner", "-i"])
+            .arg(&clip)
+            .output()
+            .unwrap();
         let info = String::from_utf8_lossy(&out.stderr);
-        let dur = info.lines().find(|l| l.contains("Duration:")).unwrap_or("").to_string();
-        assert!(dur.contains("00:00:10") || dur.contains("00:00:11") || dur.contains("00:00:09"), "{dur}");
-        assert!(info.contains("Video: h264") && info.contains("Audio: aac"), "{info}");
+        let dur = info
+            .lines()
+            .find(|l| l.contains("Duration:"))
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            dur.contains("00:00:10") || dur.contains("00:00:11") || dur.contains("00:00:09"),
+            "{dur}"
+        );
+        assert!(
+            info.contains("Video: h264") && info.contains("Audio: aac"),
+            "{info}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn classifies_ytdlp_errors() {
-        assert_eq!(classify_error("ERROR: [twitch:vod] 123: This video is only available for subscribers"), DownloadError::SubOnly);
-        assert_eq!(classify_error("ERROR: Video 123 does not exist"), DownloadError::Gone);
-        assert!(matches!(classify_error("ERROR: network\nERROR: timed out"), DownloadError::Other(m) if m == "ERROR: timed out"));
+        assert_eq!(
+            classify_error("ERROR: [twitch:vod] 123: This video is only available for subscribers"),
+            DownloadError::SubOnly
+        );
+        assert_eq!(
+            classify_error("ERROR: Video 123 does not exist"),
+            DownloadError::Gone
+        );
+        assert!(
+            matches!(classify_error("ERROR: network\nERROR: timed out"), DownloadError::Other(m) if m == "ERROR: timed out")
+        );
     }
 
     #[test]
@@ -1448,12 +1980,21 @@ mod tests {
         let m = sample();
         let store = StreamerStore::new(dir.clone());
         // Two clean checks, no streamers found.
-        store.put(&MatchStreamers { match_id: m.id.clone(), checked_ms: Some(now_ms()), checks: 2, ..Default::default() });
+        store.put(&MatchStreamers {
+            match_id: m.id.clone(),
+            checked_ms: Some(now_ms()),
+            checks: 2,
+            ..Default::default()
+        });
         let st = store.get(&m.id);
         let nobody = st.players.is_empty() && st.checks >= NO_STREAMER_CHECKS && st.error.is_none();
         assert!(nobody);
         // Older saved state without the counter still loads (counts as 0).
-        fs::write(dir.join(format!("{}.streamers.json", m.id)), br#"{"matchId":"x","checkedMs":1,"error":null,"players":[],"finished":false}"#).unwrap();
+        fs::write(
+            dir.join(format!("{}.streamers.json", m.id)),
+            br#"{"matchId":"x","checkedMs":1,"error":null,"players":[],"finished":false}"#,
+        )
+        .unwrap();
         assert_eq!(store.get(&m.id).checks, 0);
         let _ = fs::remove_dir_all(dir);
     }
@@ -1464,7 +2005,12 @@ mod tests {
         let mk = |puuid: &str, fights: u32, clips: u32| PlayerState {
             puuid: puuid.into(),
             name: puuid.into(),
-            channel: Channel { id: "1".into(), login: puuid.into(), display_name: puuid.into(), avatar: None },
+            channel: Channel {
+                id: "1".into(),
+                login: puuid.into(),
+                display_name: puuid.into(),
+                avatar: None,
+            },
             status: StreamerStatus::Working,
             vod: None,
             clips,
@@ -1477,9 +2023,16 @@ mod tests {
             checking: false,
             eta_sec: Some(30),
         };
-        let mut other = MatchStreamers { players: vec![mk("x", 0, 0)], ..Default::default() };
+        let mut other = MatchStreamers {
+            players: vec![mk("x", 0, 0)],
+            ..Default::default()
+        };
         settle_stuck(&mut other, false);
-        assert_eq!(other.players[0].status, StreamerStatus::Failed, "not your match: don't wait for ever");
+        assert_eq!(
+            other.players[0].status,
+            StreamerStatus::Failed,
+            "not your match: don't wait for ever"
+        );
         state.players = vec![mk("a", 0, 0), mk("b", 2, 1), mk("c", 2, 0)];
         settle_stuck(&mut state, true);
         assert_eq!(state.players[0].status, StreamerStatus::NoFights);
@@ -1494,13 +2047,28 @@ mod tests {
     #[test]
     fn merging_server_hits_counts_fights() {
         let m = sample();
-        let mut state = MatchStreamers { match_id: m.id.clone(), ..Default::default() };
+        let mut state = MatchStreamers {
+            match_id: m.id.clone(),
+            ..Default::default()
+        };
         let hit = StreamerHit {
             puuid: "st".into(),
             name: "streamer".into(),
             tag: "1".into(),
-            channel: Channel { id: "9".into(), login: "streamer".into(), display_name: "Streamer".into(), avatar: None },
-            vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
+            channel: Channel {
+                id: "9".into(),
+                login: "streamer".into(),
+                display_name: "Streamer".into(),
+                avatar: None,
+            },
+            vod: Some(Vod {
+                id: "v".into(),
+                url: "u".into(),
+                started_at: "".into(),
+                duration_sec: 7200.0,
+                offset_sec: 3600.0,
+                live: true,
+            }),
             live_game: Some("VALORANT".into()),
             verify: None,
         };
@@ -1512,11 +2080,23 @@ mod tests {
         merge_hits(&mut state, vec![hit.clone()], &m, Some("me"), &five_sec());
         assert_eq!(state.players.len(), 1);
         // The scanner still measuring their VOD's shift: hold the downloads...
-        let pending = StreamerHit { verify: Some(VerifyInfo { verdict: "pending".into(), delay_sec: None }), ..hit.clone() };
+        let pending = StreamerHit {
+            verify: Some(VerifyInfo {
+                verdict: "pending".into(),
+                delay_sec: None,
+            }),
+            ..hit.clone()
+        };
         merge_hits(&mut state, vec![pending], &m, Some("me"), &five_sec());
         assert!(state.players[0].checking);
         // ...then cut with it.
-        let measured = StreamerHit { verify: Some(VerifyInfo { verdict: "match".into(), delay_sec: Some(74.0) }), ..hit };
+        let measured = StreamerHit {
+            verify: Some(VerifyInfo {
+                verdict: "match".into(),
+                delay_sec: Some(74.0),
+            }),
+            ..hit
+        };
         merge_hits(&mut state, vec![measured], &m, Some("me"), &five_sec());
         assert!(!state.players[0].checking);
         assert_eq!(state.players[0].delay_sec, 74.0);
@@ -1525,16 +2105,34 @@ mod tests {
     #[test]
     fn a_streamer_you_never_fought_is_settled_without_lining_up() {
         let m = sample();
-        let mut state = MatchStreamers { match_id: m.id.clone(), ..Default::default() };
+        let mut state = MatchStreamers {
+            match_id: m.id.clone(),
+            ..Default::default()
+        };
         // A teammate: no kills between you two, while the scanner would still be measuring.
         let mate = StreamerHit {
             puuid: "mate".into(),
             name: "mate".into(),
             tag: "1".into(),
-            channel: Channel { id: "8".into(), login: "mate".into(), display_name: "Mate".into(), avatar: None },
-            vod: Some(Vod { id: "v".into(), url: "u".into(), started_at: "".into(), duration_sec: 7200.0, offset_sec: 3600.0, live: true }),
+            channel: Channel {
+                id: "8".into(),
+                login: "mate".into(),
+                display_name: "Mate".into(),
+                avatar: None,
+            },
+            vod: Some(Vod {
+                id: "v".into(),
+                url: "u".into(),
+                started_at: "".into(),
+                duration_sec: 7200.0,
+                offset_sec: 3600.0,
+                live: true,
+            }),
             live_game: Some("VALORANT".into()),
-            verify: Some(VerifyInfo { verdict: "pending".into(), delay_sec: None }),
+            verify: Some(VerifyInfo {
+                verdict: "pending".into(),
+                delay_sec: None,
+            }),
         };
         merge_hits(&mut state, vec![mate.clone()], &m, Some("me"), &five_sec());
         assert_eq!(state.players[0].status, StreamerStatus::NoFights);

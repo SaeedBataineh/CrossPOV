@@ -82,11 +82,20 @@ pub struct ClipInfo {
 }
 
 fn is_video(p: &Path) -> bool {
-    matches!(p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("mp4" | "mkv"))
+    matches!(
+        p.extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("mp4" | "mkv")
+    )
 }
 
 pub fn thumb_path(root: &Path, clip: &Path) -> PathBuf {
-    let stem = clip.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = clip
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     root.join(THUMBS).join(format!("{stem}.jpg"))
 }
 
@@ -115,8 +124,13 @@ fn modified_ms(meta: &fs::Metadata) -> u64 {
 /// All clips, newest first.
 pub fn list(root: &Path) -> Vec<ClipInfo> {
     let mut out = Vec::new();
-    for (dir, kind) in [(MY_CLIPS, ClipKind::Mine), (STREAMER_CLIPS, ClipKind::Theirs)] {
-        let Ok(entries) = fs::read_dir(root.join(dir)) else { continue };
+    for (dir, kind) in [
+        (MY_CLIPS, ClipKind::Mine),
+        (STREAMER_CLIPS, ClipKind::Theirs),
+    ] {
+        let Ok(entries) = fs::read_dir(root.join(dir)) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let Ok(meta) = entry.metadata() else { continue };
             if let Some(c) = build(root, entry.path(), kind, &meta) {
@@ -144,13 +158,18 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     Some(ClipInfo {
-        name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        name: path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         path: path.to_string_lossy().into_owned(),
         kind,
         size_bytes: meta.len(),
         created_ms: modified_ms(meta),
         duration_sec: details.duration_sec,
-        thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+        thumb: thumb
+            .is_file()
+            .then(|| thumb.to_string_lossy().into_owned()),
         streamer: details.streamer,
         round: details.round,
         moment: details.moment,
@@ -168,8 +187,12 @@ fn build(root: &Path, path: PathBuf, kind: ClipKind, meta: &fs::Metadata) -> Opt
 pub fn validate(root: &Path, path: &str) -> Result<PathBuf, String> {
     let p = PathBuf::from(path);
     let canon = p.canonicalize().map_err(|_| "Clip not found".to_string())?;
-    let root = root.canonicalize().map_err(|_| "Clip folder not found".to_string())?;
-    let parent_ok = [MY_CLIPS, STREAMER_CLIPS].iter().any(|d| canon.parent() == Some(root.join(d).as_path()));
+    let root = root
+        .canonicalize()
+        .map_err(|_| "Clip folder not found".to_string())?;
+    let parent_ok = [MY_CLIPS, STREAMER_CLIPS]
+        .iter()
+        .any(|d| canon.parent() == Some(root.join(d).as_path()));
     if parent_ok && is_video(&canon) {
         Ok(canon)
     } else {
@@ -207,7 +230,8 @@ pub fn hide(root: &Path, clip: &Path) -> Result<(), String> {
 
 /// Undo: puts a hidden clip back.
 pub fn unhide(root: &Path, clip: &Path) -> Result<(), String> {
-    fs::rename(held(clip), clip).map_err(|_| "That clip can't be brought back any more.".to_string())?;
+    fs::rename(held(clip), clip)
+        .map_err(|_| "That clip can't be brought back any more.".to_string())?;
     for side in [thumb_path(root, clip), meta_path(root, clip)] {
         let _ = fs::rename(held(&side), &side);
     }
@@ -216,9 +240,15 @@ pub fn unhide(root: &Path, clip: &Path) -> Result<(), String> {
 
 /// A hidden clip, checked like `validate`. Returns the clip's own (visible) path.
 pub fn validate_hidden(root: &Path, path: &str) -> Result<PathBuf, String> {
-    let canon = held(Path::new(path)).canonicalize().map_err(|_| "That clip can't be brought back any more.".to_string())?;
-    let root = root.canonicalize().map_err(|_| "Clip folder not found".to_string())?;
-    let parent_ok = [MY_CLIPS, STREAMER_CLIPS].iter().any(|d| canon.parent() == Some(root.join(d).as_path()));
+    let canon = held(Path::new(path))
+        .canonicalize()
+        .map_err(|_| "That clip can't be brought back any more.".to_string())?;
+    let root = root
+        .canonicalize()
+        .map_err(|_| "Clip folder not found".to_string())?;
+    let parent_ok = [MY_CLIPS, STREAMER_CLIPS]
+        .iter()
+        .any(|d| canon.parent() == Some(root.join(d).as_path()));
     let clip = canon.with_extension("");
     if parent_ok && is_video(&clip) {
         Ok(clip)
@@ -247,7 +277,9 @@ pub fn recycle(root: &Path, clip: &Path) -> Result<(), String> {
 /// Clips deleted just before the app closed (Undo never ran out): recycle them now.
 pub fn recycle_leftovers(root: &Path) {
     for dir in [MY_CLIPS, STREAMER_CLIPS] {
-        let Ok(entries) = fs::read_dir(root.join(dir)) else { continue };
+        let Ok(entries) = fs::read_dir(root.join(dir)) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some(HELD) {
@@ -278,7 +310,10 @@ fn plain_path(path: &Path) -> PathBuf {
 fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
+    use windows::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE,
+        SHFILEOPSTRUCTW,
+    };
     let plain = plain_path(path);
     // A list of names, each ending in a 0, the whole list ending in another 0.
     let from: Vec<u16> = plain.as_os_str().encode_wide().chain([0, 0]).collect();
@@ -293,9 +328,21 @@ fn send_to_recycle_bin(path: &Path) -> Result<(), String> {
     if code == 0 && !op.fAnyOperationsAborted.as_bool() && !path.exists() {
         Ok(())
     } else {
-        let why = format!("Windows said {code:#x}{}", if path.exists() { ", and the file is still there (is it open in another program?)" } else { "" });
-        crate::trail(&format!("recycle bin: couldn't move {} ({why})", plain.display()));
-        Err(format!("Couldn't move the clip to the Recycle Bin ({why})."))
+        let why = format!(
+            "Windows said {code:#x}{}",
+            if path.exists() {
+                ", and the file is still there (is it open in another program?)"
+            } else {
+                ""
+            }
+        );
+        crate::trail(&format!(
+            "recycle bin: couldn't move {} ({why})",
+            plain.display()
+        ));
+        Err(format!(
+            "Couldn't move the clip to the Recycle Bin ({why})."
+        ))
     }
 }
 
@@ -339,9 +386,18 @@ mod tests {
 
     #[test]
     fn recycle_bin_gets_plain_paths() {
-        assert_eq!(plain_path(Path::new(r"\\?\C:\Videos\Clip.mp4")), PathBuf::from(r"C:\Videos\Clip.mp4"));
-        assert_eq!(plain_path(Path::new(r"\\?\UNC\nas\clips\a.mp4")), PathBuf::from(r"\\nas\clips\a.mp4"));
-        assert_eq!(plain_path(Path::new("/home/a.mp4")), PathBuf::from("/home/a.mp4"));
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\Videos\Clip.mp4")),
+            PathBuf::from(r"C:\Videos\Clip.mp4")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\nas\clips\a.mp4")),
+            PathBuf::from(r"\\nas\clips\a.mp4")
+        );
+        assert_eq!(
+            plain_path(Path::new("/home/a.mp4")),
+            PathBuf::from("/home/a.mp4")
+        );
     }
 
     #[test]
@@ -349,14 +405,30 @@ mod tests {
         let root = temp_root("info");
         let clip = root.join(STREAMER_CLIPS).join("st_R3_kill_ab.mp4");
         fs::write(&clip, b"x").unwrap();
-        write_meta(&root, &clip, &ClipMeta { streamer: Some("St".into()), round: Some(3), ..Default::default() });
+        write_meta(
+            &root,
+            &clip,
+            &ClipMeta {
+                streamer: Some("St".into()),
+                round: Some(3),
+                ..Default::default()
+            },
+        );
         fs::write(root.join(STREAMER_CLIPS).join("notes.txt"), b"x").unwrap();
         let one = info(&root, &clip, ClipKind::Theirs).unwrap();
         let all = list(&root);
         assert_eq!(all.len(), 1);
-        assert_eq!((&all[0].path, all[0].size_bytes, all[0].round), (&one.path, one.size_bytes, one.round));
+        assert_eq!(
+            (&all[0].path, all[0].size_bytes, all[0].round),
+            (&one.path, one.size_bytes, one.round)
+        );
         assert_eq!(one.streamer.as_deref(), Some("St"));
-        assert!(info(&root, &root.join(STREAMER_CLIPS).join("notes.txt"), ClipKind::Theirs).is_none());
+        assert!(info(
+            &root,
+            &root.join(STREAMER_CLIPS).join("notes.txt"),
+            ClipKind::Theirs
+        )
+        .is_none());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -365,7 +437,14 @@ mod tests {
         let root = temp_root("hide");
         let clip = root.join(MY_CLIPS).join("c.mp4");
         fs::write(&clip, b"x").unwrap();
-        write_meta(&root, &clip, &ClipMeta { round: Some(5), ..Default::default() });
+        write_meta(
+            &root,
+            &clip,
+            &ClipMeta {
+                round: Some(5),
+                ..Default::default()
+            },
+        );
         let path = list(&root)[0].path.clone();
 
         hide(&root, &validate(&root, &path).unwrap()).unwrap();
@@ -387,11 +466,18 @@ mod tests {
         fs::write(root.join(STREAMER_CLIPS).join("b.mkv"), b"xy").unwrap();
         let clips = list(&root);
         assert_eq!(clips.len(), 2);
-        assert!(clips.iter().any(|c| c.kind == ClipKind::Theirs && c.size_bytes == 2));
+        assert!(clips
+            .iter()
+            .any(|c| c.kind == ClipKind::Theirs && c.size_bytes == 2));
 
         assert!(validate(&root, &clips[0].path).is_ok());
-        assert!(validate(&root, root.join(MY_CLIPS).join("notes.txt").to_str().unwrap()).is_err());
-        let outside = std::env::temp_dir().join(format!("crosspov-outside-{}.mp4", std::process::id()));
+        assert!(validate(
+            &root,
+            root.join(MY_CLIPS).join("notes.txt").to_str().unwrap()
+        )
+        .is_err());
+        let outside =
+            std::env::temp_dir().join(format!("crosspov-outside-{}.mp4", std::process::id()));
         fs::write(&outside, b"x").unwrap();
         assert!(validate(&root, outside.to_str().unwrap()).is_err());
         let _ = fs::remove_file(outside);

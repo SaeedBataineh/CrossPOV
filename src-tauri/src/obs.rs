@@ -50,7 +50,10 @@ pub enum Source {
     /// (Display Capture), with the game (exe, window class) on top through
     /// Game Capture while it's in front (see `show_game`): Windows can hand a
     /// full-screen game straight to the monitor, past what screen capture sees.
-    Screen { origin: (i32, i32), game: Option<(String, String)> },
+    Screen {
+        origin: (i32, i32),
+        game: Option<(String, String)>,
+    },
 }
 
 /// What to record right now. A change is applied to the running OBS.
@@ -115,7 +118,8 @@ impl Obs {
         let config = obs_dir.join("config").join("obs-studio");
         let port = free_port().ok_or("no free local port for OBS")?;
         let password = random_hex(16);
-        write_config(&config, &profile, port, &password).map_err(|e| format!("Couldn't write OBS's settings: {e}"))?;
+        write_config(&config, &profile, port, &password)
+            .map_err(|e| format!("Couldn't write OBS's settings: {e}"))?;
         fs::create_dir_all(&profile.replay_dir).map_err(|e| e.to_string())?;
 
         let bin = obs_dir.join("bin").join("64bit");
@@ -138,7 +142,9 @@ impl Obs {
             // No console window; OBS's own window starts in the tray.
             cmd.creation_flags(0x0800_0000);
         }
-        let child = cmd.spawn().map_err(|e| format!("Couldn't start OBS: {e}"))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Couldn't start OBS: {e}"))?;
         crate::procs::tie_to_app(&child);
 
         // OBS takes a few seconds to load; its websocket comes up with it
@@ -155,7 +161,18 @@ impl Obs {
                 Err(_) => std::thread::sleep(Duration::from_millis(500)),
             }
         };
-        let mut obs = Obs { child, ws, next_id: 1, events: Vec::new(), config, profile, capture: None, inputs: Vec::new(), game_layer: None, round: 0 };
+        let mut obs = Obs {
+            child,
+            ws,
+            next_id: 1,
+            events: Vec::new(),
+            config,
+            profile,
+            capture: None,
+            inputs: Vec::new(),
+            game_layer: None,
+            round: 0,
+        };
         // Ready: the first request waits until OBS has finished loading.
         obs.request("GetVersion", json!({}))?;
         hide_tray_icon(obs.child.id());
@@ -187,14 +204,24 @@ impl Obs {
         // and creating one under the old name then fails ("already exists").
         self.round += 1;
         let r = self.round;
-        let (video, game_audio, desktop_audio, mic) = (format!("{VIDEO} {r}"), format!("{GAME_AUDIO} {r}"), format!("{DESKTOP_AUDIO} {r}"), format!("{MIC} {r}"));
+        let (video, game_audio, desktop_audio, mic) = (
+            format!("{VIDEO} {r}"),
+            format!("{GAME_AUDIO} {r}"),
+            format!("{DESKTOP_AUDIO} {r}"),
+            format!("{MIC} {r}"),
+        );
 
         self.request(
             "SetVideoSettings",
             json!({ "baseWidth": c.size.0, "baseHeight": c.size.1, "outputWidth": c.out_size.0, "outputHeight": c.out_size.1, "fpsNumerator": c.fps, "fpsDenominator": 1 }),
         )?;
         let scene = self.request("GetCurrentProgramScene", json!({}))?;
-        let scene = scene.get("currentProgramSceneName").or_else(|| scene.get("sceneName")).and_then(Value::as_str).unwrap_or("Scene").to_string();
+        let scene = scene
+            .get("currentProgramSceneName")
+            .or_else(|| scene.get("sceneName"))
+            .and_then(Value::as_str)
+            .unwrap_or("Scene")
+            .to_string();
 
         let game_capture = |exe: &str, class: &str| {
             json!({
@@ -210,11 +237,25 @@ impl Obs {
             Source::Screen { origin, game } => {
                 // Display Capture, Windows 10 method; the monitor is picked by
                 // its position among those OBS lists ("... @ 0,0 ...").
-                self.create(&scene, &video, "monitor_capture", json!({ "method": 2, "capture_cursor": false }))?;
+                self.create(
+                    &scene,
+                    &video,
+                    "monitor_capture",
+                    json!({ "method": 2, "capture_cursor": false }),
+                )?;
                 let at = format!("@ {},{}", origin.0, origin.1);
-                if let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": video, "propertyName": "monitor_id" })) {
-                    let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
-                    if let Some(item) = items.iter().find(|i| i["itemName"].as_str().is_some_and(|n| n.contains(&at))) {
+                if let Ok(list) = self.request(
+                    "GetInputPropertiesListPropertyItems",
+                    json!({ "inputName": video, "propertyName": "monitor_id" }),
+                ) {
+                    let items = list["propertyItems"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(item) = items
+                        .iter()
+                        .find(|i| i["itemName"].as_str().is_some_and(|n| n.contains(&at)))
+                    {
                         let _ = self.request("SetInputSettings", json!({ "inputName": video, "inputSettings": { "monitor_id": item["itemValue"] } }));
                     }
                 }
@@ -222,7 +263,9 @@ impl Obs {
                 // shows nothing, so the screen below shows through).
                 if let Some((exe, class)) = game {
                     let layer = format!("{VIDEO} game {r}");
-                    if let Some(id) = self.create(&scene, &layer, "game_capture", game_capture(exe, class))? {
+                    if let Some(id) =
+                        self.create(&scene, &layer, "game_capture", game_capture(exe, class))?
+                    {
                         let _ = self.request(
                             "SetSceneItemTransform",
                             json!({ "sceneName": scene, "sceneItemId": id, "sceneItemTransform": {
@@ -241,26 +284,49 @@ impl Obs {
         let window_of = |exe: &str, class: &str, title: &str| window_spec(title, class, exe);
         if let Some(vol) = c.game_audio {
             if c.desktop_audio {
-                self.create(&scene, &desktop_audio, "wasapi_output_capture", json!({ "device_id": "default" }))?;
+                self.create(
+                    &scene,
+                    &desktop_audio,
+                    "wasapi_output_capture",
+                    json!({ "device_id": "default" }),
+                )?;
                 self.audio(&desktop_audio, vol, tracks(true, false));
             } else if let Some((exe, class)) = match &c.source {
                 Source::Game { exe, class } => Some((exe, class)),
                 Source::Screen { game, .. } => game.as_ref().map(|(e, c)| (e, c)),
             } {
-                self.create(&scene, &game_audio, "wasapi_process_output_capture", json!({ "window": window_of(exe, class, title), "priority": 2 }))?;
+                self.create(
+                    &scene,
+                    &game_audio,
+                    "wasapi_process_output_capture",
+                    json!({ "window": window_of(exe, class, title), "priority": 2 }),
+                )?;
                 self.audio(&game_audio, vol, tracks(true, false));
             }
         }
         if !c.desktop_audio {
             for (i, (exe, vol)) in c.apps.iter().enumerate() {
                 let name = format!("{APP_AUDIO} {r}.{}", i + 1);
-                if self.create(&scene, &name, "wasapi_process_output_capture", json!({ "window": window_of(exe, "", ""), "priority": 2 })).is_ok() {
+                if self
+                    .create(
+                        &scene,
+                        &name,
+                        "wasapi_process_output_capture",
+                        json!({ "window": window_of(exe, "", ""), "priority": 2 }),
+                    )
+                    .is_ok()
+                {
                     self.audio(&name, *vol, tracks(true, false));
                 }
             }
         }
         if let Some(vol) = c.mic {
-            self.create(&scene, &mic, "wasapi_input_capture", json!({ "device_id": "default" }))?;
+            self.create(
+                &scene,
+                &mic,
+                "wasapi_input_capture",
+                json!({ "device_id": "default" }),
+            )?;
             self.pick_mic(&mic, &c.mic_device);
             self.audio(&mic, vol, tracks(!c.separate_tracks, c.separate_tracks));
             if c.denoise_mic {
@@ -282,27 +348,55 @@ impl Obs {
         if wanted.is_empty() || wanted.eq_ignore_ascii_case("default") {
             return;
         }
-        let Ok(list) = self.request("GetInputPropertiesListPropertyItems", json!({ "inputName": input, "propertyName": "device_id" })) else { return };
-        let items = list["propertyItems"].as_array().cloned().unwrap_or_default();
+        let Ok(list) = self.request(
+            "GetInputPropertiesListPropertyItems",
+            json!({ "inputName": input, "propertyName": "device_id" }),
+        ) else {
+            return;
+        };
+        let items = list["propertyItems"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         match pick_device(&items, wanted) {
             Some(id) => {
-                let _ = self.request("SetInputSettings", json!({ "inputName": input, "inputSettings": { "device_id": id } }));
+                let _ = self.request(
+                    "SetInputSettings",
+                    json!({ "inputName": input, "inputSettings": { "device_id": id } }),
+                );
             }
-            None => crate::trail(&format!("obs: mic \"{wanted}\" isn't connected; using the default mic")),
+            None => crate::trail(&format!(
+                "obs: mic \"{wanted}\" isn't connected; using the default mic"
+            )),
         }
     }
 
     /// Whole screen: shows the game layer while the game is in front, the
     /// screen below while you're tabbed out.
     pub fn show_game(&mut self, on: bool) {
-        let Some((scene, id, shown)) = self.game_layer.clone() else { return };
-        if shown != on && self.request_once("SetSceneItemEnabled", json!({ "sceneName": scene, "sceneItemId": id, "sceneItemEnabled": on })).is_ok() {
+        let Some((scene, id, shown)) = self.game_layer.clone() else {
+            return;
+        };
+        if shown != on
+            && self
+                .request_once(
+                    "SetSceneItemEnabled",
+                    json!({ "sceneName": scene, "sceneItemId": id, "sceneItemEnabled": on }),
+                )
+                .is_ok()
+        {
             self.game_layer = Some((scene, id, on));
         }
     }
 
     /// Adds a source to the scene; its scene item id, if OBS says.
-    fn create(&mut self, scene: &str, name: &str, kind: &str, settings: Value) -> Result<Option<i64>, String> {
+    fn create(
+        &mut self,
+        scene: &str,
+        name: &str,
+        kind: &str,
+        settings: Value,
+    ) -> Result<Option<i64>, String> {
         let _ = self.request("RemoveInput", json!({ "inputName": name }));
         // OBS frees a removed source's name only once it's really gone, a
         // moment later: until then "already exists" (601). Wait for it.
@@ -323,8 +417,14 @@ impl Obs {
     }
 
     fn audio(&mut self, name: &str, volume: f32, tracks: Value) {
-        let _ = self.request("SetInputVolume", json!({ "inputName": name, "inputVolumeMul": volume }));
-        let _ = self.request("SetInputAudioTracks", json!({ "inputName": name, "inputAudioTracks": tracks }));
+        let _ = self.request(
+            "SetInputVolume",
+            json!({ "inputName": name, "inputVolumeMul": volume }),
+        );
+        let _ = self.request(
+            "SetInputAudioTracks",
+            json!({ "inputName": name, "inputAudioTracks": tracks }),
+        );
     }
 
     /// Stopping the replay buffer takes a moment; video settings can only
@@ -333,7 +433,9 @@ impl Obs {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             match self.request("GetReplayBufferStatus", json!({})) {
-                Ok(s) if s["outputActive"].as_bool() == Some(true) => std::thread::sleep(Duration::from_millis(100)),
+                Ok(s) if s["outputActive"].as_bool() == Some(true) => {
+                    std::thread::sleep(Duration::from_millis(100))
+                }
                 _ => return,
             }
         }
@@ -360,7 +462,8 @@ impl Obs {
     }
 
     fn replay_buffer_running(&mut self) -> bool {
-        self.request_once("GetReplayBufferStatus", json!({})).is_ok_and(|s| s["outputActive"].as_bool() == Some(true))
+        self.request_once("GetReplayBufferStatus", json!({}))
+            .is_ok_and(|s| s["outputActive"].as_bool() == Some(true))
     }
 
     /// While recording: the replay buffer still runs (started again if not).
@@ -382,11 +485,20 @@ impl Obs {
         if let Err(e) = self.request("SaveReplayBuffer", json!({})) {
             // Not running (501): start it again for the next clip.
             self.keep_replay_buffer_running();
-            return Err(if e.contains("501") { "The recording was restarting. Try again in a few seconds.".into() } else { e });
+            return Err(if e.contains("501") {
+                "The recording was restarting. Try again in a few seconds.".into()
+            } else {
+                e
+            });
         }
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            if let Some(path) = self.events.iter().find(|e| e["eventType"] == "ReplayBufferSaved").and_then(|e| e["eventData"]["savedReplayPath"].as_str()) {
+            if let Some(path) = self
+                .events
+                .iter()
+                .find(|e| e["eventType"] == "ReplayBufferSaved")
+                .and_then(|e| e["eventData"]["savedReplayPath"].as_str())
+            {
                 return Ok(PathBuf::from(path));
             }
             match self.ws.recv(Duration::from_millis(500)) {
@@ -403,7 +515,10 @@ impl Obs {
         }
         // No event: ask for the last saved replay instead.
         let last = self.request("GetLastReplayBufferReplay", json!({}))?;
-        last.get("savedReplayPath").and_then(Value::as_str).map(PathBuf::from).ok_or_else(|| "OBS didn't save the replay".into())
+        last.get("savedReplayPath")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .ok_or_else(|| "OBS didn't save the replay".into())
     }
 
     /// "fps=143.9 render skipped 3/9000 encode skipped 0/9000", for Diagnostics.
@@ -434,17 +549,47 @@ impl Obs {
 
     /// Keeps OBS's windows hidden and off the taskbar (see `hide_windows`).
     pub fn hide_own_windows(&self) {
+        hide_tray_icon(self.child.id());
         hide_windows(self.child.id());
     }
 
     /// The last lines of OBS's own log about capture, encoding or errors.
     pub fn log_lines(&self) -> Vec<String> {
         let dir = self.config.join("logs");
-        let newest = fs::read_dir(&dir).ok().and_then(|it| it.flatten().max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok()));
-        let Some(text) = newest.and_then(|e| fs::read_to_string(e.path()).ok()) else { return Vec::new() };
-        let wanted = |l: &str| ["game-capture", "game_capture", "monitor_capture", "error", "failed", "encoder", "Replay Buffer", "skipped"].iter().any(|k| l.contains(k));
-        let lines: Vec<String> = text.lines().filter(|l| wanted(l)).map(|l| l.chars().take(200).collect()).collect();
-        lines.into_iter().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect()
+        let newest = fs::read_dir(&dir).ok().and_then(|it| {
+            it.flatten()
+                .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        });
+        let Some(text) = newest.and_then(|e| fs::read_to_string(e.path()).ok()) else {
+            return Vec::new();
+        };
+        let wanted = |l: &str| {
+            [
+                "game-capture",
+                "game_capture",
+                "monitor_capture",
+                "error",
+                "failed",
+                "encoder",
+                "Replay Buffer",
+                "skipped",
+            ]
+            .iter()
+            .any(|k| l.contains(k))
+        };
+        let lines: Vec<String> = text
+            .lines()
+            .filter(|l| wanted(l))
+            .map(|l| l.chars().take(200).collect())
+            .collect();
+        lines
+            .into_iter()
+            .rev()
+            .take(8)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
     }
 
     /// One obs-websocket request. "Not ready" (207: OBS still loading, its
@@ -453,7 +598,9 @@ impl Obs {
         let until = Instant::now() + Duration::from_secs(30);
         loop {
             match self.request_once(kind, data.clone()) {
-                Err((207, _)) if Instant::now() < until => std::thread::sleep(Duration::from_millis(500)),
+                Err((207, _)) if Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(500))
+                }
                 Err((_, e)) => return Err(e),
                 Ok(v) => return Ok(v),
             }
@@ -464,12 +611,23 @@ impl Obs {
     fn request_once(&mut self, kind: &str, data: Value) -> Result<Value, (u64, String)> {
         let id = self.next_id.to_string();
         self.next_id += 1;
-        let msg = json!({ "op": 6, "d": { "requestType": kind, "requestId": id, "requestData": data } });
-        self.ws.send(&msg.to_string()).map_err(|e| (0, format!("OBS: {kind}: {e}")))?;
+        let msg =
+            json!({ "op": 6, "d": { "requestType": kind, "requestId": id, "requestData": data } });
+        self.ws
+            .send(&msg.to_string())
+            .map_err(|e| (0, format!("OBS: {kind}: {e}")))?;
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            let Some(text) = self.ws.recv(Duration::from_millis(500)).map_err(|e| (0, format!("OBS: {kind}: {e}")))? else { continue };
-            let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
+            let Some(text) = self
+                .ws
+                .recv(Duration::from_millis(500))
+                .map_err(|e| (0, format!("OBS: {kind}: {e}")))?
+            else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<Value>(&text) else {
+                continue;
+            };
             match v["op"].as_u64() {
                 Some(5) => self.events.push(v["d"].clone()),
                 Some(7) if v["d"]["requestId"] == id.as_str() => {
@@ -477,7 +635,14 @@ impl Obs {
                     if status["result"].as_bool() == Some(true) {
                         return Ok(v["d"]["responseData"].clone());
                     }
-                    return Err((status["code"].as_u64().unwrap_or(0), format!("OBS: {kind}: {} {}", status["code"], status["comment"].as_str().unwrap_or(""))));
+                    return Err((
+                        status["code"].as_u64().unwrap_or(0),
+                        format!(
+                            "OBS: {kind}: {} {}",
+                            status["code"],
+                            status["comment"].as_str().unwrap_or("")
+                        ),
+                    ));
                 }
                 _ => {}
             }
@@ -494,7 +659,11 @@ fn pick_device(items: &[Value], wanted: &str) -> Option<Value> {
     items
         .iter()
         .find(|i| named(i).as_deref() == Some(w.as_str()))
-        .or_else(|| items.iter().find(|i| named(i).is_some_and(|n| !n.is_empty() && (n.contains(&w) || w.contains(&n)))))
+        .or_else(|| {
+            items.iter().find(|i| {
+                named(i).is_some_and(|n| !n.is_empty() && (n.contains(&w) || w.contains(&n)))
+            })
+        })
         .map(|i| i["itemValue"].clone())
         .filter(|v| v.as_str().is_some_and(|s| !s.is_empty() && s != "default"))
 }
@@ -559,15 +728,28 @@ fn write_config(config: &Path, p: &Profile, port: u16, password: &str) -> io::Re
 
 /// obs-websocket v5 handshake: Hello, Identify (with the password), Identified.
 fn identify(ws: &mut Ws, password: &str) -> io::Result<()> {
-    let hello: Value = serde_json::from_str(&ws.recv(Duration::from_secs(5))?.ok_or_else(|| io::Error::other("no Hello"))?).map_err(io::Error::other)?;
+    let hello: Value = serde_json::from_str(
+        &ws.recv(Duration::from_secs(5))?
+            .ok_or_else(|| io::Error::other("no Hello"))?,
+    )
+    .map_err(io::Error::other)?;
     let mut d = json!({ "rpcVersion": 1, "eventSubscriptions": 64 });
     if let Some(auth) = hello["d"].get("authentication") {
-        let (challenge, salt) = (auth["challenge"].as_str().unwrap_or(""), auth["salt"].as_str().unwrap_or(""));
+        let (challenge, salt) = (
+            auth["challenge"].as_str().unwrap_or(""),
+            auth["salt"].as_str().unwrap_or(""),
+        );
         let secret = base64(&Sha256::digest(format!("{password}{salt}").as_bytes()));
-        d["authentication"] = json!(base64(&Sha256::digest(format!("{secret}{challenge}").as_bytes())));
+        d["authentication"] = json!(base64(&Sha256::digest(
+            format!("{secret}{challenge}").as_bytes()
+        )));
     }
     ws.send(&json!({ "op": 1, "d": d }).to_string())?;
-    let reply: Value = serde_json::from_str(&ws.recv(Duration::from_secs(5))?.ok_or_else(|| io::Error::other("no Identified"))?).map_err(io::Error::other)?;
+    let reply: Value = serde_json::from_str(
+        &ws.recv(Duration::from_secs(5))?
+            .ok_or_else(|| io::Error::other("no Identified"))?,
+    )
+    .map_err(io::Error::other)?;
     if reply["op"] == 2 {
         Ok(())
     } else {
@@ -576,7 +758,11 @@ fn identify(ws: &mut Ws, password: &str) -> io::Result<()> {
 }
 
 fn free_port() -> Option<u16> {
-    std::net::TcpListener::bind("127.0.0.1:0").ok()?.local_addr().ok().map(|a| a.port())
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()?
+        .local_addr()
+        .ok()
+        .map(|a| a.port())
 }
 
 /// Random bytes from the standard library's randomly seeded hasher.
@@ -601,7 +787,9 @@ fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for c in bytes.chunks(3) {
-        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
         for i in 0..4 {
             if i <= c.len() {
                 s.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -689,12 +877,18 @@ impl Ws {
             if left.is_zero() && message.is_empty() {
                 return Ok(None);
             }
-            self.s.set_read_timeout(Some(left.max(Duration::from_millis(50))))?;
+            self.s
+                .set_read_timeout(Some(left.max(Duration::from_millis(50))))?;
             let mut chunk = [0u8; 16384];
             match self.s.read(&mut chunk) {
                 Ok(0) => return Err(io::Error::other("OBS closed the connection")),
                 Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
-                Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
                     if message.is_empty() {
                         return Ok(None);
                     }
@@ -739,27 +933,43 @@ fn parse_frame(buf: &[u8]) -> Option<(bool, u8, Vec<u8>, usize)> {
 
 /// Removes OBS's tray icon. OBS starts hidden in the tray (no window ever
 /// shows); its icon is the only thing left, and players shouldn't see OBS.
-/// Qt's tray icon belongs to a message-only window of class
-/// "QTrayIconMessageWindowClass" with icon id 0.
+/// Qt adds it back when the icon changes (the red dot while recording), so
+/// this runs four times a second.
 #[cfg(windows)]
 fn hide_tray_icon(pid: u32) {
-    use windows::core::w;
     use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_DELETE, NOTIFYICONDATAW};
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowThreadProcessId, HWND_MESSAGE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, GetClassNameW, GetWindowThreadProcessId, HWND_MESSAGE,
+    };
     // SAFETY: window lookups and a tray-icon removal with a properly sized struct.
     unsafe {
+        // OBS's is the window of its process whose class ends in
+        // "QTrayIconMessageWindowClass" (Qt puts its version in front, e.g.
+        // "Qt683QTrayIconMessageWindowClass"): message-only, or else top-level.
         for parent in [Some(HWND_MESSAGE), None] {
             let mut after = None;
-            while let Ok(hwnd) = FindWindowExW(parent, after, w!("QTrayIconMessageWindowClass"), None) {
+            while let Ok(hwnd) = FindWindowExW(parent, after, None, None) {
                 after = Some(hwnd);
                 let mut owner = 0u32;
                 GetWindowThreadProcessId(hwnd, Some(&mut owner));
-                if owner == pid {
-                    for id in 0..4 {
-                        let data = NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: id, ..Default::default() };
-                        let _ = Shell_NotifyIconW(NIM_DELETE, &data);
-                    }
+                if owner != pid {
+                    continue;
                 }
+                let mut buf = [0u16; 128];
+                let n = GetClassNameW(hwnd, &mut buf);
+                if !String::from_utf16_lossy(&buf[..n.max(0) as usize])
+                    .ends_with("QTrayIconMessageWindowClass")
+                {
+                    continue;
+                }
+                // Qt's tray icon id is 0.
+                let data = NOTIFYICONDATAW {
+                    cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+                    hWnd: hwnd,
+                    uID: 0,
+                    ..Default::default()
+                };
+                let _ = Shell_NotifyIconW(NIM_DELETE, &data);
             }
         }
     }
@@ -779,8 +989,8 @@ fn hide_windows(pid: u32) {
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_HIDE,
-        WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible,
+        SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_HIDE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
     unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> BOOL {
         // SAFETY: `data` is the &mut (pid, found) passed below, alive for the whole EnumWindows call.
@@ -809,7 +1019,11 @@ fn hide_windows(pid: u32) {
             }
             if IsWindowVisible(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_HIDE);
-                let first = SEEN.get_or_init(Default::default).lock().map(|mut s| s.insert(hwnd.0 as isize)).unwrap_or(false);
+                let first = SEEN
+                    .get_or_init(Default::default)
+                    .lock()
+                    .map(|mut s| s.insert(hwnd.0 as isize))
+                    .unwrap_or(false);
                 if first {
                     let (title, class) = window_names(hwnd.0 as usize as u64);
                     crate::trail(&format!("obs: hid its window \"{title}\" ({class})"));
@@ -858,8 +1072,12 @@ mod tests {
     #[test]
     fn obs_websocket_auth_string() {
         // obs-websocket v5: base64(sha256(base64(sha256(password + salt)) + challenge)).
-        let secret = base64(&Sha256::digest(b"supersecretpasswordlpcQWbNQPyAAAp6ckU9RJ2JvMVz9t6c/6fvnZtPJAEM="));
-        let auth = base64(&Sha256::digest(format!("{secret}+IxH4CnCiqpX1rM9scsNynZzbOe4KhDeYcTNS3PDaeY=").as_bytes()));
+        let secret = base64(&Sha256::digest(
+            b"supersecretpasswordlpcQWbNQPyAAAp6ckU9RJ2JvMVz9t6c/6fvnZtPJAEM=",
+        ));
+        let auth = base64(&Sha256::digest(
+            format!("{secret}+IxH4CnCiqpX1rM9scsNynZzbOe4KhDeYcTNS3PDaeY=").as_bytes(),
+        ));
         assert_eq!(auth.len(), 44);
     }
 
@@ -870,15 +1088,29 @@ mod tests {
             json!({ "itemName": "Microphone (Realtek(R) Audio)", "itemValue": "{0.0.1.00000000}.{aaa}" }),
             json!({ "itemName": "Headset Microphone (HyperX Cloud II)", "itemValue": "{0.0.1.00000000}.{bbb}" }),
         ];
-        assert_eq!(pick_device(&items, "Headset Microphone (HyperX Cloud II)"), Some(json!("{0.0.1.00000000}.{bbb}")));
-        assert_eq!(pick_device(&items, "microphone (realtek(r) audio)"), Some(json!("{0.0.1.00000000}.{aaa}")), "any case");
-        assert_eq!(pick_device(&items, "HyperX Cloud II"), Some(json!("{0.0.1.00000000}.{bbb}")), "part of the name");
+        assert_eq!(
+            pick_device(&items, "Headset Microphone (HyperX Cloud II)"),
+            Some(json!("{0.0.1.00000000}.{bbb}"))
+        );
+        assert_eq!(
+            pick_device(&items, "microphone (realtek(r) audio)"),
+            Some(json!("{0.0.1.00000000}.{aaa}")),
+            "any case"
+        );
+        assert_eq!(
+            pick_device(&items, "HyperX Cloud II"),
+            Some(json!("{0.0.1.00000000}.{bbb}")),
+            "part of the name"
+        );
         assert_eq!(pick_device(&items, "Blue Yeti"), None, "not connected");
     }
 
     #[test]
     fn window_strings_escape_colons() {
-        assert_eq!(window_spec("VALORANT  ", "UnrealWindow", "VALORANT-Win64-Shipping.exe"), "VALORANT  :UnrealWindow:VALORANT-Win64-Shipping.exe");
+        assert_eq!(
+            window_spec("VALORANT  ", "UnrealWindow", "VALORANT-Win64-Shipping.exe"),
+            "VALORANT  :UnrealWindow:VALORANT-Win64-Shipping.exe"
+        );
         assert_eq!(window_spec("a:b", "c", "d.exe"), "a#3Ab:c:d.exe");
     }
 

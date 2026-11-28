@@ -24,7 +24,14 @@ pub fn shared<T>(f: impl FnOnce(&Procs) -> T) -> T {
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
     static SHARED: OnceLock<Mutex<(Procs, Option<Instant>)>> = OnceLock::new();
-    let shared = SHARED.get_or_init(|| Mutex::new((Procs { sys: System::new().ok() }, None)));
+    let shared = SHARED.get_or_init(|| {
+        Mutex::new((
+            Procs {
+                sys: System::new().ok(),
+            },
+            None,
+        ))
+    });
     let mut g = shared.lock().unwrap_or_else(|e| e.into_inner());
     if g.1.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
         g.0.refresh_light();
@@ -40,7 +47,9 @@ pub struct Procs {
 
 impl Procs {
     pub fn new() -> Self {
-        let sys = System::new().map_err(|e| eprintln!("process list unavailable: {e}")).ok();
+        let sys = System::new()
+            .map_err(|e| eprintln!("process list unavailable: {e}"))
+            .ok();
         let mut p = Self { sys };
         p.refresh();
         p
@@ -58,7 +67,11 @@ impl Procs {
     /// file path, which is most of the cost of a scan.
     pub fn refresh_light(&mut self) {
         if let Some(sys) = self.sys.as_mut() {
-            sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
         }
     }
 
@@ -84,25 +97,43 @@ impl Procs {
 
     /// How many processes run from anywhere inside `dir`.
     pub fn count_under(&self, dir: &std::path::Path) -> usize {
-        self.sys.as_ref().map_or(0, |s| s.processes().values().filter(|p| p.exe().is_some_and(|e| e.starts_with(dir))).count())
+        self.sys.as_ref().map_or(0, |s| {
+            s.processes()
+                .values()
+                .filter(|p| p.exe().is_some_and(|e| e.starts_with(dir)))
+                .count()
+        })
     }
 
     pub fn pid_running(&self, pid: u32) -> bool {
-        self.sys.as_ref().is_some_and(|s| s.process(sysinfo::Pid::from_u32(pid)).is_some())
+        self.sys
+            .as_ref()
+            .is_some_and(|s| s.process(sysinfo::Pid::from_u32(pid)).is_some())
     }
 
     pub fn is_running(&self, exe: &str) -> bool {
         let Some(sys) = &self.sys else { return false };
-        sys.processes_by_exact_name(OsStr::new(exe)).next().is_some()
-            || sys.processes().values().any(|p| p.name().eq_ignore_ascii_case(exe))
+        sys.processes_by_exact_name(OsStr::new(exe))
+            .next()
+            .is_some()
+            || sys
+                .processes()
+                .values()
+                .any(|p| p.name().eq_ignore_ascii_case(exe))
     }
 
     /// Processes named `exe` whose parent is not also `exe`. Capturing these
     /// "roots" includes all their children, e.g. Discord's voice process.
     pub fn root_pids(&self, exe: &str) -> Vec<u32> {
-        let Some(sys) = &self.sys else { return Vec::new() };
+        let Some(sys) = &self.sys else {
+            return Vec::new();
+        };
         let procs = sys.processes();
-        let is_exe = |pid: &Pid| procs.get(pid).is_some_and(|p| p.name().eq_ignore_ascii_case(exe));
+        let is_exe = |pid: &Pid| {
+            procs
+                .get(pid)
+                .is_some_and(|p| p.name().eq_ignore_ascii_case(exe))
+        };
         let mut roots: Vec<u32> = procs
             .iter()
             .filter(|(pid, p)| is_exe(pid) && !p.parent().is_some_and(|parent| is_exe(&parent)))
@@ -115,22 +146,33 @@ impl Procs {
     /// Every running program's name, in lower case: one pass over the
     /// process list, for checking many names at once.
     pub fn running_names(&self) -> std::collections::HashSet<String> {
-        let Some(sys) = &self.sys else { return Default::default() };
-        sys.processes().values().map(|p| p.name().to_string_lossy().to_lowercase()).collect()
+        let Some(sys) = &self.sys else {
+            return Default::default();
+        };
+        sys.processes()
+            .values()
+            .map(|p| p.name().to_string_lossy().to_lowercase())
+            .collect()
     }
 
     /// Full path of a running program, by its exe name.
     pub fn exe_path(&self, exe: &str) -> Option<std::path::PathBuf> {
         let sys = self.sys.as_ref()?;
-        sys.processes().values().filter(|p| p.name().eq_ignore_ascii_case(exe)).find_map(|p| p.exe().map(|e| e.to_path_buf()))
+        sys.processes()
+            .values()
+            .filter(|p| p.name().eq_ignore_ascii_case(exe))
+            .find_map(|p| p.exe().map(|e| e.to_path_buf()))
     }
 
     /// Exe names for the given process IDs.
     pub fn names(&self, pids: &[u32]) -> HashMap<u32, String> {
-        let Some(sys) = &self.sys else { return HashMap::new() };
+        let Some(sys) = &self.sys else {
+            return HashMap::new();
+        };
         pids.iter()
             .filter_map(|&pid| {
-                sys.process(Pid::from_u32(pid)).map(|p| (pid, p.name().to_string_lossy().into_owned()))
+                sys.process(Pid::from_u32(pid))
+                    .map(|p| (pid, p.name().to_string_lossy().into_owned()))
             })
             .collect()
     }
@@ -187,7 +229,8 @@ pub fn tie_to_app(child: &std::process::Child) {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     struct Job(HANDLE);
@@ -231,12 +274,18 @@ pub fn end_leftover_ffmpeg() {
     }
     // Downloaded FFmpegs (any version), and the one next to the app.
     // And the slim OBS (any version), which records full-screen games.
-    let places: Vec<std::path::PathBuf> = crate::tools::ffmpeg_root().into_iter().chain(crate::ffmpeg::locate()).chain(crate::tools::obs_root()).collect();
+    let places: Vec<std::path::PathBuf> = crate::tools::ffmpeg_root()
+        .into_iter()
+        .chain(crate::ffmpeg::locate())
+        .chain(crate::tools::obs_root())
+        .collect();
     let procs = Procs::new();
     for place in places {
         let n = procs.count_under(&place);
         if n > 0 {
-            crate::trail(&format!("recording: ended {n} FFmpeg left running by an earlier CrossPOV"));
+            crate::trail(&format!(
+                "recording: ended {n} FFmpeg left running by an earlier CrossPOV"
+            ));
             procs.kill_under(&place, std::process::id());
         }
     }

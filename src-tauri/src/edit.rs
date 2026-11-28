@@ -25,15 +25,32 @@ fn push(a: &mut Vec<String>, items: &[&str]) {
 /// `kbps`: a target bitrate (for a size limit); otherwise high quality.
 /// `hevc`: H.265 (a cut of an H.265 clip stays H.265); Discord copies are H.264.
 pub fn encode_args(enc: VideoEncoder, kbps: Option<u32>, hevc: bool) -> Vec<String> {
-    let mut a = vec!["-c:v".to_string(), if hevc { enc.hevc_codec() } else { enc.codec() }.to_string()];
+    let mut a = vec![
+        "-c:v".to_string(),
+        if hevc { enc.hevc_codec() } else { enc.codec() }.to_string(),
+    ];
     match (enc, kbps) {
         // Near-transparent quality for cuts: a second encode should lose
         // as little as possible.
-        (VideoEncoder::Nvenc, None) => push(&mut a, &["-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", "17", "-b:v", "0"]),
-        (VideoEncoder::Amf, None) => push(&mut a, &["-quality", "quality", "-rc", "cqp", "-qp_i", "17", "-qp_p", "18"]),
+        (VideoEncoder::Nvenc, None) => push(
+            &mut a,
+            &[
+                "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", "17", "-b:v", "0",
+            ],
+        ),
+        (VideoEncoder::Amf, None) => push(
+            &mut a,
+            &[
+                "-quality", "quality", "-rc", "cqp", "-qp_i", "17", "-qp_p", "18",
+            ],
+        ),
         (_, None) => push(&mut a, &["-b:v", "14M"]),
         (enc, Some(k)) => {
-            let (b, max, buf) = (format!("{k}k"), format!("{}k", k * 3 / 2), format!("{}k", k * 2));
+            let (b, max, buf) = (
+                format!("{k}k"),
+                format!("{}k", k * 3 / 2),
+                format!("{}k", k * 2),
+            );
             if enc == VideoEncoder::Nvenc {
                 push(&mut a, &["-preset", "p5", "-rc", "vbr"]);
             }
@@ -48,22 +65,51 @@ pub fn encode_args(enc: VideoEncoder, kbps: Option<u32>, hevc: bool) -> Vec<Stri
 /// A trimmed copy from `start` to `end` seconds. `exact` re-encodes so the
 /// cut lands on the very frame; otherwise it copies (instant, but starts at
 /// the keyframe before `start`).
-pub fn trim_args(input: &Path, out: &Path, start: f64, end: f64, exact: bool, enc: VideoEncoder, hevc: bool) -> Vec<String> {
+pub fn trim_args(
+    input: &Path,
+    out: &Path,
+    start: f64,
+    end: f64,
+    exact: bool,
+    enc: VideoEncoder,
+    hevc: bool,
+) -> Vec<String> {
     let mut a = Vec::new();
-    push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(start), "-i"]);
+    push(
+        &mut a,
+        &[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            &secs(start),
+            "-i",
+        ],
+    );
     a.push(input.to_string_lossy().into_owned());
     push(&mut a, &["-t", &secs(end - start)]);
     if exact {
         push(&mut a, &["-map", "0:v:0", "-map", "0:a?"]);
         a.extend(encode_args(enc, None, hevc));
-        if hevc && out.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")) {
+        if hevc
+            && out
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+        {
             push(&mut a, &["-tag:v", "hvc1"]);
         }
         push(&mut a, &["-c:a", "aac", "-b:a", "192k"]);
     } else {
-        push(&mut a, &["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"]);
+        push(
+            &mut a,
+            &["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"],
+        );
     }
-    if out.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")) {
+    if out
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
+    {
         push(&mut a, &["-movflags", "+faststart"]);
     }
     a.push(out.to_string_lossy().into_owned());
@@ -85,22 +131,63 @@ pub fn discord_plan(duration: f64) -> Option<(u32, u32)> {
 
 /// The longest clip that still fits under Discord's limit (at 480p), in whole seconds.
 pub fn discord_max_seconds() -> u32 {
-    (1..=3600).rev().find(|&s| discord_plan(f64::from(s)).is_some()).unwrap_or(0)
+    (1..=3600)
+        .rev()
+        .find(|&s| discord_plan(f64::from(s)).is_some())
+        .unwrap_or(0)
 }
 
 /// A copy of `start`..`end` that fits Discord's free upload limit: one sound
 /// track, smaller picture for longer clips.
-pub fn discord_args(input: &Path, out: &Path, start: f64, end: f64, enc: VideoEncoder) -> Option<Vec<String>> {
+pub fn discord_args(
+    input: &Path,
+    out: &Path,
+    start: f64,
+    end: f64,
+    enc: VideoEncoder,
+) -> Option<Vec<String>> {
     let (kbps, height) = discord_plan(end - start)?;
     let mut a = Vec::new();
-    push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(start), "-i"]);
+    push(
+        &mut a,
+        &[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            &secs(start),
+            "-i",
+        ],
+    );
     a.push(input.to_string_lossy().into_owned());
-    push(&mut a, &["-t", &secs(end - start), "-map", "0:v:0", "-map", "0:a:0?"]);
+    push(
+        &mut a,
+        &["-t", &secs(end - start), "-map", "0:v:0", "-map", "0:a:0?"],
+    );
     // By the shape it's shown in (`dar`), with square pixels: a stretched clip
     // comes out 16:9 wherever it's played.
-    push(&mut a, &["-vf", &format!("scale=w='trunc(dar*min({height},ih)/2)*2':h='min({height},ih)',setsar=1")]);
+    push(
+        &mut a,
+        &[
+            "-vf",
+            &format!("scale=w='trunc(dar*min({height},ih)/2)*2':h='min({height},ih)',setsar=1"),
+        ],
+    );
     a.extend(encode_args(enc, Some(kbps), false));
-    push(&mut a, &["-c:a", "aac", "-b:a", &format!("{DISCORD_AUDIO_KBPS}k"), "-ac", "2", "-movflags", "+faststart"]);
+    push(
+        &mut a,
+        &[
+            "-c:a",
+            "aac",
+            "-b:a",
+            &format!("{DISCORD_AUDIO_KBPS}k"),
+            "-ac",
+            "2",
+            "-movflags",
+            "+faststart",
+        ],
+    );
     a.push(out.to_string_lossy().into_owned());
     Some(a)
 }
@@ -108,20 +195,46 @@ pub fn discord_args(input: &Path, out: &Path, start: f64, end: f64, enc: VideoEn
 /// The video size from FFmpeg's description of a file ("Video: ..., 1920x1324 ...").
 pub fn video_size(ffmpeg_info: &str) -> Option<(u32, u32)> {
     let line = ffmpeg_info.lines().find(|l| l.contains("Video:"))?;
-    line.split(|c: char| c == ',' || c == ' ' || c == '[').find_map(|w| {
-        let (a, b) = w.split_once('x')?;
-        let (w, h) = (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?);
-        (w >= 16 && h >= 16).then_some((w, h))
-    })
+    line.split(|c: char| c == ',' || c == ' ' || c == '[')
+        .find_map(|w| {
+            let (a, b) = w.split_once('x')?;
+            let (w, h) = (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?);
+            (w >= 16 && h >= 16).then_some((w, h))
+        })
 }
 
 /// One frame at `at` seconds, at the video's real size, as raw RGB bytes in
 /// a file (made into a PNG by the caller: the small FFmpeg has no PNG encoder).
 pub fn frame_args(input: &Path, raw_out: &Path, at: f64) -> Vec<String> {
     let mut a = Vec::new();
-    push(&mut a, &["-hide_banner", "-loglevel", "error", "-y", "-ss", &secs(at), "-i"]);
+    push(
+        &mut a,
+        &[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            &secs(at),
+            "-i",
+        ],
+    );
     a.push(input.to_string_lossy().into_owned());
-    push(&mut a, &["-frames:v", "1", "-vf", "format=rgb24", "-c:v", "rawvideo", "-f", "image2", "-update", "1"]);
+    push(
+        &mut a,
+        &[
+            "-frames:v",
+            "1",
+            "-vf",
+            "format=rgb24",
+            "-c:v",
+            "rawvideo",
+            "-f",
+            "image2",
+            "-update",
+            "1",
+        ],
+    );
     a.push(raw_out.to_string_lossy().into_owned());
     a
 }
@@ -146,11 +259,20 @@ pub fn copy_file_to_clipboard(path: &Path) -> Result<(), String> {
     use crate::ffmpeg::NoWindow;
     let literal = path.to_string_lossy().replace('\'', "''");
     let status = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &format!("Set-Clipboard -LiteralPath '{literal}'")])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!("Set-Clipboard -LiteralPath '{literal}'"),
+        ])
         .no_window()
         .status()
         .map_err(|e| format!("Couldn't copy to the clipboard: {e}"))?;
-    if status.success() { Ok(()) } else { Err("Couldn't copy to the clipboard.".into()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Couldn't copy to the clipboard.".into())
+    }
 }
 
 #[cfg(not(windows))]
@@ -170,16 +292,43 @@ mod tests {
     #[test]
     fn quick_trim_copies_and_exact_trim_encodes() {
         let (i, o) = (PathBuf::from("in.mp4"), PathBuf::from("out.mp4"));
-        let quick = joined(&trim_args(&i, &o, 55.0, 70.5, false, VideoEncoder::Nvenc, false));
+        let quick = joined(&trim_args(
+            &i,
+            &o,
+            55.0,
+            70.5,
+            false,
+            VideoEncoder::Nvenc,
+            false,
+        ));
         assert!(quick.contains("-ss 55.000 -i in.mp4 -t 15.500"));
         assert!(quick.contains("-c copy"));
         assert!(quick.contains("+faststart"));
-        let exact = joined(&trim_args(&i, &o, 55.0, 70.5, true, VideoEncoder::Nvenc, false));
+        let exact = joined(&trim_args(
+            &i,
+            &o,
+            55.0,
+            70.5,
+            true,
+            VideoEncoder::Nvenc,
+            false,
+        ));
         assert!(exact.contains("-c:v h264_nvenc"));
         assert!(exact.contains("-c:a aac"));
         assert!(!exact.contains("-c copy"));
-        let h265 = joined(&trim_args(&i, &o, 55.0, 70.5, true, VideoEncoder::Nvenc, true));
-        assert!(h265.contains("-c:v hevc_nvenc") && h265.contains("-tag:v hvc1"), "an H.265 clip's cut stays H.265: {h265}");
+        let h265 = joined(&trim_args(
+            &i,
+            &o,
+            55.0,
+            70.5,
+            true,
+            VideoEncoder::Nvenc,
+            true,
+        ));
+        assert!(
+            h265.contains("-c:v hevc_nvenc") && h265.contains("-tag:v hvc1"),
+            "an H.265 clip's cut stays H.265: {h265}"
+        );
     }
 
     /// A real frame out of a real file, with real FFmpeg, as a full-size PNG.
@@ -195,15 +344,51 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let (src, raw, png) = (dir.join("in.mp4"), dir.join("f.rgb"), dir.join("f.png"));
         let run = |args: &[String]| std::process::Command::new(&ff).args(args).output().unwrap();
-        let made = run(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1324:rate=30", "-t", "2", "-vf", "format=nv12", "-c:v", crate::ffmpeg::VideoEncoder::Cpu.codec(), "-b:v", "4M"].map(String::from).into_iter().chain([src.to_string_lossy().into_owned()]).collect::<Vec<_>>());
-        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
-        let info = run(&["-hide_banner".to_string(), "-i".to_string(), src.to_string_lossy().into_owned()]);
+        let made = run(&[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=1920x1324:rate=30",
+            "-t",
+            "2",
+            "-vf",
+            "format=nv12",
+            "-c:v",
+            crate::ffmpeg::VideoEncoder::Cpu.codec(),
+            "-b:v",
+            "4M",
+        ]
+        .map(String::from)
+        .into_iter()
+        .chain([src.to_string_lossy().into_owned()])
+        .collect::<Vec<_>>());
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        let info = run(&[
+            "-hide_banner".to_string(),
+            "-i".to_string(),
+            src.to_string_lossy().into_owned(),
+        ]);
         let (w, h) = video_size(&String::from_utf8_lossy(&info.stderr)).expect("size");
         assert_eq!((w, h), (1920, 1324));
         let out = run(&frame_args(&src, &raw, 1.0));
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         write_png(&png, w, h, &std::fs::read(&raw).unwrap()).unwrap();
-        let decoded = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&png).unwrap())).read_info().unwrap();
+        let decoded =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&png).unwrap()))
+                .read_info()
+                .unwrap();
         assert_eq!((decoded.info().width, decoded.info().height), (1920, 1324));
         let _ = std::fs::remove_dir_all(&dir);
     }

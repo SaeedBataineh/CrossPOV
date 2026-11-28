@@ -32,11 +32,17 @@ fn server() -> Option<&'static Server> {
             .name("clip-server".into())
             .spawn(move || {
                 for conn in listener.incoming().flatten() {
-                    let _ = thread::Builder::new().name("clip-serve".into()).spawn(move || serve(conn));
+                    let _ = thread::Builder::new()
+                        .name("clip-serve".into())
+                        .spawn(move || serve(conn));
                 }
             })
             .ok()?;
-        Some(Server { port, key, files: Mutex::new(HashMap::new()) })
+        Some(Server {
+            port,
+            key,
+            files: Mutex::new(HashMap::new()),
+        })
     })
     .as_ref()
 }
@@ -68,7 +74,9 @@ fn serve(conn: TcpStream) {
 
 fn serve_requests(conn: TcpStream) {
     let _ = conn.set_read_timeout(Some(Duration::from_secs(60)));
-    let Ok(mut out) = conn.try_clone() else { return };
+    let Ok(mut out) = conn.try_clone() else {
+        return;
+    };
     let mut reader = BufReader::new(conn);
     loop {
         let mut line = String::new();
@@ -99,7 +107,12 @@ fn serve_requests(conn: TcpStream) {
     }
 }
 
-fn respond(out: &mut TcpStream, method: &str, target: &str, range: Option<&str>) -> std::io::Result<()> {
+fn respond(
+    out: &mut TcpStream,
+    method: &str,
+    target: &str,
+    range: Option<&str>,
+) -> std::io::Result<()> {
     let file = file_for(target).filter(|_| method == "GET" || method == "HEAD");
     let Some(mut f) = file.and_then(|p| File::open(p).ok()) else {
         return out.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
@@ -109,7 +122,11 @@ fn respond(out: &mut TcpStream, method: &str, target: &str, range: Option<&str>)
         return out.write_all(format!("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{len}\r\nContent-Length: 0\r\n\r\n").as_bytes());
     };
     let count = end + 1 - start;
-    let status = if range.is_some() { "206 Partial Content" } else { "200 OK" };
+    let status = if range.is_some() {
+        "206 Partial Content"
+    } else {
+        "200 OK"
+    };
     let mut head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Length: {count}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n"
     );
@@ -130,9 +147,16 @@ fn respond(out: &mut TcpStream, method: &str, target: &str, range: Option<&str>)
 fn file_for(target: &str) -> Option<PathBuf> {
     let s = server()?;
     let path = target.split('?').next()?;
-    let rest = path.strip_prefix('/')?.strip_prefix(s.key.as_str())?.strip_prefix('/')?;
+    let rest = path
+        .strip_prefix('/')?
+        .strip_prefix(s.key.as_str())?
+        .strip_prefix('/')?;
     let id: u64 = rest.strip_suffix(".mp4")?.parse().ok()?;
-    s.files.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+    s.files
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned()
 }
 
 /// First and last byte for a "Range: bytes=a-b" header (the whole file without one).
@@ -140,7 +164,9 @@ fn byte_range(range: Option<&str>, len: u64) -> Option<(u64, u64)> {
     if len == 0 {
         return None;
     }
-    let Some(r) = range else { return Some((0, len - 1)) };
+    let Some(r) = range else {
+        return Some((0, len - 1));
+    };
     let spec = r.strip_prefix("bytes=")?.split(',').next()?.trim();
     let (a, b) = spec.split_once('-')?;
     let (start, end) = match (a.trim(), b.trim()) {
@@ -176,9 +202,18 @@ mod tests {
         std::fs::write(&clip, b"0123456789").unwrap();
         let url = url_for(clip).unwrap();
         let get = |path: &str, range: &str| -> String {
-            let addr = url.trim_start_matches("http://").split('/').next().unwrap().to_string();
+            let addr = url
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap()
+                .to_string();
             let mut c = TcpStream::connect(addr).unwrap();
-            write!(c, "GET {path} HTTP/1.1\r\nHost: x\r\n{range}Connection: close\r\n\r\n").unwrap();
+            write!(
+                c,
+                "GET {path} HTTP/1.1\r\nHost: x\r\n{range}Connection: close\r\n\r\n"
+            )
+            .unwrap();
             c.shutdown(std::net::Shutdown::Write).unwrap();
             // Everything until the server closes (an abrupt close at the end is fine).
             let mut got = Vec::new();
@@ -199,7 +234,10 @@ mod tests {
         let path = format!("/{}", url.splitn(4, '/').nth(3).unwrap());
         let part = get(&path, "Range: bytes=2-4\r\n");
         assert!(part.starts_with("HTTP/1.1 206"), "{part}");
-        assert!(part.contains("Content-Range: bytes 2-4/10") && part.ends_with("234"), "{part}");
+        assert!(
+            part.contains("Content-Range: bytes 2-4/10") && part.ends_with("234"),
+            "{part}"
+        );
         assert!(get("/wrong-key/1.mp4", "").starts_with("HTTP/1.1 404"));
         let _ = std::fs::remove_dir_all(dir);
     }

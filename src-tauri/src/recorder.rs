@@ -53,7 +53,14 @@ pub struct RecorderStatus {
 
 impl RecorderStatus {
     fn new(state: RecState) -> Self {
-        Self { state, encoder: None, message: None, audio_warning: None, hotkey_error: None, game: None }
+        Self {
+            state,
+            encoder: None,
+            message: None,
+            audio_warning: None,
+            hotkey_error: None,
+            game: None,
+        }
     }
 }
 
@@ -93,10 +100,13 @@ fn container_ext(c: Container) -> &'static str {
 /// A new clip's file: "Clip_2026-11-27_21-03-15.mp4" in the clip folder.
 fn new_clip_path(clip_root: &Path, ext: &str) -> Result<PathBuf, String> {
     let out_dir = clip_root.join(MY_CLIPS);
-    fs::create_dir_all(&out_dir).map_err(|e| format!("Could not create {}: {e}", out_dir.display()))?;
+    fs::create_dir_all(&out_dir)
+        .map_err(|e| format!("Could not create {}: {e}", out_dir.display()))?;
     let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
     let stamp = now
-        .format(time::macros::format_description!("[year]-[month]-[day]_[hour]-[minute]-[second]"))
+        .format(time::macros::format_description!(
+            "[year]-[month]-[day]_[hour]-[minute]-[second]"
+        ))
         .unwrap_or_else(|_| now_ms().to_string());
     let mut out = out_dir.join(format!("Clip_{stamp}.{ext}"));
     let mut n = 2;
@@ -112,7 +122,10 @@ fn new_clip_path(clip_root: &Path, ext: &str) -> Result<PathBuf, String> {
 fn obs_output_size(screen: (u32, u32), r: crate::settings::Resolution) -> (u32, u32) {
     let even = |v: u32| v & !1;
     match ffmpeg::target_height(r).filter(|h| *h < screen.1) {
-        Some(h) => (even((u64::from(screen.0) * u64::from(h) / u64::from(screen.1)) as u32), even(h)),
+        Some(h) => (
+            even((u64::from(screen.0) * u64::from(h) / u64::from(screen.1)) as u32),
+            even(h),
+        ),
         None => (even(screen.0), even(screen.1)),
     }
 }
@@ -121,14 +134,25 @@ fn obs_output_size(screen: (u32, u32), r: crate::settings::Resolution) -> (u32, 
 fn same_capture(a: Option<&crate::obs::Capture>, b: Option<&crate::obs::Capture>) -> bool {
     let near = |x: (u32, u32), y: (u32, u32)| x.0.abs_diff(y.0) <= 8 && x.1.abs_diff(y.1) <= 8;
     match (a, b) {
-        (Some(a), Some(b)) => near(a.size, b.size) && near(a.out_size, b.out_size) && crate::obs::Capture { size: b.size, out_size: b.out_size, ..a.clone() } == *b,
+        (Some(a), Some(b)) => {
+            near(a.size, b.size)
+                && near(a.out_size, b.out_size)
+                && crate::obs::Capture {
+                    size: b.size,
+                    out_size: b.out_size,
+                    ..a.clone()
+                } == *b
+        }
         (None, None) => true,
         _ => false,
     }
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn run_ffmpeg(ffmpeg: &Path, args: &[String]) -> Result<(), String> {
@@ -143,8 +167,16 @@ fn run_ffmpeg(ffmpeg: &Path, args: &[String]) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
-        let text: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(400).collect();
-        Err(if text.is_empty() { format!("FFmpeg stopped ({}) without saying why", out.status) } else { text })
+        let text: String = String::from_utf8_lossy(&out.stderr)
+            .trim()
+            .chars()
+            .take(400)
+            .collect();
+        Err(if text.is_empty() {
+            format!("FFmpeg stopped ({}) without saying why", out.status)
+        } else {
+            text
+        })
     }
 }
 
@@ -212,7 +244,11 @@ impl Recorder {
     /// Shown while the single exe downloads FFmpeg (`failed`: it couldn't, and will retry).
     pub fn show_tools_status(&self, message: String, failed: bool) {
         self.set_status(|s| {
-            s.state = if failed { RecState::NoFfmpeg } else { RecState::Starting };
+            s.state = if failed {
+                RecState::NoFfmpeg
+            } else {
+                RecState::Starting
+            };
             s.message = Some(message);
         });
     }
@@ -237,7 +273,10 @@ impl Recorder {
         crate::procs::end_leftover_ffmpeg();
         let Some(path) = ffmpeg::locate() else {
             self.set_status(|s| {
-                *s = RecorderStatus { message: Some("FFmpeg is missing. Reinstall CrossPOV.".into()), ..RecorderStatus::new(RecState::NoFfmpeg) };
+                *s = RecorderStatus {
+                    message: Some("FFmpeg is missing. Reinstall CrossPOV.".into()),
+                    ..RecorderStatus::new(RecState::NoFfmpeg)
+                };
             });
             return;
         };
@@ -253,23 +292,25 @@ impl Recorder {
         // else the screen below it.
         {
             let inner = self.inner.clone();
-            let _ = thread::Builder::new().name("game-in-front".into()).spawn(move || loop {
-                thread::sleep(Duration::from_millis(250));
-                let (obs, game) = {
-                    let i = inner.lock().unwrap_or_else(|e| e.into_inner());
-                    (i.obs.clone(), i.status.game.clone())
-                };
-                let Some(obs) = obs else { continue };
-                let in_front = game.as_ref().map(|g| !games::covered(g));
-                // Busy (OBS is being set up): next time.
-                let locked = obs.try_lock();
-                if let Ok(mut o) = locked {
-                    o.hide_own_windows();
-                    if let Some(in_front) = in_front {
-                        o.show_game(in_front);
+            let _ = thread::Builder::new()
+                .name("game-in-front".into())
+                .spawn(move || loop {
+                    thread::sleep(Duration::from_millis(250));
+                    let (obs, game) = {
+                        let i = inner.lock().unwrap_or_else(|e| e.into_inner());
+                        (i.obs.clone(), i.status.game.clone())
+                    };
+                    let Some(obs) = obs else { continue };
+                    let in_front = game.as_ref().map(|g| !games::covered(g));
+                    // Busy (OBS is being set up): next time.
+                    let locked = obs.try_lock();
+                    if let Ok(mut o) = locked {
+                        o.hide_own_windows();
+                        if let Some(in_front) = in_front {
+                            o.show_game(in_front);
+                        }
                     }
-                }
-            });
+                });
         }
 
         let always = std::env::var("CROSSPOV_ALWAYS_RECORD").is_ok_and(|v| v == "1");
@@ -327,12 +368,16 @@ impl Recorder {
             }
         }
         if inner.obs.is_none() {
-            if inner.obs_failed.is_some_and(|t| t.elapsed() < Duration::from_secs(30)) {
+            if inner
+                .obs_failed
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(30))
+            {
                 return;
             }
             let Some(dir) = crate::tools::obs_dir() else {
                 inner.status.state = RecState::Starting;
-                inner.status.message = Some("Getting the recorder ready (one-time download)…".into());
+                inner.status.message =
+                    Some("Getting the recorder ready (one-time download)…".into());
                 let status = inner.status.clone();
                 drop(inner);
                 self.send(&status);
@@ -350,7 +395,9 @@ impl Recorder {
                     inner.obs_failed = None;
                 }
                 Err(e) => {
-                    crate::trail(&format!("recording: OBS couldn't start ({e}); trying again in 30 s"));
+                    crate::trail(&format!(
+                        "recording: OBS couldn't start ({e}); trying again in 30 s"
+                    ));
                     inner.obs_failed = Some(Instant::now());
                     inner.status.state = RecState::Error;
                     inner.status.message = Some(format!("The recorder couldn't start: {e}"));
@@ -364,27 +411,52 @@ impl Recorder {
 
         // What it should record now.
         let desired = game.as_ref().filter(|_| want).map(|g| {
-            let size = if game_only { g.window_size.or(g.screen_size) } else { g.screen_size }.unwrap_or((1920, 1080));
+            let size = if game_only {
+                g.window_size.or(g.screen_size)
+            } else {
+                g.screen_size
+            }
+            .unwrap_or((1920, 1080));
             crate::obs::Capture {
                 source: if game_only {
-                    crate::obs::Source::Game { exe: g.exe.clone(), class: crate::obs::window_names(g.hwnd).1 }
+                    crate::obs::Source::Game {
+                        exe: g.exe.clone(),
+                        class: crate::obs::window_names(g.hwnd).1,
+                    }
                 } else {
-                    crate::obs::Source::Screen { origin: g.screen_origin, game: (g.hwnd != 0).then(|| (g.exe.clone(), crate::obs::window_names(g.hwnd).1)) }
+                    crate::obs::Source::Screen {
+                        origin: g.screen_origin,
+                        game: (g.hwnd != 0)
+                            .then(|| (g.exe.clone(), crate::obs::window_names(g.hwnd).1)),
+                    }
                 },
                 size,
                 out_size: obs_output_size(size, settings.resolution),
                 fps: settings.fps,
-                game_audio: settings.game_audio.then(|| settings.game_volume as f32 / 100.0),
+                game_audio: settings
+                    .game_audio
+                    .then(|| settings.game_volume as f32 / 100.0),
                 desktop_audio: settings.audio_mode == crate::settings::AudioMode::Desktop,
-                apps: settings.apps.iter().filter(|a| a.enabled).map(|a| (a.exe.clone(), a.volume as f32 / 100.0)).collect(),
-                mic: settings.microphone.then(|| settings.mic_volume as f32 / 100.0),
+                apps: settings
+                    .apps
+                    .iter()
+                    .filter(|a| a.enabled)
+                    .map(|a| (a.exe.clone(), a.volume as f32 / 100.0))
+                    .collect(),
+                mic: settings
+                    .microphone
+                    .then(|| settings.mic_volume as f32 / 100.0),
                 mic_device: settings.mic_device.clone(),
                 denoise_mic: settings.microphone && settings.mic_noise_suppression,
                 separate_tracks: settings.microphone && settings.separate_tracks,
             }
         });
         let Some(obs) = inner.obs.clone() else { return };
-        let current = obs.lock().unwrap_or_else(|e| e.into_inner()).capture.clone();
+        let current = obs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .capture
+            .clone();
         // A line or two of size wobble (VALORANT reports 1080, then 1079)
         // isn't worth starting over: that would empty the replay buffer.
         if !same_capture(desired.as_ref(), current.as_ref()) {
@@ -392,7 +464,11 @@ impl Recorder {
                 Some(c) => crate::trail(&format!(
                     "recording: {} with OBS {} ({}) {}x{} -> {}x{}, {} fps, {} Mbps",
                     game.as_ref().map_or("", |g| g.exe.as_str()),
-                    if game_only { "Game Capture" } else { "Display Capture" },
+                    if game_only {
+                        "Game Capture"
+                    } else {
+                        "Display Capture"
+                    },
                     encoder.label(),
                     c.size.0,
                     c.size.1,
@@ -403,19 +479,41 @@ impl Recorder {
                 )),
                 None => crate::trail("recording: stopped (game closed)"),
             }
-            let title = game.as_ref().map(|g| crate::obs::window_names(g.hwnd).0).unwrap_or_default();
+            let title = game
+                .as_ref()
+                .map(|g| crate::obs::window_names(g.hwnd).0)
+                .unwrap_or_default();
             drop(inner);
-            let applied = obs.lock().unwrap_or_else(|e| e.into_inner()).apply(desired.clone(), &title);
+            let applied = obs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .apply(desired.clone(), &title);
             inner = self.lock();
             if let Err(e) = applied {
-                crate::trail(&format!("recording: OBS couldn't record ({e}); restarting it"));
+                crate::trail(&format!(
+                    "recording: OBS couldn't record ({e}); restarting it"
+                ));
                 inner.obs = None;
                 inner.obs_failed = Some(Instant::now());
             }
         }
         let recording = inner.obs.is_some() && desired.is_some();
-        inner.status.state = if recording { RecState::Recording } else { RecState::Waiting };
-        inner.status.encoder = recording.then(|| format!("OBS {} ({})", if game_only { "Game Capture" } else { "Display Capture" }, encoder.label()));
+        inner.status.state = if recording {
+            RecState::Recording
+        } else {
+            RecState::Waiting
+        };
+        inner.status.encoder = recording.then(|| {
+            format!(
+                "OBS {} ({})",
+                if game_only {
+                    "Game Capture"
+                } else {
+                    "Display Capture"
+                },
+                encoder.label()
+            )
+        });
         inner.status.message = None;
         let status = inner.status.clone();
         drop(inner);
@@ -424,23 +522,45 @@ impl Recorder {
 
     /// FFmpeg and the encoder it found, once known (used to cut clips too).
     pub fn ffmpeg_tools(&self) -> Option<(PathBuf, VideoEncoder)> {
-        self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.ffmpeg
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Saves the last `buffer_seconds` as a clip.
     pub fn save_clip(&self, clip_root: &Path) -> Result<ClipInfo, String> {
         let (obs, settings, game) = {
             let inner = self.lock();
-            let obs = inner.obs.clone().filter(|_| inner.status.state == RecState::Recording);
-            (obs, inner.settings.clone(), inner.status.game.as_ref().map(|g| g.name.clone()))
+            let obs = inner
+                .obs
+                .clone()
+                .filter(|_| inner.status.state == RecState::Recording);
+            (
+                obs,
+                inner.settings.clone(),
+                inner.status.game.as_ref().map(|g| g.name.clone()),
+            )
         };
         let obs = obs.ok_or("Not recording right now. Clips are saved while a game is open.")?;
         self.save_obs_clip(clip_root, &obs, &settings, game.filter(|g| !g.is_empty()))
     }
 
     /// F9 while OBS records: OBS saves its replay buffer, which becomes the clip.
-    fn save_obs_clip(&self, clip_root: &Path, session: &Mutex<crate::obs::Obs>, settings: &Settings, game: Option<String>) -> Result<ClipInfo, String> {
-        let ffmpeg_path = self.ffmpeg.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, _)| p.clone()).ok_or("FFmpeg not ready")?;
+    fn save_obs_clip(
+        &self,
+        clip_root: &Path,
+        session: &Mutex<crate::obs::Obs>,
+        settings: &Settings,
+        game: Option<String>,
+    ) -> Result<ClipInfo, String> {
+        let ffmpeg_path = self
+            .ffmpeg
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|(p, _)| p.clone())
+            .ok_or("FFmpeg not ready")?;
         let saved = {
             let mut s = session.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(h) = s.health() {
@@ -451,7 +571,11 @@ impl Recorder {
             }
             s.save_replay()?
         };
-        let ext = saved.extension().and_then(|e| e.to_str()).unwrap_or(container_ext(settings.format)).to_string();
+        let ext = saved
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or(container_ext(settings.format))
+            .to_string();
         let out = new_clip_path(clip_root, &ext)?;
         // OBS writes an MP4's index at the end; the app's player loads clips in
         // pieces and stutters on that (VLC doesn't mind). Copy it into the
@@ -466,30 +590,57 @@ impl Recorder {
             fs::copy(&saved, &out).map_err(|e| format!("Could not save clip: {e}"))?;
             let _ = fs::remove_file(&saved);
         }
-        Ok(Self::finish_clip(clip_root, &out, &ffmpeg_path, settings, game, f64::from(settings.buffer_seconds)))
+        Ok(Self::finish_clip(
+            clip_root,
+            &out,
+            &ffmpeg_path,
+            settings,
+            game,
+            f64::from(settings.buffer_seconds),
+        ))
     }
 
     /// Thumbnail, details and storage limit for a saved clip.
-    fn finish_clip(clip_root: &Path, out: &Path, ffmpeg_path: &Path, settings: &Settings, game: Option<String>, duration: f64) -> ClipInfo {
+    fn finish_clip(
+        clip_root: &Path,
+        out: &Path,
+        ffmpeg_path: &Path,
+        settings: &Settings,
+        game: Option<String>,
+        duration: f64,
+    ) -> ClipInfo {
         let thumb = clips::thumb_path(clip_root, out);
         if let Some(dir) = thumb.parent() {
             let _ = fs::create_dir_all(dir);
         }
         let _ = run_ffmpeg(ffmpeg_path, &ffmpeg::thumbnail_args(out, &thumb));
-        clips::write_meta(clip_root, out, &ClipMeta { duration_sec: Some(duration), game: game.clone(), ..ClipMeta::default() });
+        clips::write_meta(
+            clip_root,
+            out,
+            &ClipMeta {
+                duration_sec: Some(duration),
+                game: game.clone(),
+                ..ClipMeta::default()
+            },
+        );
         if settings.prune_oldest {
             clips::prune(clip_root, settings.storage_limit_gb);
         }
 
         let size = fs::metadata(out).map(|m| m.len()).unwrap_or(0);
         ClipInfo {
-            name: out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            name: out
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             path: out.to_string_lossy().into_owned(),
             kind: clips::ClipKind::Mine,
             size_bytes: size,
             created_ms: now_ms(),
             duration_sec: Some(duration),
-            thumb: thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+            thumb: thumb
+                .is_file()
+                .then(|| thumb.to_string_lossy().into_owned()),
             streamer: None,
             round: None,
             moment: None,
@@ -511,8 +662,18 @@ mod tests {
 
     #[test]
     fn output_size_shrinks_to_the_chosen_height() {
-        assert_eq!(obs_output_size((2560, 1440), Resolution::P1080), (1920, 1080));
-        assert_eq!(obs_output_size((1568, 1080), Resolution::P1080), (1568, 1080), "never enlarged");
-        assert_eq!(obs_output_size((1920, 1080), Resolution::Native), (1920, 1080));
+        assert_eq!(
+            obs_output_size((2560, 1440), Resolution::P1080),
+            (1920, 1080)
+        );
+        assert_eq!(
+            obs_output_size((1568, 1080), Resolution::P1080),
+            (1568, 1080),
+            "never enlarged"
+        );
+        assert_eq!(
+            obs_output_size((1920, 1080), Resolution::Native),
+            (1920, 1080)
+        );
     }
 }

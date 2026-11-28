@@ -20,14 +20,22 @@ const NONE: &str = "<none>";
 /// Where 0.6.8/0.6.9 kept the game's original value: the .exe path, then the value.
 fn saved_original(exe: &str) -> Option<PathBuf> {
     let dir = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(dir).join("app.crosspov.desktop").join(format!("windowed-optimizations-{}.txt", exe.to_lowercase())))
+    Some(
+        PathBuf::from(dir)
+            .join("app.crosspov.desktop")
+            .join(format!("windowed-optimizations-{}.txt", exe.to_lowercase())),
+    )
 }
 
 /// Puts back every game's original setting, if CrossPOV changed it.
 pub fn restore() {
     for exe in GAMES {
-        let Some(saved) = saved_original(exe) else { continue };
-        let Ok(text) = std::fs::read_to_string(&saved) else { continue };
+        let Some(saved) = saved_original(exe) else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(&saved) else {
+            continue;
+        };
         let mut lines = text.lines();
         let (Some(path), Some(original)) = (lines.next(), lines.next()) else {
             let _ = std::fs::remove_file(&saved);
@@ -36,9 +44,13 @@ pub fn restore() {
         match put_back(path, original) {
             Ok(()) => {
                 let _ = std::fs::remove_file(&saved);
-                crate::trail(&format!("{exe}: put back Windows' \"Optimizations for windowed games\" as it was"));
+                crate::trail(&format!(
+                    "{exe}: put back Windows' \"Optimizations for windowed games\" as it was"
+                ));
             }
-            Err(e) => crate::trail(&format!("{exe}: couldn't put back \"Optimizations for windowed games\" ({e})")),
+            Err(e) => crate::trail(&format!(
+                "{exe}: couldn't put back \"Optimizations for windowed games\" ({e})"
+            )),
         }
     }
 }
@@ -46,9 +58,20 @@ pub fn restore() {
 #[cfg(windows)]
 fn put_back(path: &str, original: &str) -> Result<(), String> {
     use crate::ffmpeg::NoWindow;
-    let args: Vec<&str> = if original == NONE { vec!["delete", KEY, "/v", path, "/f"] } else { vec!["add", KEY, "/v", path, "/t", "REG_SZ", "/d", original, "/f"] };
-    let out = std::process::Command::new("reg").args(&args).no_window().output().map_err(|e| e.to_string())?;
-    out.status.success().then_some(()).ok_or_else(|| String::from_utf8_lossy(&out.stderr).trim().to_string())
+    let args: Vec<&str> = if original == NONE {
+        vec!["delete", KEY, "/v", path, "/f"]
+    } else {
+        vec!["add", KEY, "/v", path, "/t", "REG_SZ", "/d", original, "/f"]
+    };
+    let out = std::process::Command::new("reg")
+        .args(&args)
+        .no_window()
+        .output()
+        .map_err(|e| e.to_string())?;
+    out.status
+        .success()
+        .then_some(())
+        .ok_or_else(|| String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
 #[cfg(not(windows))]

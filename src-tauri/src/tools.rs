@@ -38,7 +38,9 @@ pub struct Tool {
 impl Tool {
     /// "ffmpeg" of "ffmpeg.exe", "obs-slim" of "obs-slim.zip".
     fn stem(&self) -> &'static str {
-        self.name.rsplit_once('.').map_or(self.name, |(stem, _)| stem)
+        self.name
+            .rsplit_once('.')
+            .map_or(self.name, |(stem, _)| stem)
     }
 
     /// ".exe", ".zip".
@@ -62,8 +64,14 @@ impl Tool {
 
 #[cfg(feature = "single-exe")]
 const TOOLS: &[Tool] = &[
-    Tool { name: "ffmpeg.exe", sha256: env!("CROSSPOV_FFMPEG_SHA256") },
-    Tool { name: "yt-dlp.exe", sha256: env!("CROSSPOV_YTDLP_SHA256") },
+    Tool {
+        name: "ffmpeg.exe",
+        sha256: env!("CROSSPOV_FFMPEG_SHA256"),
+    },
+    Tool {
+        name: "yt-dlp.exe",
+        sha256: env!("CROSSPOV_YTDLP_SHA256"),
+    },
 ];
 #[cfg(not(feature = "single-exe"))]
 const TOOLS: &[Tool] = &[];
@@ -72,7 +80,10 @@ const TOOLS: &[Tool] = &[];
 /// unpacked next to itself once checked. Downloaded on its own, after the
 /// tools above, so recording never waits for it.
 #[cfg(feature = "single-exe")]
-const OBS: Option<Tool> = Some(Tool { name: "obs-slim.zip", sha256: env!("CROSSPOV_OBS_SHA256") });
+const OBS: Option<Tool> = Some(Tool {
+    name: "obs-slim.zip",
+    sha256: env!("CROSSPOV_OBS_SHA256"),
+});
 #[cfg(not(feature = "single-exe"))]
 const OBS: Option<Tool> = None;
 
@@ -93,7 +104,11 @@ fn root() -> Option<&'static Path> {
 /// Path of a ready tool, e.g. "ffmpeg.exe". None until it's downloaded, and always None without the feature.
 pub fn get(name: &str) -> Option<PathBuf> {
     let root = root()?;
-    TOOLS.iter().find(|t| t.name == name).map(|t| t.path(root)).filter(|p| p.is_file())
+    TOOLS
+        .iter()
+        .find(|t| t.name == name)
+        .map(|t| t.path(root))
+        .filter(|p| p.is_file())
 }
 
 /// The slim OBS's folder (holding bin\64bit\obs64.exe), once downloaded,
@@ -101,7 +116,8 @@ pub fn get(name: &str) -> Option<PathBuf> {
 pub fn obs_dir() -> Option<PathBuf> {
     let (tool, root) = (OBS?, root()?);
     let dir = obs_unpacked(&tool, root);
-    (dir.join(UNPACKED).is_file() && dir.join("bin").join("64bit").join("obs64.exe").is_file()).then_some(dir)
+    (dir.join(UNPACKED).is_file() && dir.join("bin").join("64bit").join("obs64.exe").is_file())
+        .then_some(dir)
 }
 
 /// Marks a complete unpack (an interrupted one is unpacked again).
@@ -114,7 +130,9 @@ fn obs_unpacked(tool: &Tool, root: &Path) -> PathBuf {
 /// Gets the slim OBS ready: downloads and checks it if needed (from
 /// crosspov.com, else GitHub), then unpacks it. Ok(true) if it's ready.
 pub fn prepare_obs() -> Result<bool, String> {
-    let (Some(tool), Some(root)) = (OBS, root()) else { return Ok(false) };
+    let (Some(tool), Some(root)) = (OBS, root()) else {
+        return Ok(false);
+    };
     if obs_dir().is_some() {
         return Ok(true);
     }
@@ -144,7 +162,10 @@ fn unpack(zip: &Path, dir: &Path) -> Result<(), String> {
         .output()
         .map_err(|e| format!("Couldn't unpack OBS: {e}"))?;
     if !out.status.success() {
-        return Err(format!("Couldn't unpack OBS: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "Couldn't unpack OBS: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     fs::write(dir.join(UNPACKED), b"").map_err(|e| e.to_string())
 }
@@ -161,8 +182,13 @@ pub fn ffmpeg_root() -> Option<PathBuf> {
 }
 
 pub fn dirs() -> Vec<PathBuf> {
-    let Some(root) = root() else { return Vec::new() };
-    TOOLS.iter().filter_map(|t| t.path(root).parent().map(Path::to_path_buf)).collect()
+    let Some(root) = root() else {
+        return Vec::new();
+    };
+    TOOLS
+        .iter()
+        .filter_map(|t| t.path(root).parent().map(Path::to_path_buf))
+        .collect()
 }
 
 fn sha256_file(path: &Path) -> Option<String> {
@@ -189,14 +215,25 @@ pub fn missing() -> Vec<Tool> {
 }
 
 fn missing_in(tools: &[Tool], root: Option<&Path>) -> Vec<Tool> {
-    let Some(root) = root else { return tools.to_vec() };
-    tools.iter().copied().filter(|t| !verified(t, root)).collect()
+    let Some(root) = root else {
+        return tools.to_vec();
+    };
+    tools
+        .iter()
+        .copied()
+        .filter(|t| !verified(t, root))
+        .collect()
 }
 
 /// "size modified-time" of a file, to notice if it changed since it was checked.
 fn stamp(path: &Path) -> Option<String> {
     let m = fs::metadata(path).ok()?;
-    let modified = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    let modified = m
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
     Some(format!("{} {modified}", m.len()))
 }
 
@@ -206,7 +243,9 @@ fn stamp(path: &Path) -> Option<String> {
 fn verified(t: &Tool, root: &Path) -> bool {
     let path = t.path(root);
     let note = path.with_file_name(format!("{}.checked", t.name));
-    let Some(now) = stamp(&path) else { return false };
+    let Some(now) = stamp(&path) else {
+        return false;
+    };
     if fs::read_to_string(&note).ok().as_deref() == Some(now.as_str()) {
         return true;
     }
@@ -232,40 +271,67 @@ pub fn download(progress: Progress) -> Result<(), String> {
     })
 }
 
-fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent, progress: Progress) -> Result<(), String> {
+fn download_in(
+    tools: &[Tool],
+    root: &Path,
+    base_url: &str,
+    agent: &ureq::Agent,
+    progress: Progress,
+) -> Result<(), String> {
     let todo = missing_in(tools, Some(root));
     // Sizes first, for one progress bar over everything.
     let mut total = 0u64;
     let mut done = 0u64;
     for tool in &todo {
         let url = format!("{base_url}/{}", tool.asset());
-        let res = agent.get(&url).call().map_err(|e| format!("Couldn't download {}. Check your internet connection. ({e})", tool.name))?;
+        let res = agent.get(&url).call().map_err(|e| {
+            format!(
+                "Couldn't download {}. Check your internet connection. ({e})",
+                tool.name
+            )
+        })?;
         if res.status() != 200 {
-            return Err(format!("Couldn't download {} (the server answered {}).", tool.name, res.status()));
+            return Err(format!(
+                "Couldn't download {} (the server answered {}).",
+                tool.name,
+                res.status()
+            ));
         }
-        total += res.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0);
+        total += res
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
         let path = tool.path(root);
         let dir = path.parent().ok_or("bad tool path")?;
         fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
         let part = dir.join(format!("{}.part", tool.name));
-        let mut out = fs::File::create(&part).map_err(|e| format!("Couldn't save {}: {e}", tool.name))?;
+        let mut out =
+            fs::File::create(&part).map_err(|e| format!("Couldn't save {}: {e}", tool.name))?;
         let mut body = res.into_body().into_reader();
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 1 << 16];
         loop {
-            let n = body.read(&mut buf).map_err(|e| format!("Download of {} was interrupted: {e}", tool.name))?;
+            let n = body
+                .read(&mut buf)
+                .map_err(|e| format!("Download of {} was interrupted: {e}", tool.name))?;
             if n == 0 {
                 break;
             }
             h.update(&buf[..n]);
-            out.write_all(&buf[..n]).map_err(|e| format!("Couldn't save {}: {e}", tool.name))?;
+            out.write_all(&buf[..n])
+                .map_err(|e| format!("Couldn't save {}: {e}", tool.name))?;
             done += n as u64;
             progress(done, total.max(done));
         }
         drop(out);
         if hex(&h.finalize()) != tool.sha256 {
             let _ = fs::remove_file(&part);
-            return Err(format!("The downloaded {} didn't match the expected file, so it wasn't used.", tool.name));
+            return Err(format!(
+                "The downloaded {} didn't match the expected file, so it wasn't used.",
+                tool.name
+            ));
         }
         // Rename into place only once it's complete and checked.
         let _ = fs::remove_file(&path);
@@ -281,7 +347,9 @@ fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent,
 /// Deletes other versions of each tool (best effort: one may still be running).
 fn remove_old(tools: &[Tool], root: &Path) {
     for tool in tools {
-        let Ok(entries) = fs::read_dir(root.join(tool.stem())) else { continue };
+        let Ok(entries) = fs::read_dir(root.join(tool.stem())) else {
+            continue;
+        };
         for e in entries.flatten() {
             if e.file_name().to_string_lossy() != tool.short() {
                 let _ = fs::remove_dir_all(e.path());
@@ -334,7 +402,10 @@ mod tests {
                 let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
                 match files.iter().find(|(p, _)| *p == path) {
                     Some((_, body)) => {
-                        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                        let head = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
                         let _ = s.write_all(head.as_bytes());
                         let _ = s.write_all(body);
                     }
@@ -348,7 +419,10 @@ mod tests {
     }
 
     fn plain_agent() -> ureq::Agent {
-        ureq::Agent::config_builder().http_status_as_error(false).build().into()
+        ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into()
     }
 
     fn temp_root(tag: &str) -> PathBuf {
@@ -361,39 +435,76 @@ mod tests {
     fn downloads_checks_and_keeps_tools_between_versions() {
         let body = b"pretend ffmpeg".repeat(5000);
         let hash: &'static str = Box::leak(sha(&body).into_boxed_str());
-        let tool = Tool { name: "ffmpeg.exe", sha256: hash };
+        let tool = Tool {
+            name: "ffmpeg.exe",
+            sha256: hash,
+        };
         let root = temp_root("ok");
         // Leftovers of an older version and of the old packed-in tools.
         fs::create_dir_all(root.join("ffmpeg").join("0000000000000000")).unwrap();
         fs::create_dir_all(root.join("0.1.4")).unwrap();
         let base = serve(vec![(format!("/{}", tool.asset()), body.clone())], 1);
         let mut seen = (0, 0);
-        download_in(&[tool], &root, &base, &plain_agent(), &mut |d, t| seen = (d, t)).unwrap();
+        download_in(&[tool], &root, &base, &plain_agent(), &mut |d, t| {
+            seen = (d, t)
+        })
+        .unwrap();
         assert_eq!(fs::read(tool.path(&root)).unwrap(), body);
-        assert_eq!(seen, (body.len() as u64, body.len() as u64), "progress reaches the end");
+        assert_eq!(
+            seen,
+            (body.len() as u64, body.len() as u64),
+            "progress reaches the end"
+        );
         assert!(missing_in(&[tool], Some(&root)).is_empty());
-        assert!(tool.path(&root).with_file_name("ffmpeg.exe.checked").exists(), "checked once, noted");
+        assert!(
+            tool.path(&root)
+                .with_file_name("ffmpeg.exe.checked")
+                .exists(),
+            "checked once, noted"
+        );
         // Changing the file (another size) is noticed despite the note.
         fs::write(tool.path(&root), b"swapped").unwrap();
         assert_eq!(missing_in(&[tool], Some(&root)), vec![tool]);
         fs::write(tool.path(&root), &body).unwrap();
-        assert!(missing_in(&[tool], Some(&root)).is_empty(), "the right file again: fine");
-        assert!(!root.join("ffmpeg").join("0000000000000000").exists(), "old version removed");
+        assert!(
+            missing_in(&[tool], Some(&root)).is_empty(),
+            "the right file again: fine"
+        );
+        assert!(
+            !root.join("ffmpeg").join("0000000000000000").exists(),
+            "old version removed"
+        );
         assert!(!root.join("0.1.4").exists(), "old packed-in tools removed");
         // Already there: nothing is downloaded (the server would refuse a second request).
-        download_in(&[tool], &root, "http://127.0.0.1:9", &plain_agent(), &mut |_, _| {}).unwrap();
+        download_in(
+            &[tool],
+            &root,
+            "http://127.0.0.1:9",
+            &plain_agent(),
+            &mut |_, _| {},
+        )
+        .unwrap();
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_file_that_doesnt_match_is_never_used() {
-        let tool = Tool { name: "yt-dlp.exe", sha256: "00000000000000000000000000000000000000000000000000000000000000ff" };
+        let tool = Tool {
+            name: "yt-dlp.exe",
+            sha256: "00000000000000000000000000000000000000000000000000000000000000ff",
+        };
         let root = temp_root("bad");
-        let base = serve(vec![(format!("/{}", tool.asset()), b"something else".to_vec())], 1);
+        let base = serve(
+            vec![(format!("/{}", tool.asset()), b"something else".to_vec())],
+            1,
+        );
         let err = download_in(&[tool], &root, &base, &plain_agent(), &mut |_, _| {}).unwrap_err();
         assert!(err.contains("didn't match"), "{err}");
         assert!(!tool.path(&root).exists());
-        assert!(!tool.path(&root).with_file_name("yt-dlp.exe.part").exists(), "partial file cleaned up");
+        assert!(
+            !tool.path(&root).with_file_name("yt-dlp.exe.part").exists(),
+            "partial file cleaned up"
+        );
         // A tampered file on disk counts as missing.
         fs::create_dir_all(tool.path(&root).parent().unwrap()).unwrap();
         fs::write(tool.path(&root), b"tampered").unwrap();
@@ -403,7 +514,10 @@ mod tests {
 
     #[test]
     fn missing_file_on_the_server_is_a_clear_error() {
-        let tool = Tool { name: "ffmpeg.exe", sha256: "1111111111111111111111111111111111111111111111111111111111111111" };
+        let tool = Tool {
+            name: "ffmpeg.exe",
+            sha256: "1111111111111111111111111111111111111111111111111111111111111111",
+        };
         let root = temp_root("404");
         let base = serve(vec![], 1);
         let err = download_in(&[tool], &root, &base, &plain_agent(), &mut |_, _| {}).unwrap_err();
@@ -413,11 +527,29 @@ mod tests {
 
     #[test]
     fn asset_names_carry_the_fingerprint() {
-        let t = Tool { name: "yt-dlp.exe", sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" };
+        let t = Tool {
+            name: "yt-dlp.exe",
+            sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        };
         assert_eq!(t.asset(), "yt-dlp-abcdef0123456789.exe");
-        assert_eq!(t.path(Path::new("R")), Path::new("R").join("yt-dlp").join("abcdef0123456789").join("yt-dlp.exe"));
-        let obs = Tool { name: "obs-slim.zip", ..t };
+        assert_eq!(
+            t.path(Path::new("R")),
+            Path::new("R")
+                .join("yt-dlp")
+                .join("abcdef0123456789")
+                .join("yt-dlp.exe")
+        );
+        let obs = Tool {
+            name: "obs-slim.zip",
+            ..t
+        };
         assert_eq!(obs.asset(), "obs-slim-abcdef0123456789.zip");
-        assert_eq!(obs.path(Path::new("R")), Path::new("R").join("obs-slim").join("abcdef0123456789").join("obs-slim.zip"));
+        assert_eq!(
+            obs.path(Path::new("R")),
+            Path::new("R")
+                .join("obs-slim")
+                .join("abcdef0123456789")
+                .join("obs-slim.zip")
+        );
     }
 }

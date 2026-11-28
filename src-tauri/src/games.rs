@@ -99,15 +99,60 @@ pub const KNOWN_GAMES: &[(&str, &str)] = &[
 /// Apps that go fullscreen but aren't games: browsers, video players,
 /// launchers, chat, Windows itself. Never picked up as "fullscreen = game".
 const NOT_GAMES: &[&str] = &[
-    "explorer.exe", "crosspov.exe", "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
-    "brave.exe", "vivaldi.exe", "arc.exe", "vlc.exe", "mpc-hc64.exe", "mpc-be64.exe", "wmplayer.exe",
-    "potplayermini64.exe", "mpv.exe", "applicationframehost.exe", "discord.exe", "obs64.exe", "steam.exe",
-    "steamwebhelper.exe", "epicgameslauncher.exe", "battle.net.exe", "riotclientservices.exe", "riotclientux.exe",
-    "leagueclientux.exe", "eadesktop.exe", "ubisoftconnect.exe", "upc.exe", "galaxyclient.exe", "medal.exe",
-    "shellexperiencehost.exe", "startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "lockapp.exe",
-    "textinputhost.exe", "powerpnt.exe", "spotify.exe", "zoom.exe", "teams.exe", "ms-teams.exe", "slack.exe",
-    "code.exe", "windowsterminal.exe", "nvidia overlay.exe", "nvcontainer.exe", "gamebar.exe", "taskmgr.exe",
-    "netflix.exe", "photos.exe", "microsoft.photos.exe", "snippingtool.exe", "screenclippinghost.exe",
+    "explorer.exe",
+    "crosspov.exe",
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "opera.exe",
+    "opera_gx.exe",
+    "brave.exe",
+    "vivaldi.exe",
+    "arc.exe",
+    "vlc.exe",
+    "mpc-hc64.exe",
+    "mpc-be64.exe",
+    "wmplayer.exe",
+    "potplayermini64.exe",
+    "mpv.exe",
+    "applicationframehost.exe",
+    "discord.exe",
+    "obs64.exe",
+    "steam.exe",
+    "steamwebhelper.exe",
+    "epicgameslauncher.exe",
+    "battle.net.exe",
+    "riotclientservices.exe",
+    "riotclientux.exe",
+    "leagueclientux.exe",
+    "eadesktop.exe",
+    "ubisoftconnect.exe",
+    "upc.exe",
+    "galaxyclient.exe",
+    "medal.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "searchhost.exe",
+    "searchapp.exe",
+    "lockapp.exe",
+    "textinputhost.exe",
+    "powerpnt.exe",
+    "spotify.exe",
+    "zoom.exe",
+    "teams.exe",
+    "ms-teams.exe",
+    "slack.exe",
+    "code.exe",
+    "windowsterminal.exe",
+    "nvidia overlay.exe",
+    "nvcontainer.exe",
+    "gamebar.exe",
+    "taskmgr.exe",
+    "netflix.exe",
+    "photos.exe",
+    "microsoft.photos.exe",
+    "snippingtool.exe",
+    "screenclippinghost.exe",
 ];
 
 /// How a game was found.
@@ -163,7 +208,11 @@ pub struct Game {
 impl Game {
     /// "Record all the time" (for testing): the main screen, no game sound.
     pub fn desktop() -> Self {
-        Self { name: "Desktop".into(), found: Found::Yours, ..Self::default() }
+        Self {
+            name: "Desktop".into(),
+            found: Found::Yours,
+            ..Self::default()
+        }
     }
 }
 
@@ -180,8 +229,13 @@ fn ignored(s: &Settings, exe: &str) -> bool {
 
 /// Pretty name for a program: "Some Game.exe" -> "Some Game".
 pub fn display_name(exe: &str) -> String {
-    let base = exe.strip_suffix(".exe").or_else(|| exe.strip_suffix(".EXE")).unwrap_or(exe);
-    base.trim_end_matches("-Win64-Shipping").trim_end_matches("_x64").to_string()
+    let base = exe
+        .strip_suffix(".exe")
+        .or_else(|| exe.strip_suffix(".EXE"))
+        .unwrap_or(exe);
+    base.trim_end_matches("-Win64-Shipping")
+        .trim_end_matches("_x64")
+        .to_string()
 }
 
 /// The game being played right now, if any. Cheap enough to call every
@@ -192,51 +246,74 @@ pub fn detect(s: &Settings) -> Option<Game> {
     // 1-2: a game on the built-in list or yours, running now. One pass over
     // the process list, then a lookup per name.
     let running = procs::shared(|p| p.running_names());
-    let known = KNOWN_GAMES.iter().map(|(exe, name)| (exe.to_string(), name.to_string(), Found::Known));
-    let yours = s.custom_games.iter().map(|g| (g.exe.clone(), g.name.clone(), Found::Yours));
+    let known = KNOWN_GAMES
+        .iter()
+        .map(|(exe, name)| (exe.to_string(), name.to_string(), Found::Known));
+    let yours = s
+        .custom_games
+        .iter()
+        .map(|g| (g.exe.clone(), g.name.clone(), Found::Yours));
     // A listed game only counts with a visible window: some (Roblox, for one)
     // keep running in the background after you close them.
-    let listed = known.chain(yours).filter(|(exe, _, _)| running.contains(&exe.to_lowercase()) && !ignored(s, exe)).find_map(|(exe, name, found)| {
-        // Its window (and screen): looked up when it starts, then every 10 s
-        // (the window list and graphics-card query aren't free).
-        let same = current.as_ref().filter(|g| g.exe == exe);
-        let screen = match same {
-            Some(g) if SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < SCREEN_RECHECK) => Some(Spot {
-                output_idx: g.output_idx,
-                hmonitor: g.hmonitor,
-                screen_origin: g.screen_origin,
-                screen_height: g.screen_height,
-                screen_size: g.screen_size,
-                hwnd: g.hwnd,
-                window_size: g.window_size,
-                refresh_hz: g.refresh_hz,
-            }),
-            _ => {
-                *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-                let previous = same.filter(|g| g.hwnd != 0).map(|g| Spot {
-                    output_idx: g.output_idx,
-                    hmonitor: g.hmonitor,
-                    screen_origin: g.screen_origin,
-                    screen_height: g.screen_height,
-                    screen_size: g.screen_size,
-                    hwnd: g.hwnd,
-                    window_size: g.window_size,
-                    refresh_hz: g.refresh_hz,
-                });
-                match (window::screen_of_process(&exe), previous) {
-                    // Minimised (alt-tab out of exclusive fullscreen) the window
-                    // reports no size: keep the one it had.
-                    (Some(now), Some(before)) if now.hwnd == before.hwnd && now.window_size.is_none() => Some(Spot { window_size: before.window_size, ..now }),
-                    (Some(now), _) => Some(now),
-                    // No visible window big enough, but its window still exists
-                    // (minimised): still the game, keep recording.
-                    (None, Some(before)) if window::still_open(before.hwnd) => Some(before),
-                    (None, _) => None,
+    let listed = known
+        .chain(yours)
+        .filter(|(exe, _, _)| running.contains(&exe.to_lowercase()) && !ignored(s, exe))
+        .find_map(|(exe, name, found)| {
+            // Its window (and screen): looked up when it starts, then every 10 s
+            // (the window list and graphics-card query aren't free).
+            let same = current.as_ref().filter(|g| g.exe == exe);
+            let screen = match same {
+                Some(g)
+                    if SCREEN_CHECKED
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .is_some_and(|t| t.elapsed() < SCREEN_RECHECK) =>
+                {
+                    Some(Spot {
+                        output_idx: g.output_idx,
+                        hmonitor: g.hmonitor,
+                        screen_origin: g.screen_origin,
+                        screen_height: g.screen_height,
+                        screen_size: g.screen_size,
+                        hwnd: g.hwnd,
+                        window_size: g.window_size,
+                        refresh_hz: g.refresh_hz,
+                    })
                 }
-            }
-        };
-        screen.map(|spot| (exe, name, found, spot))
-    });
+                _ => {
+                    *SCREEN_CHECKED.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some(Instant::now());
+                    let previous = same.filter(|g| g.hwnd != 0).map(|g| Spot {
+                        output_idx: g.output_idx,
+                        hmonitor: g.hmonitor,
+                        screen_origin: g.screen_origin,
+                        screen_height: g.screen_height,
+                        screen_size: g.screen_size,
+                        hwnd: g.hwnd,
+                        window_size: g.window_size,
+                        refresh_hz: g.refresh_hz,
+                    });
+                    match (window::screen_of_process(&exe), previous) {
+                        // Minimised (alt-tab out of exclusive fullscreen) the window
+                        // reports no size: keep the one it had.
+                        (Some(now), Some(before))
+                            if now.hwnd == before.hwnd && now.window_size.is_none() =>
+                        {
+                            Some(Spot {
+                                window_size: before.window_size,
+                                ..now
+                            })
+                        }
+                        (Some(now), _) => Some(now),
+                        // No visible window big enough, but its window still exists
+                        // (minimised): still the game, keep recording.
+                        (None, Some(before)) if window::still_open(before.hwnd) => Some(before),
+                        (None, _) => None,
+                    }
+                }
+            };
+            screen.map(|spot| (exe, name, found, spot))
+        });
     let found = if let Some((exe, name, found, spot)) = listed {
         Some(Game {
             exe,
@@ -252,10 +329,19 @@ pub fn detect(s: &Settings) -> Option<Game> {
             refresh_hz: spot.refresh_hz,
             pid: None,
         })
-    } else if let Some(g) = current.as_ref().filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe)) {
+    } else if let Some(g) = current
+        .as_ref()
+        .filter(|g| g.found == Found::Fullscreen && !ignored(s, &g.exe))
+    {
         // 3, still open: keep it, even while you're tabbed out.
-        let alive = g.pid.is_some_and(|pid| procs::shared(|p| p.pid_running(pid)));
-        if alive { Some(g.clone()) } else { None }
+        let alive = g
+            .pid
+            .is_some_and(|pid| procs::shared(|p| p.pid_running(pid)));
+        if alive {
+            Some(g.clone())
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -293,7 +379,10 @@ pub fn detect(s: &Settings) -> Option<Game> {
             crate::icons::remember(&g.exe);
         }
         crate::trail(&match &found {
-            Some(g) => format!("game: {} ({}, {:?}, screen {})", g.name, g.exe, g.found, g.output_idx),
+            Some(g) => format!(
+                "game: {} ({}, {:?}, screen {})",
+                g.name, g.exe, g.found, g.output_idx
+            ),
             None => "game: none".to_string(),
         });
     }
@@ -337,24 +426,33 @@ struct Front {
 #[cfg(windows)]
 mod window {
     use super::{Front, Spot};
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::LPARAM;
     use windows::Win32::{
         Foundation::{HWND, RECT},
         Graphics::{
             Dxgi::{CreateDXGIFactory1, IDXGIFactory1},
-            Gdi::{GetMonitorInfoW, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST},
+            Gdi::{
+                GetMonitorInfoW, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+            },
         },
-        UI::WindowsAndMessaging::{EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsWindow, IsWindowVisible},
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindowRect,
+            GetWindowThreadProcessId, IsWindow, IsWindowVisible,
+        },
     };
-    use windows::core::BOOL;
-    use windows::Win32::Foundation::LPARAM;
 
     /// Which screen a monitor is, in the order the screen capture (DXGI, first
     /// graphics card) counts them. Screens on another graphics card fall back to 0.
     fn output_index(monitor: HMONITOR) -> u32 {
         // SAFETY: plain COM calls; every returned interface is owned and released on drop.
         unsafe {
-            let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else { return 0 };
-            let Ok(adapter) = factory.EnumAdapters1(0) else { return 0 };
+            let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else {
+                return 0;
+            };
+            let Ok(adapter) = factory.EnumAdapters1(0) else {
+                return 0;
+            };
             let mut i = 0;
             while let Ok(output) = adapter.EnumOutputs(i) {
                 if output.GetDesc().is_ok_and(|d| d.Monitor == monitor) {
@@ -375,18 +473,28 @@ mod window {
             // game's. Use where it goes back to when restored.
             let monitor = if windows::Win32::UI::WindowsAndMessaging::IsIconic(hwnd).as_bool() {
                 let mut place = windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT {
-                    length: std::mem::size_of::<windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT>() as u32,
+                    length: std::mem::size_of::<
+                        windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT,
+                    >() as u32,
                     ..Default::default()
                 };
-                if windows::Win32::UI::WindowsAndMessaging::GetWindowPlacement(hwnd, &mut place).is_ok() {
-                    windows::Win32::Graphics::Gdi::MonitorFromRect(&place.rcNormalPosition, MONITOR_DEFAULTTONEAREST)
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowPlacement(hwnd, &mut place)
+                    .is_ok()
+                {
+                    windows::Win32::Graphics::Gdi::MonitorFromRect(
+                        &place.rcNormalPosition,
+                        MONITOR_DEFAULTTONEAREST,
+                    )
                 } else {
                     MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
                 }
             } else {
                 MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
             };
-            let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
             let ok = GetMonitorInfoW(monitor, &mut info).as_bool();
             let rect = info.rcMonitor;
             let height = (ok && rect.bottom > rect.top).then(|| (rect.bottom - rect.top) as u32);
@@ -395,16 +503,32 @@ mod window {
     }
 
     fn spot_of(hwnd: HWND, monitor: HMONITOR, screen_height: Option<u32>, screen: RECT) -> Spot {
-        let size = |r: RECT| (r.right > r.left && r.bottom > r.top).then(|| ((r.right - r.left) as u32, (r.bottom - r.top) as u32));
+        let size = |r: RECT| {
+            (r.right > r.left && r.bottom > r.top)
+                .then(|| ((r.right - r.left) as u32, (r.bottom - r.top) as u32))
+        };
         let mut client = RECT::default();
         // SAFETY: plain query on a window Windows handed us; `client` is a valid local.
-        let window_size = unsafe { GetClientRect(hwnd, &mut client) }.ok().and_then(|_| size(client));
-        Spot { output_idx: output_index(monitor), hmonitor: monitor.0 as usize as u64, screen_origin: (screen.left, screen.top), screen_height, screen_size: size(screen), hwnd: hwnd.0 as usize as u64, window_size, refresh_hz: refresh_of(monitor) }
+        let window_size = unsafe { GetClientRect(hwnd, &mut client) }
+            .ok()
+            .and_then(|_| size(client));
+        Spot {
+            output_idx: output_index(monitor),
+            hmonitor: monitor.0 as usize as u64,
+            screen_origin: (screen.left, screen.top),
+            screen_height,
+            screen_size: size(screen),
+            hwnd: hwnd.0 as usize as u64,
+            window_size,
+            refresh_hz: refresh_of(monitor),
+        }
     }
 
     /// A screen's refresh rate, in Hz.
     fn refresh_of(monitor: HMONITOR) -> Option<u32> {
-        use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW};
+        use windows::Win32::Graphics::Gdi::{
+            EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW,
+        };
         // SAFETY: both structs have their size fields set as Windows requires;
         // MONITORINFOEXW starts with a MONITORINFO, as GetMonitorInfoW expects.
         unsafe {
@@ -413,11 +537,18 @@ mod window {
             if !GetMonitorInfoW(monitor, &mut info.monitorInfo).as_bool() {
                 return None;
             }
-            let mut mode = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
-            EnumDisplaySettingsW(windows::core::PCWSTR(info.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode)
-                .as_bool()
-                .then_some(mode.dmDisplayFrequency)
-                .filter(|&hz| hz > 1)
+            let mut mode = DEVMODEW {
+                dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
+            EnumDisplaySettingsW(
+                windows::core::PCWSTR(info.szDevice.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut mode,
+            )
+            .as_bool()
+            .then_some(mode.dmDisplayFrequency)
+            .filter(|&hz| hz > 1)
         }
     }
 
@@ -438,7 +569,8 @@ mod window {
                 return true;
             }
             let game = HWND(game_hwnd as usize as *mut core::ffi::c_void);
-            MonitorFromWindow(front, MONITOR_DEFAULTTONEAREST) == MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST)
+            MonitorFromWindow(front, MONITOR_DEFAULTTONEAREST)
+                == MonitorFromWindow(game, MONITOR_DEFAULTTONEAREST)
         }
     }
 
@@ -463,7 +595,10 @@ mod window {
                 return None;
             }
             // The desktop and the taskbar aren't games.
-            if matches!(class_of(hwnd).as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") {
+            if matches!(
+                class_of(hwnd).as_str(),
+                "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+            ) {
                 return None;
             }
             let mut pid = 0u32;
@@ -474,9 +609,15 @@ mod window {
             let mut win = RECT::default();
             GetWindowRect(hwnd, &mut win).ok()?;
             let (monitor, screen_height, screen) = monitor_of(hwnd);
-            let covers = win.left <= screen.left && win.top <= screen.top && win.right >= screen.right && win.bottom >= screen.bottom;
+            let covers = win.left <= screen.left
+                && win.top <= screen.top
+                && win.right >= screen.right
+                && win.bottom >= screen.bottom;
             // Only a fullscreen window is worth asking the graphics card which screen it is.
-            covers.then(|| Front { pid, spot: spot_of(hwnd, monitor, screen_height, screen) })
+            covers.then(|| Front {
+                pid,
+                spot: spot_of(hwnd, monitor, screen_height, screen),
+            })
         }
     }
 
@@ -553,14 +694,23 @@ mod tests {
         for (exe, name) in KNOWN_GAMES {
             assert!(exe.to_lowercase().ends_with(".exe"), "{exe}");
             assert!(!name.is_empty());
-            assert!(!NOT_GAMES.contains(&exe.to_lowercase().as_str()), "{exe} is listed as both");
+            assert!(
+                !NOT_GAMES.contains(&exe.to_lowercase().as_str()),
+                "{exe} is listed as both"
+            );
         }
-        assert!(NOT_GAMES.iter().all(|e| *e == e.to_lowercase()), "NOT_GAMES is compared in lower case");
+        assert!(
+            NOT_GAMES.iter().all(|e| *e == e.to_lowercase()),
+            "NOT_GAMES is compared in lower case"
+        );
     }
 
     #[test]
     fn ignored_games_are_never_picked() {
-        let s = Settings { ignored_games: vec!["Some.EXE".into()], ..Settings::default() };
+        let s = Settings {
+            ignored_games: vec!["Some.EXE".into()],
+            ..Settings::default()
+        };
         assert!(ignored(&s, "some.exe"));
         assert!(!ignored(&s, "other.exe"));
     }

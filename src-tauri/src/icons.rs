@@ -13,12 +13,19 @@ fn valid_exe(exe: &str) -> bool {
     exe.len() <= 128
         && exe.to_ascii_lowercase().ends_with(".exe")
         && !exe.starts_with('.')
-        && exe.chars().all(|c| c.is_alphanumeric() || " ._-+()".contains(c))
+        && exe
+            .chars()
+            .all(|c| c.is_alphanumeric() || " ._-+()".contains(c))
 }
 
 fn cache_path(exe: &str) -> Option<PathBuf> {
     let dir = std::env::var_os("LOCALAPPDATA")?;
-    Some(PathBuf::from(dir).join("app.crosspov.desktop").join("icons").join(format!("{}.png", exe.to_lowercase())))
+    Some(
+        PathBuf::from(dir)
+            .join("app.crosspov.desktop")
+            .join("icons")
+            .join(format!("{}.png", exe.to_lowercase())),
+    )
 }
 
 /// The icon of `exe` as PNG bytes, or None if it isn't known (never ran
@@ -33,7 +40,10 @@ pub fn icon_png(exe: &str, path: Option<PathBuf>) -> Option<Vec<u8>> {
     if let Some(bytes) = cache.as_ref().and_then(|p| std::fs::read(p).ok()) {
         return Some(bytes);
     }
-    let named_exe = |p: &PathBuf| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(exe));
+    let named_exe = |p: &PathBuf| {
+        p.file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(exe))
+    };
     let path = match path.filter(named_exe) {
         Some(p) => p,
         None => running_path(exe).or_else(|| installed_path(exe))?,
@@ -59,17 +69,30 @@ fn running_path(exe: &str) -> Option<PathBuf> {
     for pid in crate::procs::shared(|p| p.root_pids(exe)) {
         use windows::core::PWSTR;
         use windows::Win32::Foundation::CloseHandle;
-        use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+        use windows::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        };
         // SAFETY: plain query on a process handle we open and close here; the
         // buffer outlives the call and its length is passed in.
         unsafe {
-            let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { continue };
+            let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+                continue;
+            };
             let mut buf = [0u16; 1024];
             let mut len = buf.len() as u32;
-            let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+            let ok = QueryFullProcessImageNameW(
+                handle,
+                PROCESS_NAME_WIN32,
+                PWSTR(buf.as_mut_ptr()),
+                &mut len,
+            )
+            .is_ok();
             let _ = CloseHandle(handle);
             if ok && len > 0 {
-                return Some(PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])));
+                return Some(PathBuf::from(String::from_utf16_lossy(
+                    &buf[..len as usize],
+                )));
             }
         }
     }
@@ -79,18 +102,33 @@ fn running_path(exe: &str) -> Option<PathBuf> {
 /// Where an installed (not running) game is, for games whose launcher says
 /// where it put them. VALORANT: Riot's product settings name its folder.
 fn installed_path(exe: &str) -> Option<PathBuf> {
-    if !exe.eq_ignore_ascii_case("VALORANT-Win64-Shipping.exe") && !exe.eq_ignore_ascii_case("VALORANT.exe") {
+    if !exe.eq_ignore_ascii_case("VALORANT-Win64-Shipping.exe")
+        && !exe.eq_ignore_ascii_case("VALORANT.exe")
+    {
         return None;
     }
-    let data = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-    let settings = data.join("Riot Games").join("Metadata").join("valorant.live").join("valorant.live.product_settings.yaml");
+    let data = std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    let settings = data
+        .join("Riot Games")
+        .join("Metadata")
+        .join("valorant.live")
+        .join("valorant.live.product_settings.yaml");
     let folder = std::fs::read_to_string(settings)
         .ok()
         .and_then(|text| riot_install_folder(&text))
         .unwrap_or_else(|| PathBuf::from(r"C:\Riot Games\VALORANT\live"));
-    [folder.join("ShooterGame").join("Binaries").join("Win64").join("VALORANT-Win64-Shipping.exe"), folder.join("VALORANT.exe")]
-        .into_iter()
-        .find(|p| p.is_file())
+    [
+        folder
+            .join("ShooterGame")
+            .join("Binaries")
+            .join("Win64")
+            .join("VALORANT-Win64-Shipping.exe"),
+        folder.join("VALORANT.exe"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
 }
 
 /// `product_install_full_path: "C:/Riot Games/VALORANT/live"` from Riot's settings.
@@ -120,14 +158,20 @@ fn extract(_path: &std::path::Path) -> Option<Vec<u8>> {
 fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::{HRESULT, PCWSTR};
-    use windows::Win32::Graphics::Gdi::{DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP};
+    use windows::Win32::Graphics::Gdi::{
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP,
+    };
     use windows::Win32::UI::Shell::SHDefExtractIconW;
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut icon = HICON::default();
     // S_OK only: S_FALSE means the file has no icon.
-    if unsafe { SHDefExtractIconW(PCWSTR(wide.as_ptr()), 0, 0, Some(&mut icon), None, SIZE) } != HRESULT(0) || icon.is_invalid() {
+    if unsafe { SHDefExtractIconW(PCWSTR(wide.as_ptr()), 0, 0, Some(&mut icon), None, SIZE) }
+        != HRESULT(0)
+        || icon.is_invalid()
+    {
         return None;
     }
     let mut info = ICONINFO::default();
@@ -141,7 +185,14 @@ fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
             return None;
         }
         let mut b = BITMAP::default();
-        if unsafe { GetObjectW(bm.into(), std::mem::size_of::<BITMAP>() as i32, Some((&mut b as *mut BITMAP).cast())) } == 0 {
+        if unsafe {
+            GetObjectW(
+                bm.into(),
+                std::mem::size_of::<BITMAP>() as i32,
+                Some((&mut b as *mut BITMAP).cast()),
+            )
+        } == 0
+        {
             return None;
         }
         let (w, h) = (b.bmWidth.unsigned_abs(), b.bmHeight.unsigned_abs());
@@ -162,7 +213,17 @@ fn extract(path: &std::path::Path) -> Option<Vec<u8>> {
         };
         let mut buf = vec![0u8; (w * h * 4) as usize];
         let dc = unsafe { GetDC(None) };
-        let lines = unsafe { GetDIBits(dc, bm, 0, h, Some(buf.as_mut_ptr().cast()), &mut bmi, DIB_RGB_COLORS) };
+        let lines = unsafe {
+            GetDIBits(
+                dc,
+                bm,
+                0,
+                h,
+                Some(buf.as_mut_ptr().cast()),
+                &mut bmi,
+                DIB_RGB_COLORS,
+            )
+        };
         unsafe { ReleaseDC(None, dc) };
         (lines == h as i32).then_some((w, h, buf))
     }
@@ -219,7 +280,10 @@ mod tests {
     #[test]
     fn reads_where_riot_installed_valorant() {
         let yaml = "product_install_full_path: \"D:/Games/Riot Games/VALORANT/live\"\nproduct_install_root: \"D:/Games/Riot Games\"\n";
-        assert_eq!(riot_install_folder(yaml), Some(PathBuf::from("D:/Games/Riot Games/VALORANT/live")));
+        assert_eq!(
+            riot_install_folder(yaml),
+            Some(PathBuf::from("D:/Games/Riot Games/VALORANT/live"))
+        );
         assert_eq!(riot_install_folder("other: 1"), None);
     }
 

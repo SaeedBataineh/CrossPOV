@@ -30,14 +30,19 @@ const AFTER_UPDATE: &str = "--after-update=";
 const SINGLE_EXE_TARGET: &str = "windows-x86_64-single";
 
 fn start_exe() -> Option<PathBuf> {
-    START_EXE.get_or_init(|| std::env::current_exe().ok()).clone()
+    START_EXE
+        .get_or_init(|| std::env::current_exe().ok())
+        .clone()
 }
 
 /// Runs first thing in `run()`. After a single-exe update, waits for the old
 /// copy to close and deletes its file.
 pub fn finish_self_update() {
     let exe = start_exe();
-    let old_pid = std::env::args().find_map(|a| a.strip_prefix(AFTER_UPDATE).and_then(|p| p.parse::<u32>().ok()));
+    let old_pid = std::env::args().find_map(|a| {
+        a.strip_prefix(AFTER_UPDATE)
+            .and_then(|p| p.parse::<u32>().ok())
+    });
     if let Some(pid) = old_pid {
         for _ in 0..150 {
             if !Procs::new().pid_running(pid) {
@@ -52,7 +57,10 @@ pub fn finish_self_update() {
 }
 
 fn old_path(exe: &std::path::Path) -> PathBuf {
-    let mut name = exe.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let mut name = exe
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     name.push(".old");
     exe.with_file_name(name)
 }
@@ -90,7 +98,11 @@ pub enum UpdateStatus {
     /// Found a newer version that waits for VALORANT to close.
     Waiting { version: String },
     /// Downloading; the UI is locked.
-    Downloading { version: String, downloaded: u64, total: Option<u64> },
+    Downloading {
+        version: String,
+        downloaded: u64,
+        total: Option<u64>,
+    },
     /// Running the installer; the app restarts by itself.
     Installing { version: String },
     /// A newer version exists but couldn't be installed. The UI stays locked with a Retry button.
@@ -110,18 +122,25 @@ static LAUNCH_CHECK_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// Waits (up to `max`) for the launch update check to finish.
 pub fn wait_for_launch_check(max: std::time::Duration) {
     let until = std::time::Instant::now() + max;
-    while !LAUNCH_CHECK_DONE.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < until {
+    while !LAUNCH_CHECK_DONE.load(std::sync::atomic::Ordering::Relaxed)
+        && std::time::Instant::now() < until
+    {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 }
 
 impl Updates {
     pub fn new() -> Self {
-        Self { status: Arc::new(Mutex::new(UpdateStatus::Checking)) }
+        Self {
+            status: Arc::new(Mutex::new(UpdateStatus::Checking)),
+        }
     }
 
     pub fn status(&self) -> UpdateStatus {
-        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn set(&self, app: &AppHandle, status: UpdateStatus) {
@@ -147,12 +166,18 @@ impl Updates {
                 Ok(Some(update)) => me.install(&app, update).await,
                 Ok(None) => me.set(&app, UpdateStatus::UpToDate { offline: false }),
                 Err(err) => {
-                    crate::trail(&format!("update: check at launch failed ({err}); trying again in 2 min"));
+                    crate::trail(&format!(
+                        "update: check at launch failed ({err}); trying again in 2 min"
+                    ));
                     me.set(&app, UpdateStatus::UpToDate { offline: true });
                 }
             }
             drop(done);
-            let mut wait = if matches!(me.status(), UpdateStatus::UpToDate { offline: true }) { RETRY_OFFLINE } else { RECHECK };
+            let mut wait = if matches!(me.status(), UpdateStatus::UpToDate { offline: true }) {
+                RETRY_OFFLINE
+            } else {
+                RECHECK
+            };
             loop {
                 tokio_sleep(wait).await;
                 wait = RECHECK;
@@ -161,7 +186,12 @@ impl Updates {
                 }
                 match me.find(&app).await {
                     Ok(Some(update)) => {
-                        me.set(&app, UpdateStatus::Waiting { version: update.version.clone() });
+                        me.set(
+                            &app,
+                            UpdateStatus::Waiting {
+                                version: update.version.clone(),
+                            },
+                        );
                         while game_running() {
                             tokio_sleep(GAME_POLL).await;
                         }
@@ -169,7 +199,9 @@ impl Updates {
                     }
                     Ok(None) => {}
                     Err(err) => {
-                        crate::trail(&format!("update: check failed ({err}); trying again in 2 min"));
+                        crate::trail(&format!(
+                            "update: check failed ({err}); trying again in 2 min"
+                        ));
                         wait = RETRY_OFFLINE;
                     }
                 }
@@ -179,7 +211,10 @@ impl Updates {
 
     /// Not checking, downloading or installing right now.
     fn idle(&self) -> bool {
-        matches!(self.status(), UpdateStatus::UpToDate { .. } | UpdateStatus::Waiting { .. })
+        matches!(
+            self.status(),
+            UpdateStatus::UpToDate { .. } | UpdateStatus::Waiting { .. }
+        )
     }
 
     /// Opening CrossPOV again (from the Start menu or desktop while it sits in
@@ -211,7 +246,13 @@ impl Updates {
                 Ok(None) => me.set(&app, UpdateStatus::UpToDate { offline: false }),
                 Err(err) => {
                     let version = String::new();
-                    me.set(&app, UpdateStatus::Failed { version, message: format!("Couldn't reach the update server: {err}") });
+                    me.set(
+                        &app,
+                        UpdateStatus::Failed {
+                            version,
+                            message: format!("Couldn't reach the update server: {err}"),
+                        },
+                    );
                 }
             }
         });
@@ -238,7 +279,14 @@ impl Updates {
         let version = update.version.clone();
         crate::trail(&format!("update: installing {version}"));
         crate::show_main_window(app);
-        self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded: 0, total: None });
+        self.set(
+            app,
+            UpdateStatus::Downloading {
+                version: version.clone(),
+                downloaded: 0,
+                total: None,
+            },
+        );
         let mut downloaded = 0u64;
         let mut last_emit = 0u64;
         let progress = |chunk: usize, total: Option<u64>| {
@@ -246,14 +294,31 @@ impl Updates {
             // About every 2 MB, so the progress bar moves without flooding the UI.
             if downloaded - last_emit > 2_000_000 || Some(downloaded) == total {
                 last_emit = downloaded;
-                self.set(app, UpdateStatus::Downloading { version: version.clone(), downloaded, total });
+                self.set(
+                    app,
+                    UpdateStatus::Downloading {
+                        version: version.clone(),
+                        downloaded,
+                        total,
+                    },
+                );
             }
         };
-        let finished = || self.set(app, UpdateStatus::Installing { version: version.clone() });
+        let finished = || {
+            self.set(
+                app,
+                UpdateStatus::Installing {
+                    version: version.clone(),
+                },
+            )
+        };
 
         if crate::tools::EMBEDDED {
             let result = async {
-                let bytes = update.download(progress, finished).await.map_err(|e| e.to_string())?;
+                let bytes = update
+                    .download(progress, finished)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 update.verify(&bytes).map_err(|e| e.to_string())?; // signed by us, or nothing happens
                 let recorder = app.state::<crate::AppState>().recorder.clone();
                 recorder.halt();
@@ -264,7 +329,8 @@ impl Updates {
                 if app.get_webview_window(crate::MAIN_WINDOW).is_none() {
                     cmd.arg(crate::MINIMIZED_ARG); // it was in the tray, keep it there
                 }
-                cmd.spawn().map_err(|e| format!("Couldn't start the new version: {e}"))?;
+                cmd.spawn()
+                    .map_err(|e| format!("Couldn't start the new version: {e}"))?;
                 Ok::<(), String>(())
             }
             .await;
@@ -279,7 +345,13 @@ impl Updates {
         match result {
             // Windows exits inside download_and_install and the installer starts the new version.
             Ok(()) => app.restart(),
-            Err(err) => self.set(app, UpdateStatus::Failed { version, message: err.to_string() }),
+            Err(err) => self.set(
+                app,
+                UpdateStatus::Failed {
+                    version,
+                    message: err.to_string(),
+                },
+            ),
         }
     }
 }
@@ -311,6 +383,9 @@ mod tests {
 
     #[test]
     fn old_copy_sits_next_to_the_exe() {
-        assert_eq!(old_path(std::path::Path::new("C:/Games/CrossPOV.exe")), PathBuf::from("C:/Games/CrossPOV.exe.old"));
+        assert_eq!(
+            old_path(std::path::Path::new("C:/Games/CrossPOV.exe")),
+            PathBuf::from("C:/Games/CrossPOV.exe.old")
+        );
     }
 }

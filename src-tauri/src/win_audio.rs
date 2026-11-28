@@ -9,8 +9,8 @@ use windows::{
     core::{Interface, Result as WinResult, PCWSTR},
     Win32::{
         Media::Audio::{
-            eConsole, eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator, PlaySoundW,
-            SND_MEMORY, SND_NODEFAULT, SND_SYNC,
+            eConsole, eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
+            MMDeviceEnumerator, PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_SYNC,
         },
         System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED},
     },
@@ -21,7 +21,8 @@ pub fn audio_session_pids() -> Vec<u32> {
     let run = || -> WinResult<Vec<u32>> {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
             let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
             let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;
             let sessions = manager.GetSessionEnumerator()?;
@@ -40,7 +41,11 @@ pub fn audio_session_pids() -> Vec<u32> {
         }
     };
     // COM calls run on a fresh thread so they never clash with the UI thread's COM mode.
-    thread::spawn(run).join().ok().and_then(Result::ok).unwrap_or_default()
+    thread::spawn(run)
+        .join()
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
 }
 
 /// A 70 ms, 880 Hz beep as an in-memory WAV file.
@@ -81,14 +86,20 @@ pub fn beep() {
     static PLAYER: OnceLock<std::sync::mpsc::Sender<()>> = OnceLock::new();
     let tx = PLAYER.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<()>();
-        let _ = std::thread::Builder::new().name("clip-beep".into()).spawn(move || {
-            let wav = beep_wav();
-            while rx.recv().is_ok() {
-                unsafe {
-                    let _ = PlaySoundW(PCWSTR(wav.as_ptr() as *const u16), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
+        let _ = std::thread::Builder::new()
+            .name("clip-beep".into())
+            .spawn(move || {
+                let wav = beep_wav();
+                while rx.recv().is_ok() {
+                    unsafe {
+                        let _ = PlaySoundW(
+                            PCWSTR(wav.as_ptr() as *const u16),
+                            None,
+                            SND_MEMORY | SND_SYNC | SND_NODEFAULT,
+                        );
+                    }
                 }
-            }
-        });
+            });
         tx
     });
     let _ = tx.send(());

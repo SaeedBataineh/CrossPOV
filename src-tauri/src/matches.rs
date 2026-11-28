@@ -19,10 +19,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    procs,
-    settings::Settings,
-};
+use crate::{procs, settings::Settings};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,7 +102,10 @@ pub struct MatchesStatus {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Splits "Name#TAG" into its parts.
@@ -117,7 +117,8 @@ pub fn split_riot_id(riot_id: &str) -> Option<(String, String)> {
 
 /// Asks the server for the user's latest match.
 pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSummary, String> {
-    let (name, tag) = split_riot_id(riot_id).ok_or("Enter your Riot ID as Name#TAG in Settings.")?;
+    let (name, tag) =
+        split_riot_id(riot_id).ok_or("Enter your Riot ID as Name#TAG in Settings.")?;
     // Windows' own TLS and certificate store; if the PC's DNS can't find the
     // server, the address is looked up over HTTPS instead (net.rs).
     let agent = crate::net::agent(
@@ -139,7 +140,10 @@ pub fn fetch_latest(server: &str, region: &str, riot_id: &str) -> Result<MatchSu
         .map_err(|e| crate::net_error(&e.to_string()))?;
     let status = res.status().as_u16();
     if status == 200 {
-        let body: LatestResponse = res.body_mut().read_json().map_err(|e| format!("Unexpected answer from the server: {e}"))?;
+        let body: LatestResponse = res
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("Unexpected answer from the server: {e}"))?;
         Ok(body.match_)
     } else {
         let msg = res
@@ -171,7 +175,10 @@ impl MatchStore {
 
     fn path(&self, id: &str) -> PathBuf {
         // Ids come from the server; keep only safe characters for the file name.
-        let safe: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+        let safe: String = id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
         self.dir.join(format!("{safe}.json"))
     }
 
@@ -189,7 +196,9 @@ impl MatchStore {
 
     /// Newest first.
     pub fn list(&self) -> Vec<MatchSummary> {
-        let Ok(entries) = fs::read_dir(&self.dir) else { return Vec::new() };
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return Vec::new();
+        };
         let mut out: Vec<MatchSummary> = entries
             .flatten()
             .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
@@ -202,7 +211,9 @@ impl MatchStore {
 
     /// Forgets every saved match (and the streamer results stored beside them).
     pub fn clear(&self) {
-        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        let Ok(entries) = fs::read_dir(&self.dir) else {
+            return;
+        };
         for e in entries.flatten() {
             if e.path().extension().is_some_and(|x| x == "json") {
                 let _ = fs::remove_file(e.path());
@@ -225,7 +236,13 @@ const TICK: Duration = Duration::from_secs(15);
 
 /// Whether to ask the server now. `failures` in a row stretch the wait (up to 4x),
 /// so a busy server isn't hammered by every app at once.
-fn check_due(game_running: bool, since_check: Option<Duration>, since_close: Option<Duration>, close_checks_done: usize, failures: u32) -> bool {
+fn check_due(
+    game_running: bool,
+    since_check: Option<Duration>,
+    since_close: Option<Duration>,
+    close_checks_done: usize,
+    failures: u32,
+) -> bool {
     let backoff = 1u32 << failures.min(2);
     if game_running {
         return since_check.is_none_or(|d| d >= IN_GAME_EVERY * backoff);
@@ -257,7 +274,10 @@ impl MatchWatcher {
         Self {
             store,
             settings: Arc::new(Mutex::new(settings)),
-            status: Arc::new(Mutex::new(MatchesStatus { configured, ..MatchesStatus::default() })),
+            status: Arc::new(Mutex::new(MatchesStatus {
+                configured,
+                ..MatchesStatus::default()
+            })),
             listener: Arc::new(listener),
         }
     }
@@ -290,7 +310,10 @@ impl MatchWatcher {
     }
 
     pub fn status(&self) -> MatchesStatus {
-        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn list(&self) -> Vec<MatchSummary> {
@@ -299,7 +322,11 @@ impl MatchWatcher {
 
     /// Asks the server now. Returns the latest match (new or already known).
     pub fn check_now(&self) -> Result<MatchSummary, String> {
-        let s = self.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let s = self
+            .settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let result = fetch_latest(&s.server_url, &s.region, &s.riot_id);
         let status = {
             let mut st = self.status.lock().unwrap_or_else(|e| e.into_inner());
@@ -308,7 +335,10 @@ impl MatchWatcher {
             st.configured = split_riot_id(&s.riot_id).is_some();
             if let Ok(m) = &result {
                 let r = m.region.to_lowercase();
-                st.region_hint = (!r.is_empty() && r != s.region && crate::settings::REGIONS.contains(&r.as_str())).then_some(r);
+                st.region_hint = (!r.is_empty()
+                    && r != s.region
+                    && crate::settings::REGIONS.contains(&r.as_str()))
+                .then_some(r);
             }
             st.clone()
         };
@@ -345,7 +375,14 @@ impl MatchWatcher {
                 failures = 0;
             }
             was_running = running;
-            let configured = split_riot_id(&self.settings.lock().unwrap_or_else(|e| e.into_inner()).riot_id).is_some();
+            let configured = split_riot_id(
+                &self
+                    .settings
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .riot_id,
+            )
+            .is_some();
             let since_check = last_check.map(|t| t.elapsed());
             let since_close = closed_at.map(|t| t.elapsed());
             if configured && check_due(running, since_check, since_close, close_checks, failures) {
@@ -372,7 +409,9 @@ pub fn find_me<'a>(m: &'a MatchSummary, riot_id: &str) -> Option<&'a MatchPlayer
     let (name, tag) = split_riot_id(riot_id)?;
     // Riot names can have accents and other non-English letters: compare them case-blind too.
     let (name, tag) = (name.to_lowercase(), tag.to_lowercase());
-    m.players.iter().find(|p| p.name.to_lowercase() == name && p.tag.to_lowercase() == tag)
+    m.players
+        .iter()
+        .find(|p| p.name.to_lowercase() == name && p.tag.to_lowercase() == tag)
 }
 
 #[cfg(test)]
@@ -386,13 +425,22 @@ mod tests {
         assert!(check_due(true, None, None, 0, 0), "first check right away");
         assert!(!check_due(true, m(4), None, 0, 0));
         assert!(check_due(true, m(5), None, 0, 0));
-        assert!(!check_due(false, m(1), s(10), 0, 0), "not the instant it closes");
+        assert!(
+            !check_due(false, m(1), s(10), 0, 0),
+            "not the instant it closes"
+        );
         assert!(check_due(false, m(1), s(30), 0, 0), "30 s after closing");
         assert!(!check_due(false, m(1), m(3), 1, 0));
         assert!(check_due(false, m(5), m(5), 1, 0), "once more after 5 min");
         assert!(!check_due(false, m(60), m(60), 2, 0), "then stops");
-        assert!(!check_due(false, None, None, 0, 0), "game never ran: never asks");
-        assert!(!check_due(true, m(5), None, 0, 1), "a failure doubles the wait");
+        assert!(
+            !check_due(false, None, None, 0, 0),
+            "game never ran: never asks"
+        );
+        assert!(
+            !check_due(true, m(5), None, 0, 1),
+            "a failure doubles the wait"
+        );
         assert!(check_due(true, m(20), None, 0, 9), "at most 4x");
     }
 
@@ -409,7 +457,10 @@ mod tests {
         assert_eq!(r.match_.map, "Ascent");
         assert_eq!(r.match_.kills[0].at_ms, 30_000);
         assert_eq!(r.match_.rounds[1].start_ms, None);
-        assert_eq!(find_me(&r.match_, "me#euw").map(|p| p.agent.as_str()), Some("Jett"));
+        assert_eq!(
+            find_me(&r.match_, "me#euw").map(|p| p.agent.as_str()),
+            Some("Jett")
+        );
     }
 
     /// Talks to a real CrossPOV server when CROSSPOV_TEST_SERVER is set
@@ -417,7 +468,9 @@ mod tests {
     /// as the server's clear "not found" message.
     #[test]
     fn live_server_reports_unknown_riot_id() {
-        let Ok(server) = std::env::var("CROSSPOV_TEST_SERVER") else { return };
+        let Ok(server) = std::env::var("CROSSPOV_TEST_SERVER") else {
+            return;
+        };
         let err = fetch_latest(&server, "eu", "zzqqxxnotreal#Q9Z8").unwrap_err();
         assert!(err.contains("No matches found"), "{err}");
         let err = fetch_latest(&server, "mars", "a#b").unwrap_err();
@@ -426,7 +479,10 @@ mod tests {
 
     #[test]
     fn splits_riot_ids() {
-        assert_eq!(split_riot_id(" Some Player #EUW "), Some(("Some Player".into(), "EUW".into())));
+        assert_eq!(
+            split_riot_id(" Some Player #EUW "),
+            Some(("Some Player".into(), "EUW".into()))
+        );
         assert_eq!(split_riot_id("a#b#c"), Some(("a#b".into(), "c".into())));
         assert_eq!(split_riot_id("nohash"), None);
         assert_eq!(split_riot_id("#EUW"), None);
@@ -437,12 +493,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("crosspov-matches-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let store = MatchStore::new(dir.clone());
-        let mut m = serde_json::from_str::<LatestResponse>(SAMPLE).unwrap().match_;
+        let mut m = serde_json::from_str::<LatestResponse>(SAMPLE)
+            .unwrap()
+            .match_;
         store.save(&m).unwrap();
         m.id = "../../evil".into();
         m.started_at = "2026-11-25T00:00:00Z".into();
         store.save(&m).unwrap();
-        assert!(dir.join("evil.json").is_file(), "path characters are stripped");
+        assert!(
+            dir.join("evil.json").is_file(),
+            "path characters are stripped"
+        );
         let list = store.list();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].started_at, "2026-11-25T00:00:00Z", "newest first");
@@ -451,17 +512,23 @@ mod tests {
 
     #[test]
     fn clear_forgets_matches_and_their_streamers() {
-        let dir = std::env::temp_dir().join(format!("crosspov-matches-clear-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("crosspov-matches-clear-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let store = MatchStore::new(dir.clone());
-        let m = serde_json::from_str::<LatestResponse>(SAMPLE).unwrap().match_;
+        let m = serde_json::from_str::<LatestResponse>(SAMPLE)
+            .unwrap()
+            .match_;
         store.save(&m).unwrap();
         fs::write(dir.join(format!("{}.streamers.json", m.id)), b"{}").unwrap();
         fs::write(dir.join("keep.txt"), b"not ours").unwrap();
         store.clear();
         assert!(store.list().is_empty());
         assert!(!dir.join(format!("{}.streamers.json", m.id)).exists());
-        assert!(dir.join("keep.txt").exists(), "only match files are removed");
+        assert!(
+            dir.join("keep.txt").exists(),
+            "only match files are removed"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
