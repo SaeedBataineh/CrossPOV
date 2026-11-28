@@ -90,7 +90,10 @@ macro_rules! api {
         /// obs.dll's functions.
         #[allow(non_snake_case)]
         pub struct Obs {
-            _lib: Library,
+            /// Never unloaded: libobs' own threads (audio devices, capture)
+            /// can outlive obs_shutdown, and unloading under them crashes.
+            /// Windows frees it when the recorder exits.
+            _lib: std::mem::ManuallyDrop<Library>,
             $(pub $name: unsafe extern "C" fn($($arg),*) $(-> $ret)?,)*
         }
 
@@ -106,7 +109,7 @@ macro_rules! api {
                             .get::<unsafe extern "C" fn($($arg),*) $(-> $ret)?>(concat!(stringify!($name), "\0").as_bytes())
                             .map_err(|e| format!("obs.dll has no {}: {e}", stringify!($name)))?;
                     )*
-                    Ok(Obs { _lib: lib, $($name,)* })
+                    Ok(Obs { _lib: std::mem::ManuallyDrop::new(lib), $($name,)* })
                 }
             }
         }

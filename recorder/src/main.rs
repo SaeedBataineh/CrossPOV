@@ -48,8 +48,7 @@ fn selftest(dir: &str) -> i32 {
     std::thread::sleep(std::time::Duration::from_secs(8));
     let stats = rec.handle(&json!({ "op": "stats" })).map(|v| v["text"].to_string()).unwrap_or_default();
     let saved = rec.handle(&json!({ "op": "save" }));
-    rec.stop();
-    match saved {
+    let code = match saved {
         Ok(v) => {
             let path = v["path"].as_str().unwrap_or("").to_string();
             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -60,7 +59,11 @@ fn selftest(dir: &str) -> i32 {
             println!("selftest: save failed: {e} ({stats})");
             1
         }
-    }
+    };
+    // Shutting down cleanly is part of the test (CrossPOV quits it this way).
+    rec.stop();
+    println!("selftest: stopped cleanly");
+    code
 }
 
 fn main() {
