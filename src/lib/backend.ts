@@ -194,7 +194,9 @@ export async function recycleClip(path: string): Promise<void> {
 /** A URL the app's own player can play, or null when the clip must open outside (MKV, website demo). */
 export async function clipVideoSrc(path: string): Promise<string | null> {
   if (!isDesktop || !/\.mp4$/i.test(path)) return null;
-  return convertFileSrc(await tauriInvoke<string>("play_clip_in_app", { path }));
+  const src = await tauriInvoke<string>("play_clip_in_app", { path });
+  // A link from CrossPOV's own clip server, or a file path for the asset link.
+  return src.startsWith("http://127.0.0.1:") ? src : convertFileSrc(src);
 }
 
 /** A short report about what the app is doing, for problem reports. */

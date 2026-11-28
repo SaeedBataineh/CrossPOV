@@ -6,6 +6,7 @@
 //! while you play. Opening it from the tray builds a fresh window.
 
 mod audio;
+mod clipserve;
 mod clips;
 mod edit;
 mod fastvod;
@@ -636,6 +637,11 @@ fn open_clip(app: AppHandle, state: State<'_, AppState>, path: String) -> Result
 #[tauri::command]
 fn play_clip_in_app(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<String, String> {
     let clip = clips::validate(&clip_folder(&app, &state.get()), &path)?;
+    // Straight from disk through CrossPOV's own little server (smooth at any
+    // bitrate); Tauri's asset link only if that couldn't start.
+    if let Some(url) = clipserve::url_for(clip.clone()) {
+        return Ok(url);
+    }
     app.asset_protocol_scope().allow_file(&clip).map_err(|e| e.to_string())?;
     Ok(clip.to_string_lossy().into_owned())
 }

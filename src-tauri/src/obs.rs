@@ -262,7 +262,7 @@ impl Obs {
                 );
             }
         }
-        self.request("StartReplayBuffer", json!({}))?;
+        self.start_replay_buffer()?;
         self.capture = Some(c);
         Ok(())
     }
@@ -331,13 +331,51 @@ impl Obs {
         }
     }
 
+    /// Starts the replay buffer and waits until it really runs. Right after a
+    /// stop, OBS can answer "started" while the old one is still finishing
+    /// and then not start at all (F9 then failed: "501", not running).
+    fn start_replay_buffer(&mut self) -> Result<(), String> {
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            let _ = self.request_once("StartReplayBuffer", json!({}));
+            let tried = Instant::now();
+            while tried.elapsed() < Duration::from_millis(1500) {
+                if self.replay_buffer_running() {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if Instant::now() > until {
+                return Err("the replay buffer didn't start".into());
+            }
+        }
+    }
+
+    fn replay_buffer_running(&mut self) -> bool {
+        self.request_once("GetReplayBufferStatus", json!({})).is_ok_and(|s| s["outputActive"].as_bool() == Some(true))
+    }
+
+    /// While recording: the replay buffer still runs (started again if not).
+    pub fn keep_replay_buffer_running(&mut self) {
+        if self.capture.is_some() && !self.replay_buffer_running() {
+            crate::trail("obs: the replay buffer had stopped; starting it again");
+            if let Err(e) = self.start_replay_buffer() {
+                crate::trail(&format!("obs: {e}"));
+            }
+        }
+    }
+
     /// Saves the replay buffer; returns the saved file once OBS has written it.
     pub fn save_replay(&mut self) -> Result<PathBuf, String> {
         if self.capture.is_none() {
             return Err("Not recording right now. Clips are saved while a game is open.".into());
         }
         self.events.clear();
-        self.request("SaveReplayBuffer", json!({}))?;
+        if let Err(e) = self.request("SaveReplayBuffer", json!({})) {
+            // Not running (501): start it again for the next clip.
+            self.keep_replay_buffer_running();
+            return Err(if e.contains("501") { "The recording was restarting. Try again in a few seconds.".into() } else { e });
+        }
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             if let Some(path) = self.events.iter().find(|e| e["eventType"] == "ReplayBufferSaved").and_then(|e| e["eventData"]["savedReplayPath"].as_str()) {
@@ -381,6 +419,7 @@ impl Obs {
         if alive {
             hide_tray_icon(self.child.id());
             hide_windows(self.child.id());
+            self.keep_replay_buffer_running();
         }
         alive
     }
@@ -541,7 +580,7 @@ fn random_bytes(n: usize) -> Vec<u8> {
     out
 }
 
-fn random_hex(n: usize) -> String {
+pub(crate) fn random_hex(n: usize) -> String {
     random_bytes(n).iter().map(|b| format!("{b:02x}")).collect()
 }
 
