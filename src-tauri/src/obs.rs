@@ -815,6 +815,13 @@ fn hide_windows(pid: u32) {
             if want != ex {
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want);
             }
+            // OBS's main window (class "Qt683QWindowIcon"): while recording,
+            // OBS puts a red dot on its taskbar button (ITaskbarList
+            // SetOverlayIcon), which makes Windows show the button even for a
+            // hidden window. Take the button off the taskbar again.
+            if class_of(hwnd).ends_with("QWindowIcon") {
+                delete_taskbar_button(hwnd);
+            }
             if IsWindowVisible(hwnd).as_bool() {
                 let _ = ShowWindow(hwnd, SW_HIDE);
                 let first = SEEN.get_or_init(Default::default).lock().map(|mut s| s.insert(hwnd.0 as isize)).unwrap_or(false);
@@ -825,6 +832,41 @@ fn hide_windows(pid: u32) {
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn class_of(hwnd: windows::Win32::Foundation::HWND) -> String {
+    let mut buf = [0u16; 128];
+    // SAFETY: a plain query into a local buffer of the given size.
+    let n = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut buf) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+/// Removes a window's taskbar button (the Windows taskbar's own API; works
+/// for another program's window). One taskbar connection per thread.
+#[cfg(windows)]
+fn delete_taskbar_button(hwnd: windows::Win32::Foundation::HWND) {
+    use std::cell::RefCell;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+    use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
+    thread_local! {
+        static TASKBAR: RefCell<Option<ITaskbarList>> = const { RefCell::new(None) };
+    }
+    TASKBAR.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.is_none() {
+            // SAFETY: COM set up on this thread, then the taskbar object made and initialised.
+            *t = unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let made: windows::core::Result<ITaskbarList> = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER);
+                made.ok().filter(|list| list.HrInit().is_ok())
+            };
+        }
+        if let Some(list) = t.as_ref() {
+            // SAFETY: a valid taskbar object and a window handle; a window without a button is ignored.
+            let _ = unsafe { list.DeleteTab(hwnd) };
+        }
+    });
 }
 
 #[cfg(not(windows))]
