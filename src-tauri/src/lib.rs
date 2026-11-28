@@ -441,6 +441,9 @@ fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> String {
     let _ = writeln!(out, "tools: {}", if missing.is_empty() { "ok".to_string() } else { format!("missing {}", missing.join(", ")) });
     if tools::EMBEDDED {
         let _ = writeln!(out, "recorder: {}", if tools::obs_dir().is_some() { "ready" } else { "not downloaded yet" });
+        if let Ok(base) = app.path().app_local_data_dir() {
+            let _ = writeln!(out, "storage: {}", tools::storage_report(&base));
+        }
     }
     let _ = writeln!(out, "ffmpeg: {}", ffmpeg::locate().map(|p| p.display().to_string()).unwrap_or_else(|| "not found".into()));
     let _ = writeln!(out, "\n[Matches]\nRiot ID: {} ({})", if s.riot_id.is_empty() { "not set" } else { &s.riot_id }, s.region);

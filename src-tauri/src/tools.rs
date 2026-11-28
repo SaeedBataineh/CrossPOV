@@ -283,7 +283,10 @@ fn download_in(tools: &[Tool], root: &Path, base_url: &str, agent: &ureq::Agent,
             let _ = fs::write(path.with_file_name(format!("{}.checked", tool.name)), now);
         }
     }
-    let _ = remove_old(tools, root);
+    let freed = remove_old(tools, root);
+    if freed > 0 {
+        crate::trail(&format!("clean-up: deleted {:.0} MB of older versions", freed as f64 / 1e6));
+    }
     Ok(())
 }
 
@@ -333,6 +336,22 @@ fn size_of(path: &Path) -> u64 {
         Ok(m) => m.len(),
         Err(_) => 0,
     }
+}
+
+/// What CrossPOV keeps in its local data folder (`base`), for Diagnostics:
+/// "tools 140 MB (ffmpeg 1 version, yt-dlp 1, recorder 1), match recording 0 MB".
+pub fn storage_report(base: &Path) -> String {
+    let versions = |stem: &str| root().map(|r| fs::read_dir(r.join(stem)).map(|it| it.count()).unwrap_or(0)).unwrap_or(0);
+    let tools = root().map(size_of).unwrap_or(0);
+    format!(
+        "tools {:.0} MB (ffmpeg {} version(s), yt-dlp {}, recorder {}), match recording {:.0} MB, old FFmpeg buffer {:.0} MB",
+        tools as f64 / 1e6,
+        versions("ffmpeg"),
+        versions("yt-dlp"),
+        versions("obs-slim"),
+        size_of(&base.join("session")) as f64 / 1e6,
+        size_of(&base.join("buffer")) as f64 / 1e6
+    )
 }
 
 /// Deletes what earlier versions left behind and nothing uses any more, in
